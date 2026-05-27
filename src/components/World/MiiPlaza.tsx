@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -316,8 +317,8 @@ export default function MiiPlaza({
         Drag to rotate · Scroll to zoom · Tap a Mii to interact
       </div>
 
-      {/* Centered member card */}
-      {selectedMember && (
+      {/* Centered member card — portalled to body to escape canvas stacking context */}
+      {selectedMember && typeof document !== 'undefined' && createPortal(
         <MemberCard
           member={selectedMember}
           currentUid={currentUid}
@@ -326,7 +327,8 @@ export default function MiiPlaza({
           remainingTake={remainingTake}
           onClose={() => setSelectedMember(null)}
           onSubmitted={onPointsSubmitted}
-        />
+        />,
+        document.body
       )}
     </div>
   )
