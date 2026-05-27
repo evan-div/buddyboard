@@ -1,11 +1,9 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
-import { giveOrTakePoints } from '@/lib/firestore'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
 
 // ─── Hair ─────────────────────────────────────────────────────────────────────
@@ -115,174 +113,6 @@ function SelectionRing({ visible }: { visible: boolean }) {
   )
 }
 
-// ─── Floating Card ────────────────────────────────────────────────────────────
-
-const EMOJIS = ['🎉','💪','🔥','⭐','👏','😤','💀','🙄','😂','❤️','🫡','💯','🤑','👀','🐐']
-
-interface CardProps {
-  member: GroupMember
-  currentUid: string
-  groupId: string
-  remainingGive: number
-  remainingTake: number
-  onClose: () => void
-  onSubmitted: () => void
-}
-
-function FloatingCard({ member, currentUid, groupId, remainingGive, remainingTake, onClose, onSubmitted }: CardProps) {
-  const [mode, setMode]           = useState<'give' | 'take'>('give')
-  const [points, setPoints]       = useState(0)
-  const [reason, setReason]       = useState('')
-  const [showEmojis, setShowEmojis] = useState(false)
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
-
-  const limit = mode === 'give' ? remainingGive : remainingTake
-  const isOwn = member.uid === currentUid
-
-  function switchMode(m: 'give' | 'take') {
-    setMode(m); setPoints(0); setError('')
-  }
-
-  async function handleSubmit() {
-    if (points <= 0)    { setError('Enter at least 1'); return }
-    if (points > limit) { setError(`Max ${limit} today`); return }
-    setLoading(true); setError('')
-    try {
-      await giveOrTakePoints(groupId, currentUid, [{
-        toUid: member.uid,
-        points: mode === 'give' ? points : -points,
-        reason: reason.trim(),
-      }])
-      onSubmitted(); onClose()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const card: React.CSSProperties = {
-    background: '#ffffff',
-    borderRadius: 20,
-    padding: '14px 14px 16px',
-    width: 210,
-    boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
-    fontFamily: 'system-ui, sans-serif',
-    userSelect: 'none',
-  }
-
-  return (
-    <Html position={[0, 2.3, 0]} center distanceFactor={5} style={{ pointerEvents: 'none' }} zIndexRange={[100,0]}>
-      <div style={{ ...card, pointerEvents: 'auto' }}>
-
-        {/* Name + close */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{member.displayName}</div>
-            <div style={{ fontSize: 12, color: '#f59e0b' }}>⭐ {member.totalPoints.toLocaleString()} pts</div>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontSize: 16, lineHeight: 1, padding: 0 }}>✕</button>
-        </div>
-
-        {isOwn ? (
-          <div style={{ textAlign: 'center', color: '#888', fontSize: 13, padding: '12px 0' }}>This is you!</div>
-        ) : (
-          <>
-            {/* Give / Take toggle */}
-            <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 12 }}>
-              {(['give','take'] as const).map(m => (
-                <button key={m} onClick={() => switchMode(m)} style={{
-                  flex: 1, padding: '7px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
-                  fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
-                  background: mode === m ? (m === 'give' ? '#22c55e' : '#ef4444') : 'transparent',
-                  color: mode === m ? '#fff' : '#888',
-                }}>
-                  {m === 'give' ? 'GIVE' : 'TAKE'}
-                </button>
-              ))}
-            </div>
-
-            {/* Emoji toggle */}
-            <div style={{ marginBottom: 10 }}>
-              <button onClick={() => setShowEmojis(v => !v)} style={{
-                width: '100%', background: 'none',
-                border: '2px dashed #d1d5db', borderRadius: 12,
-                padding: '8px 0', cursor: 'pointer',
-                fontSize: 13, color: '#9ca3af', fontWeight: 600,
-              }}>
-                {showEmojis ? 'Hide emojis' : '😊 Add emoji'}
-              </button>
-              {showEmojis && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8, justifyContent: 'center' }}>
-                  {EMOJIS.map(e => (
-                    <button key={e} onClick={() => setReason(r => r + e)} style={{
-                      background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 2,
-                    }}>{e}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Points stepper */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 10 }}>
-              <button onClick={() => setPoints(p => Math.max(0, p - 1))} style={{
-                width: 32, height: 32, borderRadius: '50%', border: '2px solid #e5e7eb',
-                background: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555',
-              }}>−</button>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 26, fontWeight: 800, color: '#111', lineHeight: 1 }}>{points}</div>
-                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{limit} left today</div>
-              </div>
-              <button onClick={() => setPoints(p => Math.min(limit, p + 1))} style={{
-                width: 32, height: 32, borderRadius: '50%', border: '2px solid #e5e7eb',
-                background: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555',
-              }}>+</button>
-            </div>
-
-            {/* Reason */}
-            <input
-              type="text"
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              placeholder={mode === 'give' ? 'Why are you giving?' : 'Why are you taking?'}
-              maxLength={100}
-              style={{
-                width: '100%', boxSizing: 'border-box',
-                border: '2px solid #e5e7eb', borderRadius: 10,
-                padding: '8px 10px', fontSize: 12, color: '#111',
-                outline: 'none', marginBottom: 10,
-                fontFamily: 'inherit',
-              }}
-            />
-
-            {error && <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8 }}>{error}</div>}
-
-            {/* Submit */}
-            <button
-              onClick={handleSubmit}
-              disabled={loading || points <= 0}
-              style={{
-                width: '100%', padding: '10px 0', borderRadius: 12,
-                border: 'none', cursor: points > 0 ? 'pointer' : 'not-allowed',
-                fontWeight: 800, fontSize: 13, color: '#fff',
-                background: points > 0
-                  ? (mode === 'give' ? '#22c55e' : '#ef4444')
-                  : '#d1d5db',
-                transition: 'background 0.15s',
-              }}
-            >
-              {loading ? '...' : mode === 'give' ? `Give ${points} pts` : `Take ${points} pts`}
-            </button>
-          </>
-        )}
-      </div>
-    </Html>
-  )
-}
-
 // ─── Main Character ───────────────────────────────────────────────────────────
 
 type AnimState = 'walking' | 'idle_bob' | 'idle_sway'
@@ -292,19 +122,12 @@ export interface MiiCharacterProps {
   initialPosition: [number, number, number]
   bounds?: number
   isSelected: boolean
-  onSelect: (member: GroupMember) => void
-  onDeselect: () => void
-  currentUid: string
-  groupId: string
-  remainingGive: number
-  remainingTake: number
-  onPointsSubmitted: () => void
+  onSelect: (member: GroupMember, pos: [number, number, number]) => void
 }
 
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
-  isSelected, onSelect, onDeselect,
-  currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted,
+  isSelected, onSelect,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -331,6 +154,7 @@ export default function MiiCharacter({
   }
 
   useFrame((_, delta) => {
+    if (isSelected) return  // freeze in place while the card is open
     const group = groupRef.current
     const body  = bodyGroupRef.current
     if (!group) return
@@ -371,20 +195,16 @@ export default function MiiCharacter({
   })
 
   return (
-    <group ref={groupRef} position={initialPosition} onClick={e => { e.stopPropagation(); onSelect(member) }}>
+    <group
+      ref={groupRef}
+      position={initialPosition}
+      onClick={e => {
+        e.stopPropagation()
+        const p = groupRef.current!.position
+        onSelect(member, [p.x, p.y, p.z])
+      }}
+    >
       <SelectionRing visible={isSelected} />
-
-      {isSelected && (
-        <FloatingCard
-          member={member}
-          currentUid={currentUid}
-          groupId={groupId}
-          remainingGive={remainingGive}
-          remainingTake={remainingTake}
-          onClose={onDeselect}
-          onSubmitted={onPointsSubmitted}
-        />
-      )}
 
       <group ref={bodyGroupRef}>
         <group ref={leftLegRef} position={[-0.12, 0.65, 0]}>

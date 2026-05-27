@@ -1,10 +1,11 @@
 'use client'
 
-import { Suspense, useMemo, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Suspense, useMemo, useRef, useState } from 'react'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter from './MiiCharacter'
+import { giveOrTakePoints } from '@/lib/firestore'
 import type { GroupMember } from '@/lib/types'
 
 // ─── Checkered Floor ─────────────────────────────────────────────────────────
@@ -36,29 +37,254 @@ function CheckerFloor() {
   )
 }
 
+// ─── Camera Controller ────────────────────────────────────────────────────────
+
+const DEFAULT_CAM_POS  = new THREE.Vector3(0, 8, 12)
+const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
+
+function CameraController({
+  focusPos,
+  orbitRef,
+  onUnlock,
+}: {
+  focusPos: [number, number, number] | null
+  orbitRef: React.RefObject<any>
+  onUnlock: () => void
+}) {
+  const { camera } = useThree()
+  const lookAt      = useRef(DEFAULT_CAM_LOOK.clone())
+  const wasLocked   = useRef(false)
+  const unlockSent  = useRef(false)
+
+  useFrame(() => {
+    if (focusPos) {
+      wasLocked.current  = true
+      unlockSent.current = false
+      const [fx, fy, fz] = focusPos
+      // position camera slightly behind and above the character
+      const goal     = new THREE.Vector3(fx, fy + 2.2, fz + 4.0)
+      const lookGoal = new THREE.Vector3(fx, fy + 1.1, fz)
+      camera.position.lerp(goal, 0.07)
+      lookAt.current.lerp(lookGoal, 0.07)
+      camera.lookAt(lookAt.current)
+    } else if (wasLocked.current) {
+      // smoothly return to default view
+      camera.position.lerp(DEFAULT_CAM_POS, 0.06)
+      lookAt.current.lerp(DEFAULT_CAM_LOOK, 0.06)
+      camera.lookAt(lookAt.current)
+
+      // keep orbit controls target in sync so it resumes cleanly
+      if (orbitRef.current) {
+        orbitRef.current.target.copy(lookAt.current)
+      }
+
+      // once close enough, hand control back to OrbitControls
+      if (!unlockSent.current && camera.position.distanceTo(DEFAULT_CAM_POS) < 0.4) {
+        unlockSent.current = true
+        wasLocked.current  = false
+        onUnlock()
+      }
+    }
+  })
+
+  return null
+}
+
+// ─── Member Card (DOM overlay) ────────────────────────────────────────────────
+
+const EMOJIS = ['🎉','💪','🔥','⭐','👏','😤','💀','🙄','😂','❤️','🫡','💯','🤑','👀','🐐']
+
+interface CardProps {
+  member: GroupMember
+  currentUid: string
+  groupId: string
+  remainingGive: number
+  remainingTake: number
+  onClose: () => void
+  onSubmitted: () => void
+}
+
+function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, onClose, onSubmitted }: CardProps) {
+  const [mode, setMode]             = useState<'give' | 'take'>('give')
+  const [points, setPoints]         = useState(0)
+  const [reason, setReason]         = useState('')
+  const [showEmojis, setShowEmojis] = useState(false)
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState('')
+
+  const limit = mode === 'give' ? remainingGive : remainingTake
+  const isOwn = member.uid === currentUid
+
+  function switchMode(m: 'give' | 'take') { setMode(m); setPoints(0); setError('') }
+
+  async function handleSubmit() {
+    if (points <= 0)    { setError('Enter at least 1 point'); return }
+    if (points > limit) { setError(`Only ${limit} pts left today`); return }
+    setLoading(true); setError('')
+    try {
+      await giveOrTakePoints(groupId, currentUid, [{
+        toUid: member.uid,
+        points: mode === 'give' ? points : -points,
+        reason: reason.trim(),
+      }])
+      onSubmitted()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{
+      background: '#ffffff',
+      borderRadius: 20,
+      padding: '16px 16px 18px',
+      width: 230,
+      boxShadow: '0 20px 60px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.12)',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: '#111', letterSpacing: -0.3 }}>{member.displayName}</div>
+          <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 2 }}>⭐ {member.totalPoints.toLocaleString()} pts</div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}
+        >✕</button>
+      </div>
+
+      {isOwn ? (
+        <div style={{ textAlign: 'center', color: '#999', fontSize: 13, padding: '10px 0' }}>This is you!</div>
+      ) : (
+        <>
+          {/* Give / Take toggle */}
+          <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 13 }}>
+            {(['give', 'take'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => switchMode(m)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
+                  fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
+                  background: mode === m ? (m === 'give' ? '#22c55e' : '#ef4444') : 'transparent',
+                  color: mode === m ? '#fff' : '#888',
+                }}
+              >
+                {m === 'give' ? 'GIVE' : 'TAKE'}
+              </button>
+            ))}
+          </div>
+
+          {/* Points stepper */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 12 }}>
+            <button
+              onClick={() => setPoints(p => Math.max(0, p - 1))}
+              style={{
+                width: 34, height: 34, borderRadius: '50%', border: '2px solid #e5e7eb',
+                background: '#fff', cursor: 'pointer', fontSize: 20, lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555',
+              }}
+            >−</button>
+            <div style={{ textAlign: 'center', minWidth: 52 }}>
+              <div style={{ fontSize: 30, fontWeight: 800, color: '#111', lineHeight: 1 }}>{points}</div>
+              <div style={{ fontSize: 10, color: '#aaa', marginTop: 3 }}>{limit} left today</div>
+            </div>
+            <button
+              onClick={() => setPoints(p => Math.min(limit, p + 1))}
+              style={{
+                width: 34, height: 34, borderRadius: '50%', border: '2px solid #e5e7eb',
+                background: '#fff', cursor: 'pointer', fontSize: 20, lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555',
+              }}
+            >+</button>
+          </div>
+
+          {/* Emoji toggle */}
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={() => setShowEmojis(v => !v)}
+              style={{
+                width: '100%', background: 'none',
+                border: '1.5px dashed #d1d5db', borderRadius: 10,
+                padding: '7px 0', cursor: 'pointer',
+                fontSize: 12, color: '#9ca3af', fontWeight: 600,
+              }}
+            >
+              {showEmojis ? 'Hide emojis' : '😊 Add emoji to reason'}
+            </button>
+            {showEmojis && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 8, justifyContent: 'center' }}>
+                {EMOJIS.map(e => (
+                  <button
+                    key={e}
+                    onClick={() => setReason(r => r + e)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 2 }}
+                  >{e}</button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Reason input */}
+          <input
+            type="text"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder={mode === 'give' ? 'Why are you giving?' : 'Why are you taking?'}
+            maxLength={100}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: '1.5px solid #e5e7eb', borderRadius: 10,
+              padding: '8px 10px', fontSize: 12, color: '#111',
+              outline: 'none', marginBottom: 11, fontFamily: 'inherit',
+            }}
+          />
+
+          {error && <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8 }}>{error}</div>}
+
+          {/* Submit */}
+          <button
+            onClick={handleSubmit}
+            disabled={loading || points <= 0}
+            style={{
+              width: '100%', padding: '11px 0', borderRadius: 12,
+              border: 'none', cursor: points > 0 ? 'pointer' : 'not-allowed',
+              fontWeight: 800, fontSize: 13, color: '#fff',
+              background: points > 0 ? (mode === 'give' ? '#22c55e' : '#ef4444') : '#d1d5db',
+              transition: 'background 0.15s',
+            }}
+          >
+            {loading ? '...' : mode === 'give' ? `Give ${points} pts` : `Take ${points} pts`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── 3D Scene ─────────────────────────────────────────────────────────────────
 
 function Scene({
   members,
   selectedUid,
+  focusPos,
+  cameraLocked,
+  onUnlock,
   onSelect,
-  onDeselect,
-  currentUid,
-  groupId,
-  remainingGive,
-  remainingTake,
-  onPointsSubmitted,
 }: {
   members: GroupMember[]
   selectedUid: string | null
-  onSelect: (member: GroupMember) => void
-  onDeselect: () => void
-  currentUid: string
-  groupId: string
-  remainingGive: number
-  remainingTake: number
-  onPointsSubmitted: () => void
+  focusPos: [number, number, number] | null
+  cameraLocked: boolean
+  onUnlock: () => void
+  onSelect: (member: GroupMember, pos: [number, number, number]) => void
 }) {
+  const orbitRef = useRef<any>(null)
+
   const positions = useMemo<[number, number, number][]>(() => {
     return members.map((_, i) => {
       const angle  = (i / Math.max(members.length, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 1.2
@@ -69,6 +295,7 @@ function Scene({
 
   return (
     <>
+      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
@@ -81,15 +308,11 @@ function Scene({
           bounds={5.5}
           isSelected={selectedUid === member.uid}
           onSelect={onSelect}
-          onDeselect={onDeselect}
-          currentUid={currentUid}
-          groupId={groupId}
-          remainingGive={remainingGive}
-          remainingTake={remainingTake}
-          onPointsSubmitted={onPointsSubmitted}
         />
       ))}
       <OrbitControls
+        ref={orbitRef}
+        enabled={!cameraLocked}
         target={[0, 0.6, 0]}
         minDistance={3}
         maxDistance={20}
@@ -113,14 +336,23 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members,
-  currentUid,
-  groupId,
-  remainingGive,
-  remainingTake,
-  onPointsSubmitted,
+  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted,
 }: Props) {
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null)
+  const [focusPos, setFocusPos]             = useState<[number, number, number] | null>(null)
+  const [cameraLocked, setCameraLocked]     = useState(false)
+
+  function handleSelect(member: GroupMember, pos: [number, number, number]) {
+    setSelectedMember(member)
+    setFocusPos(pos)
+    setCameraLocked(true)
+  }
+
+  function handleClose() {
+    setSelectedMember(null)
+    setFocusPos(null)
+    // cameraLocked stays true — CameraController lerps back and calls onUnlock
+  }
 
   return (
     <div
@@ -138,26 +370,45 @@ export default function MiiPlaza({
         camera={{ position: [0, 8, 12], fov: 48 }}
         gl={{ antialias: true }}
         style={{ width: '100%', height: '100%' }}
-        onPointerMissed={() => setSelectedMember(null)}
+        onPointerMissed={() => { if (!selectedMember) return; handleClose() }}
       >
         <Suspense fallback={null}>
           <Scene
             members={members}
             selectedUid={selectedMember?.uid ?? null}
-            onSelect={setSelectedMember}
-            onDeselect={() => setSelectedMember(null)}
-            currentUid={currentUid}
-            groupId={groupId}
-            remainingGive={remainingGive}
-            remainingTake={remainingTake}
-            onPointsSubmitted={onPointsSubmitted}
+            focusPos={focusPos}
+            cameraLocked={cameraLocked}
+            onUnlock={() => setCameraLocked(false)}
+            onSelect={handleSelect}
           />
         </Suspense>
       </Canvas>
 
+      {/* Member card — plain DOM overlay, no Three.js pointer conflicts */}
+      {selectedMember && (
+        <div style={{
+          position: 'absolute',
+          top: 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+          pointerEvents: 'auto',
+        }}>
+          <MemberCard
+            member={selectedMember}
+            currentUid={currentUid}
+            groupId={groupId}
+            remainingGive={remainingGive}
+            remainingTake={remainingTake}
+            onClose={handleClose}
+            onSubmitted={() => { onPointsSubmitted(); handleClose() }}
+          />
+        </div>
+      )}
+
       {/* Hint */}
-      <div
-        style={{
+      {!selectedMember && (
+        <div style={{
           position: 'absolute',
           bottom: 12,
           left: '50%',
@@ -169,10 +420,10 @@ export default function MiiPlaza({
           borderRadius: 20,
           pointerEvents: 'none',
           whiteSpace: 'nowrap',
-        }}
-      >
-        Drag to rotate · Scroll to zoom · Tap a Mii to interact
-      </div>
+        }}>
+          Drag to rotate · Scroll to zoom · Tap a Mii to interact
+        </div>
+      )}
     </div>
   )
 }
