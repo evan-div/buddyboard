@@ -102,14 +102,16 @@ function Accessory({ style }: { style: AvatarConfig['accessory'] }) {
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
 function SelectionRing({ visible }: { visible: boolean }) {
-  const ref = useRef<THREE.Mesh>(null)
-  useFrame((_, delta) => { if (ref.current) ref.current.rotation.y += delta * 2 })
+  const groupRef = useRef<THREE.Group>(null)
+  useFrame((_, delta) => { if (groupRef.current) groupRef.current.rotation.y += delta * 2 })
   if (!visible) return null
   return (
-    <mesh ref={ref} position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[0.38, 0.46, 32]} />
-      <meshStandardMaterial color="#6366f1" transparent opacity={0.85} emissive="#6366f1" emissiveIntensity={0.6} />
-    </mesh>
+    <group ref={groupRef} position={[0, 0.02, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.38, 0.46, 32, 1, 0, Math.PI * 1.5]} />
+        <meshStandardMaterial color="#6366f1" transparent opacity={0.85} emissive="#6366f1" emissiveIntensity={0.6} />
+      </mesh>
+    </group>
   )
 }
 
