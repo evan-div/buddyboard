@@ -154,12 +154,20 @@ export default function MiiCharacter({
   }
 
   useFrame((_, delta) => {
-    if (isSelected) return  // freeze in place while the card is open
     const group = groupRef.current
-    const body  = bodyGroupRef.current
     if (!group) return
+
+    if (isSelected) {
+      // smoothly rotate to face the camera (local +Z toward world +Z = rotation.y → 0)
+      let dy = -group.rotation.y
+      while (dy >  Math.PI) dy -= Math.PI * 2
+      while (dy < -Math.PI) dy += Math.PI * 2
+      group.rotation.y += dy * Math.min(1, 10 * delta)
+      return
+    }
     phase.current += delta
-    const t = phase.current
+    const t    = phase.current
+    const body = bodyGroupRef.current
 
     if (animState.current === 'walking') {
       const dx = targetPos.current.x - group.position.x

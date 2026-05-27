@@ -39,6 +39,11 @@ function CheckerFloor() {
 
 // ─── Camera Controller ────────────────────────────────────────────────────────
 
+// Camera zooms in from behind/below looking slightly upward past the head,
+// so the character sits in the lower frame and the card floats above them.
+const ZOOM_OFFSET_Y    =  1.0   // camera height above ground
+const ZOOM_OFFSET_Z    =  4.5   // camera distance behind character
+const ZOOM_LOOKAT_Y    =  2.5   // look-at point above character (above head)
 const DEFAULT_CAM_POS  = new THREE.Vector3(0, 8, 12)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
@@ -52,33 +57,25 @@ function CameraController({
   onUnlock: () => void
 }) {
   const { camera } = useThree()
-  const lookAt      = useRef(DEFAULT_CAM_LOOK.clone())
-  const wasLocked   = useRef(false)
-  const unlockSent  = useRef(false)
+  const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
+  const wasLocked  = useRef(false)
+  const unlockSent = useRef(false)
 
   useFrame(() => {
     if (focusPos) {
       wasLocked.current  = true
       unlockSent.current = false
       const [fx, fy, fz] = focusPos
-      // position camera slightly behind and above the character
-      const goal     = new THREE.Vector3(fx, fy + 2.2, fz + 4.0)
-      const lookGoal = new THREE.Vector3(fx, fy + 1.1, fz)
+      const goal     = new THREE.Vector3(fx, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_Z)
+      const lookGoal = new THREE.Vector3(fx, fy + ZOOM_LOOKAT_Y, fz)
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
     } else if (wasLocked.current) {
-      // smoothly return to default view
       camera.position.lerp(DEFAULT_CAM_POS, 0.06)
       lookAt.current.lerp(DEFAULT_CAM_LOOK, 0.06)
       camera.lookAt(lookAt.current)
-
-      // keep orbit controls target in sync so it resumes cleanly
-      if (orbitRef.current) {
-        orbitRef.current.target.copy(lookAt.current)
-      }
-
-      // once close enough, hand control back to OrbitControls
+      if (orbitRef.current) orbitRef.current.target.copy(lookAt.current)
       if (!unlockSent.current && camera.position.distanceTo(DEFAULT_CAM_POS) < 0.4) {
         unlockSent.current = true
         wasLocked.current  = false
@@ -105,12 +102,12 @@ interface CardProps {
 }
 
 function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, onClose, onSubmitted }: CardProps) {
-  const [mode, setMode]             = useState<'give' | 'take'>('give')
-  const [points, setPoints]         = useState(0)
-  const [reason, setReason]         = useState('')
-  const [showEmojis, setShowEmojis] = useState(false)
-  const [loading, setLoading]       = useState(false)
-  const [error, setError]           = useState('')
+  const [mode, setMode]       = useState<'give' | 'take'>('give')
+  const [points, setPoints]   = useState(0)
+  const [emoji, setEmoji]     = useState('')
+  const [reason, setReason]   = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
 
   const limit = mode === 'give' ? remainingGive : remainingTake
   const isOwn = member.uid === currentUid
@@ -122,10 +119,11 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
     if (points > limit) { setError(`Only ${limit} pts left today`); return }
     setLoading(true); setError('')
     try {
+      const fullReason = [emoji, reason.trim()].filter(Boolean).join(' ')
       await giveOrTakePoints(groupId, currentUid, [{
         toUid: member.uid,
         points: mode === 'give' ? points : -points,
-        reason: reason.trim(),
+        reason: fullReason,
       }])
       onSubmitted()
       onClose()
@@ -180,7 +178,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
           </div>
 
           {/* Points stepper */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 13 }}>
             <button
               onClick={() => setPoints(p => Math.max(0, p - 1))}
               style={{
@@ -203,33 +201,32 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
             >+</button>
           </div>
 
-          {/* Emoji toggle */}
+          {/* Emoji reaction — single-select grid */}
           <div style={{ marginBottom: 10 }}>
-            <button
-              onClick={() => setShowEmojis(v => !v)}
-              style={{
-                width: '100%', background: 'none',
-                border: '1.5px dashed #d1d5db', borderRadius: 10,
-                padding: '7px 0', cursor: 'pointer',
-                fontSize: 12, color: '#9ca3af', fontWeight: 600,
-              }}
-            >
-              {showEmojis ? 'Hide emojis' : '😊 Add emoji to reason'}
-            </button>
-            {showEmojis && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 8, justifyContent: 'center' }}>
-                {EMOJIS.map(e => (
-                  <button
-                    key={e}
-                    onClick={() => setReason(r => r + e)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 2 }}
-                  >{e}</button>
-                ))}
-              </div>
-            )}
+            <div style={{ fontSize: 10, color: '#aaa', fontWeight: 600, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Reaction
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {EMOJIS.map(e => (
+                <button
+                  key={e}
+                  onClick={() => setEmoji(prev => prev === e ? '' : e)}
+                  style={{
+                    background: emoji === e ? '#f0f0ff' : 'none',
+                    border: emoji === e ? '2px solid #6366f1' : '2px solid transparent',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontSize: 18,
+                    padding: '3px 4px',
+                    lineHeight: 1,
+                    transition: 'all 0.1s',
+                  }}
+                >{e}</button>
+              ))}
+            </div>
           </div>
 
-          {/* Reason input */}
+          {/* Reason text input */}
           <input
             type="text"
             value={reason}
@@ -338,11 +335,28 @@ interface Props {
 export default function MiiPlaza({
   members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null)
   const [focusPos, setFocusPos]             = useState<[number, number, number] | null>(null)
   const [cameraLocked, setCameraLocked]     = useState(false)
+  const [headScreenY, setHeadScreenY]       = useState<number>(0)
 
   function handleSelect(member: GroupMember, pos: [number, number, number]) {
+    const [fx, fy, fz] = pos
+    const container = containerRef.current
+    if (container) {
+      const w = container.clientWidth
+      const h = container.clientHeight
+      // Project where the character's head will appear once the camera settles
+      const tempCam = new THREE.PerspectiveCamera(48, w / h, 0.1, 100)
+      tempCam.position.set(fx, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_Z)
+      tempCam.lookAt(fx, fy + ZOOM_LOOKAT_Y, fz)
+      tempCam.updateMatrixWorld()
+      const headNDC = new THREE.Vector3(fx, fy + 1.8, fz).project(tempCam)
+      // NDC y: 1 = top, -1 = bottom  →  screen y: 0 = top
+      setHeadScreenY(((1 - headNDC.y) / 2) * h)
+    }
     setSelectedMember(member)
     setFocusPos(pos)
     setCameraLocked(true)
@@ -351,11 +365,16 @@ export default function MiiPlaza({
   function handleClose() {
     setSelectedMember(null)
     setFocusPos(null)
-    // cameraLocked stays true — CameraController lerps back and calls onUnlock
+    // cameraLocked stays true until CameraController lerps back and calls onUnlock
   }
+
+  const containerH = containerRef.current?.clientHeight ?? 500
+  // card bottom sits 16px above the projected head position
+  const cardBottom  = Math.max(8, containerH - headScreenY + 16)
 
   return (
     <div
+      ref={containerRef}
       style={{
         width: '100%',
         height: 'calc(100dvh - 160px)',
@@ -370,7 +389,7 @@ export default function MiiPlaza({
         camera={{ position: [0, 8, 12], fov: 48 }}
         gl={{ antialias: true }}
         style={{ width: '100%', height: '100%' }}
-        onPointerMissed={() => { if (!selectedMember) return; handleClose() }}
+        onPointerMissed={() => { if (selectedMember) handleClose() }}
       >
         <Suspense fallback={null}>
           <Scene
@@ -384,12 +403,12 @@ export default function MiiPlaza({
         </Suspense>
       </Canvas>
 
-      {/* Member card — plain DOM overlay, no Three.js pointer conflicts */}
+      {/* Member card — anchored above the character's head via screen-space projection */}
       {selectedMember && (
         <div style={{
           position: 'absolute',
-          top: 20,
           left: '50%',
+          bottom: cardBottom,
           transform: 'translateX(-50%)',
           zIndex: 10,
           pointerEvents: 'auto',
