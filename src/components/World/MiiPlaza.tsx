@@ -10,13 +10,16 @@ import type { GroupMember } from '@/lib/types'
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
-const FSIZE       = 26
-const PATCH_GRID  = 16                              // 16×16 = bigger, clearer checker squares
-const PATCH_W     = FSIZE / PATCH_GRID              // 1.625 per patch
-const N_BLADES    = 80                              // dense coverage
-const BLADE_H     = 0.13
-const BLADE_W     = 0.014
-const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES  // 10240
+const FSIZE      = 26
+const PATCH_GRID = 16                               // 16×16 checker squares
+const PATCH_W    = FSIZE / PATCH_GRID               // 1.625 per patch
+const N_BLADES   = 40                               // blades per patch (3D texture only)
+const BLADE_H    = 0.16
+const BLADE_W    = 0.022
+const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 5120
+
+const LIGHT_COLOR = '#6dc957'
+const DARK_COLOR  = '#246b24'
 
 function makeBladeMat(color: string): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.85 })
@@ -40,6 +43,20 @@ function GrassFloor() {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
 
+  // Canvas-drawn checkerboard — solid full coverage, no gaps between blades
+  const baseTex = useMemo(() => {
+    const PX = 512, TILES = PATCH_GRID, TW = PX / TILES
+    const cv  = document.createElement('canvas')
+    cv.width  = PX; cv.height = PX
+    const ctx = cv.getContext('2d')!
+    for (let y = 0; y < TILES; y++)
+      for (let x = 0; x < TILES; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? LIGHT_COLOR : DARK_COLOR
+        ctx.fillRect(x * TW, y * TW, TW, TW)
+      }
+    return new THREE.CanvasTexture(cv)
+  }, [])
+
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
     const verts = new Float32Array([
@@ -52,9 +69,8 @@ function GrassFloor() {
     return geo
   }, [])
 
-  // Strong contrast between light and dark patches so checkerboard is clearly visible
-  const lightMat = useMemo(() => makeBladeMat('#6dc957'), [])
-  const darkMat  = useMemo(() => makeBladeMat('#246b24'), [])
+  const lightMat = useMemo(() => makeBladeMat(LIGHT_COLOR), [])
+  const darkMat  = useMemo(() => makeBladeMat(DARK_COLOR), [])
 
   useEffect(() => {
     const dummy = new THREE.Object3D()
@@ -64,7 +80,6 @@ function GrassFloor() {
         const cx      = -FSIZE / 2 + PATCH_W * ix + PATCH_W / 2
         const cz      = -FSIZE / 2 + PATCH_W * iz + PATCH_W / 2
         const isLight = (ix + iz) % 2 === 0
-        // Tilt blades in different directions per patch type for a mowed-lawn sheen
         const tiltX   = isLight ? -0.28 : 0.12
         const yawBase = isLight ? 0 : Math.PI / 2
         for (let b = 0; b < N_BLADES; b++) {
@@ -92,11 +107,12 @@ function GrassFloor() {
 
   return (
     <group>
-      {/* Soil base */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+      {/* Solid checkerboard base — canvas texture guarantees full coverage */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]}>
         <planeGeometry args={[FSIZE, FSIZE]} />
-        <meshStandardMaterial color="#3d2b1f" />
+        <meshStandardMaterial map={baseTex} roughness={0.95} />
       </mesh>
+      {/* Blade instances sit on top for 3D raised-grass texture */}
       <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} />
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} />
     </group>
