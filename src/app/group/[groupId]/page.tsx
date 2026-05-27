@@ -433,7 +433,7 @@ export default function GroupPage() {
     }
   }, [user, authLoading, router])
 
-  // Load group data
+  // Load group data (shows loading spinner — use only on initial load)
   const loadGroupData = useCallback(async () => {
     if (!user || !groupId) return
     setLoading(true)
@@ -453,6 +453,27 @@ export default function GroupPage() {
       console.error('Error loading group:', err)
     } finally {
       setLoading(false)
+    }
+  }, [user, groupId])
+
+  // Silent background refresh — does not trigger the loading screen,
+  // so components like MiiPlaza stay mounted and animations can finish
+  const refreshGroupData = useCallback(async () => {
+    if (!user || !groupId) return
+    try {
+      const [groupData, membersData, stats] = await Promise.all([
+        getGroup(groupId),
+        getGroupMembers(groupId),
+        getGroupDailyStats(groupId, user.uid),
+      ])
+      setGroup(groupData)
+      setMembers(membersData)
+      setDailyStats({
+        remainingGive: stats.remainingGive,
+        remainingTake: stats.remainingTake,
+      })
+    } catch (err) {
+      console.error('Error refreshing group:', err)
     }
   }, [user, groupId])
 
@@ -571,7 +592,7 @@ export default function GroupPage() {
             groupId={groupId}
             remainingGive={dailyStats.remainingGive}
             remainingTake={dailyStats.remainingTake}
-            onPointsSubmitted={loadGroupData}
+            onPointsSubmitted={refreshGroupData}
           />
         ) : (
           <FeedTab groupId={groupId} members={members} />
