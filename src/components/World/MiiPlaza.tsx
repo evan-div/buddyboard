@@ -13,7 +13,7 @@ import type { GroupMember } from '@/lib/types'
 const FSIZE      = 26
 const PATCH_GRID = 16                               // 16×16 checker squares
 const PATCH_W    = FSIZE / PATCH_GRID               // 1.625 per patch
-const N_BLADES   = 400                              // blades per patch (3D texture only)
+const N_BLADES   = 1000                             // blades per patch (3D texture only)
 const BLADE_H    = 0.16
 const BLADE_W    = 0.022
 const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 5120
