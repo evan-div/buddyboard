@@ -10,32 +10,68 @@ import type { GroupMember } from '@/lib/types'
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
-const GRID   = 24
-const FSIZE  = 26
-const TILE_W = FSIZE / GRID          // ≈1.083
-const TILE_H = 0.09
-const LIGHT_COUNT = (GRID * GRID) / 2   // 288
-const DARK_COUNT  = (GRID * GRID) / 2   // 288
+const FSIZE       = 26
+const PATCH_GRID  = 24                              // 24×24 checkerboard patches
+const PATCH_W     = FSIZE / PATCH_GRID              // ≈1.083 per patch
+const N_BLADES    = 8                               // blades per patch
+const BLADE_H     = 0.32
+const BLADE_W     = 0.040
+const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES  // 2304
+
+function makeBladeMat(color: string): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.85 })
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = { value: 0 }
+    mat.userData.shader = shader
+    // Sway blade tips with a sine wave; base stays fixed (h=0 there)
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      float h    = position.y / ${BLADE_H.toFixed(2)};
+      float sway = h * sin(uTime * 1.35 + instanceMatrix[3][0] * 0.65 + instanceMatrix[3][2] * 0.52) * 0.09;
+      transformed.x += sway;
+      transformed.z += sway * 0.22;`,
+    )
+  }
+  return mat
+}
 
 function GrassFloor() {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
 
+  const bladeGeo = useMemo(() => {
+    const geo   = new THREE.BufferGeometry()
+    const verts = new Float32Array([
+      -BLADE_W,  0,       0,
+       BLADE_W,  0,       0,
+       0,        BLADE_H, 0,
+    ])
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3))
+    geo.computeVertexNormals()
+    return geo
+  }, [])
+
+  const lightMat = useMemo(() => makeBladeMat('#52c45a'), [])
+  const darkMat  = useMemo(() => makeBladeMat('#357d3e'), [])
+
   useEffect(() => {
     const dummy = new THREE.Object3D()
     let li = 0, di = 0
-    for (let ix = 0; ix < GRID; ix++) {
-      for (let iz = 0; iz < GRID; iz++) {
-        dummy.position.set(
-          -FSIZE / 2 + TILE_W * ix + TILE_W / 2,
-          0,
-          -FSIZE / 2 + TILE_W * iz + TILE_W / 2,
-        )
-        dummy.updateMatrix()
-        if ((ix + iz) % 2 === 0) {
-          lightRef.current?.setMatrixAt(li++, dummy.matrix)
-        } else {
-          darkRef.current?.setMatrixAt(di++, dummy.matrix)
+    for (let ix = 0; ix < PATCH_GRID; ix++) {
+      for (let iz = 0; iz < PATCH_GRID; iz++) {
+        const cx      = -FSIZE / 2 + PATCH_W * ix + PATCH_W / 2
+        const cz      = -FSIZE / 2 + PATCH_W * iz + PATCH_W / 2
+        const isLight = (ix + iz) % 2 === 0
+        for (let b = 0; b < N_BLADES; b++) {
+          const ox = (Math.random() - 0.5) * PATCH_W * 0.88
+          const oz = (Math.random() - 0.5) * PATCH_W * 0.88
+          dummy.position.set(cx + ox, 0, cz + oz)
+          dummy.rotation.y = Math.random() * Math.PI * 2
+          dummy.scale.setScalar(0.70 + Math.random() * 0.55)
+          dummy.updateMatrix()
+          if (isLight) lightRef.current?.setMatrixAt(li++, dummy.matrix)
+          else          darkRef.current?.setMatrixAt(di++, dummy.matrix)
         }
       }
     }
@@ -43,23 +79,22 @@ function GrassFloor() {
     if (darkRef.current)  darkRef.current.instanceMatrix.needsUpdate  = true
   }, [])
 
+  useFrame((_, delta) => {
+    const ls = lightMat.userData.shader
+    const ds = darkMat.userData.shader
+    if (ls) ls.uniforms.uTime.value += delta
+    if (ds) ds.uniforms.uTime.value += delta
+  })
+
   return (
     <group>
-      {/* Soil base beneath the tiles */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
+      {/* Soil base */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <planeGeometry args={[FSIZE, FSIZE]} />
-        <meshStandardMaterial color="#2e5e38" />
+        <meshStandardMaterial color="#3d2b1f" />
       </mesh>
-      {/* Light grass tiles */}
-      <instancedMesh ref={lightRef} args={[undefined, undefined, LIGHT_COUNT]}>
-        <boxGeometry args={[TILE_W - 0.02, TILE_H, TILE_W - 0.02]} />
-        <meshStandardMaterial color="#4d9e62" roughness={0.9} />
-      </instancedMesh>
-      {/* Dark grass tiles */}
-      <instancedMesh ref={darkRef} args={[undefined, undefined, DARK_COUNT]}>
-        <boxGeometry args={[TILE_W - 0.02, TILE_H, TILE_W - 0.02]} />
-        <meshStandardMaterial color="#3a7a4a" roughness={0.9} />
-      </instancedMesh>
+      <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} />
+      <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} />
     </group>
   )
 }
