@@ -23,6 +23,8 @@ function makeBladeMat(color: string): THREE.MeshStandardMaterial {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 }
     mat.userData.shader = shader
+    // Declare uTime before the rest of the vertex shader
+    shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader
     // Sway blade tips with a sine wave; base stays fixed (h=0 there)
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
