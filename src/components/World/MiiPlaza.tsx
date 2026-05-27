@@ -11,26 +11,24 @@ import type { GroupMember } from '@/lib/types'
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
 const FSIZE       = 26
-const PATCH_GRID  = 24                              // 24×24 checkerboard patches
-const PATCH_W     = FSIZE / PATCH_GRID              // ≈1.083 per patch
-const N_BLADES    = 8                               // blades per patch
-const BLADE_H     = 0.32
-const BLADE_W     = 0.040
-const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES  // 2304
+const PATCH_GRID  = 16                              // 16×16 = bigger, clearer checker squares
+const PATCH_W     = FSIZE / PATCH_GRID              // 1.625 per patch
+const N_BLADES    = 80                              // dense coverage
+const BLADE_H     = 0.13
+const BLADE_W     = 0.014
+const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES  // 10240
 
 function makeBladeMat(color: string): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.85 })
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 }
     mat.userData.shader = shader
-    // Declare uTime before the rest of the vertex shader
     shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader
-    // Sway blade tips with a sine wave; base stays fixed (h=0 there)
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
       float h    = position.y / ${BLADE_H.toFixed(2)};
-      float sway = h * sin(uTime * 1.35 + instanceMatrix[3][0] * 0.65 + instanceMatrix[3][2] * 0.52) * 0.09;
+      float sway = h * sin(uTime * 1.35 + instanceMatrix[3][0] * 0.65 + instanceMatrix[3][2] * 0.52) * 0.04;
       transformed.x += sway;
       transformed.z += sway * 0.22;`,
     )
@@ -54,8 +52,9 @@ function GrassFloor() {
     return geo
   }, [])
 
-  const lightMat = useMemo(() => makeBladeMat('#52c45a'), [])
-  const darkMat  = useMemo(() => makeBladeMat('#357d3e'), [])
+  // Strong contrast between light and dark patches so checkerboard is clearly visible
+  const lightMat = useMemo(() => makeBladeMat('#6dc957'), [])
+  const darkMat  = useMemo(() => makeBladeMat('#246b24'), [])
 
   useEffect(() => {
     const dummy = new THREE.Object3D()
@@ -65,12 +64,15 @@ function GrassFloor() {
         const cx      = -FSIZE / 2 + PATCH_W * ix + PATCH_W / 2
         const cz      = -FSIZE / 2 + PATCH_W * iz + PATCH_W / 2
         const isLight = (ix + iz) % 2 === 0
+        // Tilt blades in different directions per patch type for a mowed-lawn sheen
+        const tiltX   = isLight ? -0.28 : 0.12
+        const yawBase = isLight ? 0 : Math.PI / 2
         for (let b = 0; b < N_BLADES; b++) {
-          const ox = (Math.random() - 0.5) * PATCH_W * 0.88
-          const oz = (Math.random() - 0.5) * PATCH_W * 0.88
+          const ox = (Math.random() - 0.5) * PATCH_W * 0.92
+          const oz = (Math.random() - 0.5) * PATCH_W * 0.92
           dummy.position.set(cx + ox, 0, cz + oz)
-          dummy.rotation.y = Math.random() * Math.PI * 2
-          dummy.scale.setScalar(0.70 + Math.random() * 0.55)
+          dummy.rotation.set(tiltX, yawBase + (Math.random() - 0.5) * 1.2, 0)
+          dummy.scale.setScalar(0.80 + Math.random() * 0.45)
           dummy.updateMatrix()
           if (isLight) lightRef.current?.setMatrixAt(li++, dummy.matrix)
           else          darkRef.current?.setMatrixAt(di++, dummy.matrix)
