@@ -13,7 +13,7 @@ import type { GroupMember } from '@/lib/types'
 const FSIZE      = 26
 const PATCH_GRID = 16                               // 16×16 checker squares
 const PATCH_W    = FSIZE / PATCH_GRID               // 1.625 per patch
-const N_BLADES   = 1000                             // blades per patch (3D texture only)
+const N_BLADES   = 1500                             // blades per patch (3D texture only)
 const BLADE_H    = 0.16
 const BLADE_W    = 0.022
 const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 5120
@@ -83,8 +83,8 @@ function GrassFloor() {
         const tiltX   = isLight ? -0.28 : 0.12
         const yawBase = isLight ? 0 : Math.PI / 2
         for (let b = 0; b < N_BLADES; b++) {
-          const ox = (Math.random() - 0.5) * PATCH_W * 0.92
-          const oz = (Math.random() - 0.5) * PATCH_W * 0.92
+          const ox = (Math.random() - 0.5) * PATCH_W * 1.1
+          const oz = (Math.random() - 0.5) * PATCH_W * 1.1
           dummy.position.set(cx + ox, 0, cz + oz)
           dummy.rotation.set(tiltX, yawBase + (Math.random() - 0.5) * 1.2, 0)
           dummy.scale.setScalar(0.80 + Math.random() * 0.45)
