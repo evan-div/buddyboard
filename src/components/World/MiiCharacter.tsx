@@ -173,6 +173,10 @@ function CelebrationParticles() {
   )
 }
 
+// ─── Drag Mode ────────────────────────────────────────────────────────────────
+
+export type DragMode = 'held' | 'flying' | 'dazed' | 'waking' | 'mad'
+
 // ─── Main Character ───────────────────────────────────────────────────────────
 
 type AnimState = 'walking' | 'idle_bob' | 'idle_sway'
@@ -184,11 +188,15 @@ export interface MiiCharacterProps {
   isSelected: boolean
   onSelect: (member: GroupMember, pos: [number, number, number]) => void
   celebrationType?: 'celebrate' | 'shame' | null
+  dragMode?: DragMode | null
+  onPickupStart?: () => void
+  onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
 
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
   isSelected, onSelect, celebrationType = null,
+  dragMode = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -203,12 +211,20 @@ export default function MiiCharacter({
   const phase        = useRef(Math.random() * Math.PI * 2)
   const celebTimer   = useRef(0)
   const selectedTimer = useRef(0)
+  const dragTimer    = useRef(0)
   const targetPos    = useRef(new THREE.Vector3(
     initialPosition[0] + (Math.random() - 0.5) * 6, 0,
     initialPosition[2] + (Math.random() - 0.5) * 6,
   ))
 
   const skinColor = SKIN_TONES[member.avatar.skinTone]
+
+  // Expose groupRef to parent
+  useEffect(() => {
+    onGroupMount?.(member.uid, groupRef.current)
+    return () => { onGroupMount?.(member.uid, null) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Reset all celebration-driven transforms when celebrationType changes
   useEffect(() => {
@@ -233,6 +249,29 @@ export default function MiiCharacter({
     }
   }, [isSelected])
 
+  // Reset on dragMode change
+  useEffect(() => {
+    dragTimer.current = 0
+    if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
+    if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
+    if (leftLegRef.current)  { leftLegRef.current.rotation.x  = 0; leftLegRef.current.rotation.z  = 0 }
+    if (rightLegRef.current) { rightLegRef.current.rotation.x = 0; rightLegRef.current.rotation.z = 0 }
+    if (headRef.current)     { headRef.current.rotation.x = 0; headRef.current.rotation.z = 0 }
+    if (bodyGroupRef.current) {
+      bodyGroupRef.current.rotation.x = 0
+      bodyGroupRef.current.rotation.z = 0
+      bodyGroupRef.current.position.set(0, 0, 0)
+    }
+    // When returning to normal, pick a new walk target from current position
+    if (dragMode === null && groupRef.current) {
+      const p = groupRef.current.position
+      animState.current = 'walking'
+      const angle  = Math.random() * Math.PI * 2
+      const radius = 1.0 + Math.random() * (bounds * 0.85)
+      targetPos.current.set(p.x + Math.cos(angle) * radius, 0, p.z + Math.sin(angle) * radius)
+    }
+  }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function pickNewTarget() {
     animState.current = 'walking'
     const angle  = Math.random() * Math.PI * 2
@@ -243,6 +282,150 @@ export default function MiiCharacter({
   useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
+
+    // ── Drag mode: held ──────────────────────────────────────────────────────
+    if (dragMode === 'held') {
+      dragTimer.current += delta
+      const t = dragTimer.current
+      // Fast random squirm: all 4 limbs oscillate rapidly at different frequencies
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x  = Math.sin(t * 11.3 + 0.3) * 0.9
+        leftArmRef.current.rotation.z  = Math.sin(t * 9.7  + 1.1) * 0.5
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = Math.sin(t * 10.1 + 2.2) * 0.9
+        rightArmRef.current.rotation.z = Math.sin(t * 12.5 + 0.7) * 0.5
+      }
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x  = Math.sin(t * 13.7 + 1.5) * 0.7
+        leftLegRef.current.rotation.z  = Math.sin(t * 8.4  + 2.9) * 0.2
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = Math.sin(t * 12.2 + 0.9) * 0.7
+        rightLegRef.current.rotation.z = Math.sin(t * 9.1  + 3.5) * 0.2
+      }
+      // Slight body tilt / wiggle
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.x = Math.sin(t * 7.3 + 0.5) * 0.1
+        bodyGroupRef.current.rotation.z = Math.sin(t * 6.1 + 1.8) * 0.1
+      }
+      return
+    }
+
+    // ── Drag mode: flying ────────────────────────────────────────────────────
+    if (dragMode === 'flying') {
+      dragTimer.current += delta
+      const t = dragTimer.current
+      // Wild chaotic flailing
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x  = Math.sin(t * 14.0 + 0.0) * 1.4
+        leftArmRef.current.rotation.z  = Math.sin(t * 11.0 + 1.0) * 1.0
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = Math.sin(t * 13.0 + 2.0) * 1.4
+        rightArmRef.current.rotation.z = Math.sin(t * 15.0 + 0.5) * 1.0
+      }
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x  = Math.sin(t * 16.0 + 1.2) * 1.2
+        leftLegRef.current.rotation.z  = Math.sin(t * 10.0 + 3.0) * 0.4
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = Math.sin(t * 15.0 + 2.5) * 1.2
+        rightLegRef.current.rotation.z = Math.sin(t * 12.0 + 0.8) * 0.4
+      }
+      // Slow body spin
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.z = t * 2.5
+      }
+      return
+    }
+
+    // ── Drag mode: dazed ────────────────────────────────────────────────────
+    if (dragMode === 'dazed') {
+      dragTimer.current += delta
+      // Slumped forward, arms splayed, head droops
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0.7, 0.05)
+        bodyGroupRef.current.rotation.z = 0
+      }
+      if (headRef.current) {
+        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0.55, 0.05)
+      }
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0.3, 0.05)
+        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -0.9, 0.05)
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0.3, 0.05)
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.9, 0.05)
+      }
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0.2, 0.05)
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, -0.2, 0.05)
+      }
+      return
+    }
+
+    // ── Drag mode: waking ────────────────────────────────────────────────────
+    if (dragMode === 'waking') {
+      dragTimer.current += delta
+      const t = dragTimer.current
+      // Slowly straighten body/head back to zero
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
+        bodyGroupRef.current.rotation.z = 0
+      }
+      if (headRef.current) {
+        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0, 0.03)
+        // Head shake: fast sin, damped over time
+        const damp = Math.max(0, 1 - t / 1.5)
+        headRef.current.rotation.z = Math.sin(t * 18) * 0.25 * damp
+      }
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0, 0.04)
+        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  0, 0.04)
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0, 0.04)
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.04)
+      }
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
+      }
+      return
+    }
+
+    // ── Drag mode: mad ───────────────────────────────────────────────────────
+    if (dragMode === 'mad') {
+      dragTimer.current += delta
+      const t = dragTimer.current
+      // Arms raised and shaking
+      if (leftArmRef.current) {
+        leftArmRef.current.rotation.x  = -Math.PI * 0.7 + Math.sin(t * 12) * 0.15
+        leftArmRef.current.rotation.z  = -0.5
+      }
+      if (rightArmRef.current) {
+        rightArmRef.current.rotation.x = -Math.PI * 0.7 + Math.sin(t * 13 + 1) * 0.15
+        rightArmRef.current.rotation.z =  0.5
+      }
+      // Feet stomping
+      if (leftLegRef.current) {
+        leftLegRef.current.rotation.x  = Math.sin(t * 8) * 0.4
+      }
+      if (rightLegRef.current) {
+        rightLegRef.current.rotation.x = Math.sin(t * 8 + Math.PI) * 0.4
+      }
+      // Body bob with anger
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.z = Math.sin(t * 9) * 0.06
+      }
+      return
+    }
 
     // ── Celebrate ────────────────────────────────────────────────────────────
     if (celebrationType === 'celebrate') {
@@ -364,19 +547,36 @@ export default function MiiCharacter({
     <group
       ref={groupRef}
       position={initialPosition}
-      onClick={e => {
+      onPointerDown={e => {
         e.stopPropagation()
-        const p = groupRef.current!.position
-        onSelect(member, [p.x, p.y, p.z])
+        if (!dragMode) onPickupStart?.()
       }}
     >
-      <SelectionRing visible={isSelected} />
+      <SelectionRing visible={isSelected && !dragMode} />
 
       {celebrationType === 'celebrate' && <CelebrationParticles />}
 
       {celebrationType === 'shame' && (
         <Html position={[0, 2.55, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>👎</div>
+        </Html>
+      )}
+
+      {dragMode === 'dazed' && (
+        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>💫</div>
+        </Html>
+      )}
+
+      {dragMode === 'waking' && (
+        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😵</div>
+        </Html>
+      )}
+
+      {dragMode === 'mad' && (
+        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😤</div>
         </Html>
       )}
 

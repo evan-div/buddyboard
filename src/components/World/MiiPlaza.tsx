@@ -1,10 +1,10 @@
 'use client'
 
-import { Suspense, useMemo, useRef, useState, useEffect } from 'react'
+import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-import MiiCharacter from './MiiCharacter'
+import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints } from '@/lib/firestore'
 import type { GroupMember } from '@/lib/types'
 
@@ -345,6 +345,129 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
   )
 }
 
+// ─── Physics / drag constants ─────────────────────────────────────────────────
+
+const HOLD_HEIGHT = 1.8
+const GRAVITY     = 14
+const FLING_MIN   = 4.0
+const WALL_BOUND  = FSIZE / 2 - 0.5
+const IMPACT_DAZE = 10
+const IMPACT_MAD  = 4
+
+interface PhysState {
+  mode: DragMode
+  pos: THREE.Vector3
+  vel: THREE.Vector3
+  modeTimer: number
+  gentleDrop: boolean
+}
+
+// ─── Physics Updater ──────────────────────────────────────────────────────────
+
+interface PhysicsUpdaterProps {
+  draggingUid:    React.RefObject<string | null>
+  dragCursor:     React.RefObject<THREE.Vector3>
+  dragCursorVel:  React.RefObject<THREE.Vector3>
+  charGroups:     React.RefObject<Map<string, THREE.Group>>
+  physicsMap:     React.RefObject<Map<string, PhysState>>
+  orbitRef:       React.RefObject<any>
+  cameraLocked:   boolean
+  setCharMode:    (uid: string, mode: DragMode | null) => void
+}
+
+function PhysicsUpdater({
+  draggingUid, dragCursor, dragCursorVel,
+  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode,
+}: PhysicsUpdaterProps) {
+  const { pointer, camera } = useThree()
+  const raycaster  = useMemo(() => new THREE.Raycaster(), [])
+  const holdPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -HOLD_HEIGHT), [])
+  const prevCursor = useRef(new THREE.Vector3())
+  const hitPoint   = useMemo(() => new THREE.Vector3(), [])
+
+  useFrame((_, delta) => {
+    // Update orbit enabled state
+    if (orbitRef.current) {
+      orbitRef.current.enabled = !draggingUid.current && !cameraLocked
+    }
+
+    // If dragging: raycast pointer to hold plane, compute smoothed velocity, move char
+    if (draggingUid.current) {
+      raycaster.setFromCamera(pointer, camera)
+      if (raycaster.ray.intersectPlane(holdPlane, hitPoint)) {
+        // EMA smoothed velocity (0.6 old, 0.4 new)
+        const rawVelX = (hitPoint.x - prevCursor.current.x) / delta
+        const rawVelZ = (hitPoint.z - prevCursor.current.z) / delta
+        dragCursorVel.current.x = dragCursorVel.current.x * 0.6 + rawVelX * 0.4
+        dragCursorVel.current.z = dragCursorVel.current.z * 0.6 + rawVelZ * 0.4
+        prevCursor.current.copy(hitPoint)
+        dragCursor.current.copy(hitPoint)
+
+        const phys = physicsMap.current.get(draggingUid.current)
+        const group = charGroups.current.get(draggingUid.current)
+        if (phys && group) {
+          phys.pos.lerp(hitPoint, 0.3)
+          group.position.copy(phys.pos)
+        }
+      }
+    }
+
+    // Tick physics states
+    physicsMap.current.forEach((phys, uid) => {
+      const group = charGroups.current.get(uid)
+      if (!group) return
+
+      if (phys.mode === 'flying') {
+        // Ballistic integration
+        phys.vel.y -= GRAVITY * delta
+        phys.pos.addScaledVector(phys.vel, delta)
+
+        // Wall collisions (x and z)
+        if (Math.abs(phys.pos.x) > WALL_BOUND) {
+          phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
+          phys.vel.x *= -0.4
+        }
+        if (Math.abs(phys.pos.z) > WALL_BOUND) {
+          phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
+          phys.vel.z *= -0.4
+        }
+
+        // Ground collision
+        if (phys.pos.y <= 0) {
+          phys.pos.y = 0
+          const impactSpeed = phys.vel.length()
+          if (impactSpeed >= IMPACT_DAZE) {
+            setCharMode(uid, 'dazed')
+          } else if (impactSpeed >= IMPACT_MAD) {
+            setCharMode(uid, 'mad')
+          } else {
+            setCharMode(uid, null)
+          }
+        }
+
+        group.position.copy(phys.pos)
+      } else if (phys.mode === 'dazed') {
+        phys.modeTimer += delta
+        if (phys.modeTimer >= 3.0) {
+          setCharMode(uid, 'waking')
+        }
+      } else if (phys.mode === 'waking') {
+        phys.modeTimer += delta
+        if (phys.modeTimer >= 1.5) {
+          setCharMode(uid, null)
+        }
+      } else if (phys.mode === 'mad') {
+        phys.modeTimer += delta
+        if (phys.modeTimer >= 2.5) {
+          setCharMode(uid, null)
+        }
+      }
+    })
+  })
+
+  return null
+}
+
 // ─── 3D Scene ─────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -367,6 +490,16 @@ function Scene({
   animationType: 'celebrate' | 'shame' | null
 }) {
   const orbitRef = useRef<any>(null)
+  const { gl }   = useThree()
+
+  const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
+  const physicsMap    = useRef<Map<string, PhysState>>(new Map())
+  const draggingUid   = useRef<string | null>(null)
+  const pendingPickup = useRef<{ uid: string; member: GroupMember; pos: [number, number, number] } | null>(null)
+  const holdTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dragCursor    = useRef(new THREE.Vector3())
+  const dragCursorVel = useRef(new THREE.Vector3())
+  const [dragModeMap, setDragModeMap] = useState<Map<string, DragMode>>(new Map())
 
   const positions = useMemo<[number, number, number][]>(() => {
     return members.map((_, i) => {
@@ -375,6 +508,131 @@ function Scene({
       return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
     })
   }, [members.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setCharMode = useCallback((uid: string, mode: DragMode | null) => {
+    const existing = physicsMap.current.get(uid)
+    if (mode === null) {
+      physicsMap.current.delete(uid)
+      setDragModeMap(prev => {
+        const next = new Map(prev)
+        next.delete(uid)
+        return next
+      })
+    } else {
+      const pos = existing?.pos ?? (charGroups.current.get(uid)?.position.clone() ?? new THREE.Vector3())
+      const vel = existing?.vel ?? new THREE.Vector3()
+      physicsMap.current.set(uid, {
+        mode,
+        pos,
+        vel,
+        modeTimer: 0,
+        gentleDrop: false,
+      })
+      setDragModeMap(prev => {
+        const next = new Map(prev)
+        next.set(uid, mode)
+        return next
+      })
+    }
+  }, [])
+
+  const handlePickupStart = useCallback((member: GroupMember, pos: [number, number, number]) => {
+    if (cameraLocked || draggingUid.current) return
+
+    pendingPickup.current = { uid: member.uid, member, pos }
+
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+    holdTimer.current = setTimeout(() => {
+      const pickup = pendingPickup.current
+      if (!pickup) return
+      pendingPickup.current = null
+
+      const group = charGroups.current.get(pickup.uid)
+      const startPos = group
+        ? group.position.clone().setY(HOLD_HEIGHT)
+        : new THREE.Vector3(pos[0], HOLD_HEIGHT, pos[2])
+
+      dragCursorVel.current.set(0, 0, 0)
+      dragCursor.current.copy(startPos)
+
+      physicsMap.current.set(pickup.uid, {
+        mode: 'held',
+        pos: startPos,
+        vel: new THREE.Vector3(),
+        modeTimer: 0,
+        gentleDrop: false,
+      })
+      draggingUid.current = pickup.uid
+
+      setDragModeMap(prev => {
+        const next = new Map(prev)
+        next.set(pickup.uid, 'held')
+        return next
+      })
+    }, 250)
+  }, [cameraLocked])
+
+  const handlePointerUp = useCallback(() => {
+    // Clear pending hold timer
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+
+    // Quick tap: pendingPickup still set means the 250ms hold never fired
+    if (pendingPickup.current) {
+      const { member, pos } = pendingPickup.current
+      pendingPickup.current = null
+      onSelect(member, pos)
+      return
+    }
+
+    // Release a held character
+    if (draggingUid.current) {
+      const uid   = draggingUid.current
+      const speed = dragCursorVel.current.length()
+
+      if (speed >= FLING_MIN) {
+        // Fling: launch with cursor velocity + upward arc
+        const phys = physicsMap.current.get(uid)
+        if (phys) {
+          phys.vel.set(
+            dragCursorVel.current.x,
+            Math.max(4, speed * 0.4),
+            dragCursorVel.current.z,
+          )
+          phys.mode = 'flying'
+          setDragModeMap(prev => {
+            const next = new Map(prev)
+            next.set(uid, 'flying')
+            return next
+          })
+        }
+      } else {
+        // Gentle drop — return to normal
+        const phys = physicsMap.current.get(uid)
+        if (phys) {
+          phys.gentleDrop = true
+          // Drop to ground gently
+          phys.vel.set(0, -2, 0)
+          phys.mode = 'flying'
+          setDragModeMap(prev => {
+            const next = new Map(prev)
+            next.set(uid, 'flying')
+            return next
+          })
+        }
+      }
+
+      draggingUid.current = null
+    }
+  }, [onSelect])
+
+  // Register pointerup on canvas domElement
+  useEffect(() => {
+    gl.domElement.addEventListener('pointerup', handlePointerUp)
+    return () => gl.domElement.removeEventListener('pointerup', handlePointerUp)
+  }, [gl.domElement, handlePointerUp])
 
   return (
     <>
@@ -392,8 +650,24 @@ function Scene({
           isSelected={selectedUid === member.uid}
           onSelect={onSelect}
           celebrationType={member.uid === animatingUid ? animationType : null}
+          dragMode={dragModeMap.get(member.uid) ?? null}
+          onPickupStart={() => handlePickupStart(member, positions[i])}
+          onGroupMount={(uid, g) => {
+            if (g) charGroups.current.set(uid, g)
+            else   charGroups.current.delete(uid)
+          }}
         />
       ))}
+      <PhysicsUpdater
+        draggingUid={draggingUid}
+        dragCursor={dragCursor}
+        dragCursorVel={dragCursorVel}
+        charGroups={charGroups}
+        physicsMap={physicsMap}
+        orbitRef={orbitRef}
+        cameraLocked={cameraLocked}
+        setCharMode={setCharMode}
+      />
       <OrbitControls
         ref={orbitRef}
         enabled={!cameraLocked}
@@ -543,7 +817,7 @@ export default function MiiPlaza({
           pointerEvents: 'none',
           whiteSpace: 'nowrap',
         }}>
-          Drag to rotate · Scroll to zoom · Tap a Mii to interact
+          Hold to carry · Drag to rotate · Scroll to zoom · Tap a Mii to interact
         </div>
       )}
     </div>
