@@ -41,9 +41,9 @@ function CheckerFloor() {
 
 // Camera zooms in from behind/below looking slightly upward past the head,
 // so the character sits in the lower frame and the card floats above them.
-const ZOOM_OFFSET_Y    =  1.0   // camera height above ground
-const ZOOM_OFFSET_Z    =  4.5   // camera distance behind character
-const ZOOM_LOOKAT_Y    =  2.5   // look-at point above character (above head)
+const ZOOM_OFFSET_Y    =  2.2   // camera height above ground
+const ZOOM_OFFSET_Z    =  5.0   // camera distance behind character
+const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
 const DEFAULT_CAM_POS  = new THREE.Vector3(0, 8, 12)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
@@ -368,9 +368,8 @@ export default function MiiPlaza({
     // cameraLocked stays true until CameraController lerps back and calls onUnlock
   }
 
-  const containerH = containerRef.current?.clientHeight ?? 500
-  // card bottom sits 16px above the projected head position
-  const cardBottom  = Math.max(8, containerH - headScreenY + 16)
+  // card top aligns ~40px above the projected head, shifted right of the character
+  const cardTop = Math.max(16, headScreenY - 40)
 
   return (
     <div
@@ -403,13 +402,12 @@ export default function MiiPlaza({
         </Suspense>
       </Canvas>
 
-      {/* Member card — anchored above the character's head via screen-space projection */}
+      {/* Member card — right of character, vertically aligned to head level */}
       {selectedMember && (
         <div style={{
           position: 'absolute',
-          left: '50%',
-          bottom: cardBottom,
-          transform: 'translateX(-50%)',
+          left: 'calc(50% + 150px)',
+          top: cardTop,
           zIndex: 10,
           pointerEvents: 'auto',
         }}>
