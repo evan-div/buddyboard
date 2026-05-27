@@ -8,32 +8,59 @@ import MiiCharacter from './MiiCharacter'
 import { giveOrTakePoints } from '@/lib/firestore'
 import type { GroupMember } from '@/lib/types'
 
-// ─── Checkered Floor ─────────────────────────────────────────────────────────
+// ─── Grass Floor ─────────────────────────────────────────────────────────────
 
-function CheckerFloor() {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 512
-    canvas.height = 512
-    const ctx = canvas.getContext('2d')!
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        ctx.fillStyle = (x + y) % 2 === 0 ? '#dedad4' : '#cac6bf'
-        ctx.fillRect(x * 64, y * 64, 64, 64)
+const GRID   = 24
+const FSIZE  = 26
+const TILE_W = FSIZE / GRID          // ≈1.083
+const TILE_H = 0.09
+const LIGHT_COUNT = (GRID * GRID) / 2   // 288
+const DARK_COUNT  = (GRID * GRID) / 2   // 288
+
+function GrassFloor() {
+  const lightRef = useRef<THREE.InstancedMesh>(null)
+  const darkRef  = useRef<THREE.InstancedMesh>(null)
+
+  useEffect(() => {
+    const dummy = new THREE.Object3D()
+    let li = 0, di = 0
+    for (let ix = 0; ix < GRID; ix++) {
+      for (let iz = 0; iz < GRID; iz++) {
+        dummy.position.set(
+          -FSIZE / 2 + TILE_W * ix + TILE_W / 2,
+          0,
+          -FSIZE / 2 + TILE_W * iz + TILE_W / 2,
+        )
+        dummy.updateMatrix()
+        if ((ix + iz) % 2 === 0) {
+          lightRef.current?.setMatrixAt(li++, dummy.matrix)
+        } else {
+          darkRef.current?.setMatrixAt(di++, dummy.matrix)
+        }
       }
     }
-    const tex = new THREE.CanvasTexture(canvas)
-    tex.wrapS = THREE.RepeatWrapping
-    tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(3, 3)
-    return tex
+    if (lightRef.current) lightRef.current.instanceMatrix.needsUpdate = true
+    if (darkRef.current)  darkRef.current.instanceMatrix.needsUpdate  = true
   }, [])
 
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]}>
-      <planeGeometry args={[26, 26]} />
-      <meshStandardMaterial map={texture} />
-    </mesh>
+    <group>
+      {/* Soil base beneath the tiles */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
+        <planeGeometry args={[FSIZE, FSIZE]} />
+        <meshStandardMaterial color="#2e5e38" />
+      </mesh>
+      {/* Light grass tiles */}
+      <instancedMesh ref={lightRef} args={[undefined, undefined, LIGHT_COUNT]}>
+        <boxGeometry args={[TILE_W - 0.02, TILE_H, TILE_W - 0.02]} />
+        <meshStandardMaterial color="#4d9e62" roughness={0.9} />
+      </instancedMesh>
+      {/* Dark grass tiles */}
+      <instancedMesh ref={darkRef} args={[undefined, undefined, DARK_COUNT]}>
+        <boxGeometry args={[TILE_W - 0.02, TILE_H, TILE_W - 0.02]} />
+        <meshStandardMaterial color="#3a7a4a" roughness={0.9} />
+      </instancedMesh>
+    </group>
   )
 }
 
@@ -300,7 +327,7 @@ function Scene({
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
-      <CheckerFloor />
+      <GrassFloor />
       {members.map((member, i) => (
         <MiiCharacter
           key={member.uid}

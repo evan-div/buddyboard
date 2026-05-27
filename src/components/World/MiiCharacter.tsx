@@ -107,7 +107,7 @@ function SelectionRing({ visible }: { visible: boolean }) {
   useFrame((_, delta) => { if (groupRef.current) groupRef.current.rotation.y += delta * 2 })
   if (!visible) return null
   return (
-    <group ref={groupRef} position={[0, 0.02, 0]}>
+    <group ref={groupRef} position={[0, 0.11, 0]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.38, 0.46, 32, 1, 0, Math.PI * 1.5]} />
         <meshStandardMaterial color="#6366f1" transparent opacity={0.85} emissive="#6366f1" emissiveIntensity={0.6} />
@@ -127,7 +127,6 @@ function CelebrationParticles() {
   const meshRefs = useRef<(THREE.Mesh | null)[]>(Array(PARTICLE_COUNT).fill(null))
   const particles = useRef<ParticleState[]>([])
 
-  // Initialise once on mount (component is conditionally rendered so this is per-celebration)
   if (particles.current.length === 0) {
     particles.current = Array.from({ length: PARTICLE_COUNT }, () => ({
       pos: new THREE.Vector3(
@@ -199,26 +198,40 @@ export default function MiiCharacter({
   const leftLegRef   = useRef<THREE.Group>(null)
   const rightLegRef  = useRef<THREE.Group>(null)
 
-  const animState  = useRef<AnimState>('walking')
-  const idleTimer  = useRef(0)
-  const phase      = useRef(Math.random() * Math.PI * 2)
-  const celebTimer = useRef(0)
-  const targetPos  = useRef(new THREE.Vector3(
+  const animState    = useRef<AnimState>('walking')
+  const idleTimer    = useRef(0)
+  const phase        = useRef(Math.random() * Math.PI * 2)
+  const celebTimer   = useRef(0)
+  const selectedTimer = useRef(0)
+  const targetPos    = useRef(new THREE.Vector3(
     initialPosition[0] + (Math.random() - 0.5) * 6, 0,
     initialPosition[2] + (Math.random() - 0.5) * 6,
   ))
 
   const skinColor = SKIN_TONES[member.avatar.skinTone]
 
-  // Reset all driven transforms when celebrationType changes
+  // Reset all celebration-driven transforms when celebrationType changes
   useEffect(() => {
     celebTimer.current = 0
     bodyGroupRef.current?.position.set(0, 0, 0)
-    bodyGroupRef.current && (bodyGroupRef.current.rotation.z = 0)
-    if (leftArmRef.current)  leftArmRef.current.rotation.x  = 0
-    if (rightArmRef.current) rightArmRef.current.rotation.x = 0
-    if (headRef.current)     headRef.current.rotation.x     = 0
+    if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
+    if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
+    if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
+    if (headRef.current)     headRef.current.rotation.x = 0
+    if (rightLegRef.current) rightLegRef.current.rotation.x = 0
   }, [celebrationType])
+
+  // Reset selection-driven transforms and timer when selection changes
+  useEffect(() => {
+    selectedTimer.current = 0
+    if (!isSelected) {
+      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
+      if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
+      if (headRef.current)     headRef.current.rotation.x = 0
+      if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
+      if (rightLegRef.current) rightLegRef.current.rotation.x = 0
+    }
+  }, [isSelected])
 
   function pickNewTarget() {
     animState.current = 'walking'
@@ -231,43 +244,81 @@ export default function MiiCharacter({
     const group = groupRef.current
     if (!group) return
 
-    // ── Celebrate: jump + arms up + confetti ─────────────────────────────────
+    // ── Celebrate ────────────────────────────────────────────────────────────
     if (celebrationType === 'celebrate') {
       celebTimer.current += delta
       const t    = celebTimer.current
       const body = bodyGroupRef.current
-      // Two bouncing hops using a sin envelope
       if (body) body.position.y = t < 1.8 ? Math.max(0, Math.sin(t * Math.PI * 1.1) * 0.55) : 0
-      // Arms shoot up quickly then stay raised
       const armAngle = Math.max(-Math.PI * 0.85, -t * 5)
       if (leftArmRef.current)  leftArmRef.current.rotation.x  = armAngle
       if (rightArmRef.current) rightArmRef.current.rotation.x = armAngle
       return
     }
 
-    // ── Shame: head droops + arm scratches back of head ───────────────────────
+    // ── Shame ─────────────────────────────────────────────────────────────────
     if (celebrationType === 'shame') {
       celebTimer.current += delta
       const t = celebTimer.current
-      // Head hangs forward
       if (headRef.current) headRef.current.rotation.x = Math.min(0.48, t * 1.2)
-      // Right arm rises up with a scratching oscillation
       if (rightArmRef.current) {
         const raise   = Math.min(1, t * 1.8)
         const scratch = Math.sin(t * 7) * 0.16
         rightArmRef.current.rotation.x = -raise * 2.1 + scratch
       }
-      // Gentle ashamed sway
       if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 1.4) * 0.04
       return
     }
 
-    // ── Face camera when selected ─────────────────────────────────────────────
+    // ── Selected: face camera then play greeting / idle sequence ─────────────
     if (isSelected) {
+      selectedTimer.current += delta
+      const t = selectedTimer.current
+
+      // Always face the camera
       let dy = -group.rotation.y
       while (dy >  Math.PI) dy -= Math.PI * 2
       while (dy < -Math.PI) dy += Math.PI * 2
       group.rotation.y += dy * Math.min(1, 10 * delta)
+
+      if (t < 2.5) {
+        // ── Phase 1: Wave & smile (0–2.5 s) ─────────────────────────────────
+        if (rightArmRef.current) {
+          rightArmRef.current.rotation.x = -Math.PI * 0.78
+          rightArmRef.current.rotation.z = Math.sin(t * 4.5) * 0.62
+        }
+        if (leftArmRef.current) leftArmRef.current.rotation.x = 0
+      } else {
+        // Cycle through three idles, 2.5 s each
+        const c = (t - 2.5) % 7.5
+
+        if (c < 2.5) {
+          // ── Phase 2: Sheepish fidget ─────────────────────────────────────
+          if (rightArmRef.current) { rightArmRef.current.rotation.x = -0.28; rightArmRef.current.rotation.z =  0.30 }
+          if (leftArmRef.current)  { leftArmRef.current.rotation.x  = -0.22; leftArmRef.current.rotation.z  = -0.20 }
+          if (headRef.current)     headRef.current.rotation.x = 0.20
+          if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(c * 1.6) * 0.055
+        } else if (c < 5.0) {
+          // ── Phase 3: Kick the ground ─────────────────────────────────────
+          const k = c - 2.5
+          if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
+          if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
+          if (headRef.current)     headRef.current.rotation.x = 0
+          if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
+          // One forward kick, gentle return
+          if (rightLegRef.current) rightLegRef.current.rotation.x = Math.sin(k * Math.PI / 1.1) * 0.60
+        } else {
+          // ── Phase 4: Scratch head ────────────────────────────────────────
+          const s = c - 5.0
+          if (rightLegRef.current) rightLegRef.current.rotation.x = 0
+          if (headRef.current)     headRef.current.rotation.x = 0.14
+          if (rightArmRef.current) {
+            const raise = Math.min(1, s * 2.2)
+            rightArmRef.current.rotation.x = -raise * 1.85 + Math.sin(s * 6) * 0.13
+            rightArmRef.current.rotation.z = 0
+          }
+        }
+      }
       return
     }
 
