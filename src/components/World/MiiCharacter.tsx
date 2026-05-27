@@ -1,7 +1,8 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
@@ -115,6 +116,64 @@ function SelectionRing({ visible }: { visible: boolean }) {
   )
 }
 
+// ─── Celebration Particles ────────────────────────────────────────────────────
+
+const CONFETTI_COLORS = ['#F5D033','#FF6B9D','#6366F1','#22c55e','#F97316','#ffffff','#06B6D4']
+const PARTICLE_COUNT  = 24
+
+type ParticleState = { pos: THREE.Vector3; vel: THREE.Vector3; age: number; maxAge: number }
+
+function CelebrationParticles() {
+  const meshRefs = useRef<(THREE.Mesh | null)[]>(Array(PARTICLE_COUNT).fill(null))
+  const particles = useRef<ParticleState[]>([])
+
+  // Initialise once on mount (component is conditionally rendered so this is per-celebration)
+  if (particles.current.length === 0) {
+    particles.current = Array.from({ length: PARTICLE_COUNT }, () => ({
+      pos: new THREE.Vector3(
+        (Math.random() - 0.5) * 0.5,
+        1.9 + Math.random() * 0.4,
+        (Math.random() - 0.5) * 0.5,
+      ),
+      vel: new THREE.Vector3(
+        (Math.random() - 0.5) * 5,
+        2.5 + Math.random() * 3.5,
+        (Math.random() - 0.5) * 5,
+      ),
+      age: 0,
+      maxAge: 1.0 + Math.random() * 1.2,
+    }))
+  }
+
+  useFrame((_, delta) => {
+    particles.current.forEach((p, i) => {
+      p.age = Math.min(p.maxAge, p.age + delta)
+      p.vel.y -= delta * 9
+      p.pos.addScaledVector(p.vel, delta)
+      const mesh = meshRefs.current[i]
+      if (!mesh) return
+      mesh.position.copy(p.pos)
+      const t = p.age / p.maxAge
+      mesh.scale.setScalar(Math.max(0, (1 - t) * 0.09))
+    })
+  })
+
+  return (
+    <group>
+      {Array.from({ length: PARTICLE_COUNT }, (_, i) => (
+        <mesh key={i} ref={el => { meshRefs.current[i] = el }}>
+          <boxGeometry args={[1, 1, 0.18]} />
+          <meshStandardMaterial
+            color={CONFETTI_COLORS[i % CONFETTI_COLORS.length]}
+            emissive={CONFETTI_COLORS[i % CONFETTI_COLORS.length]}
+            emissiveIntensity={1.3}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 // ─── Main Character ───────────────────────────────────────────────────────────
 
 type AnimState = 'walking' | 'idle_bob' | 'idle_sway'
@@ -125,32 +184,45 @@ export interface MiiCharacterProps {
   bounds?: number
   isSelected: boolean
   onSelect: (member: GroupMember, pos: [number, number, number]) => void
+  celebrationType?: 'celebrate' | 'shame' | null
 }
 
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
-  isSelected, onSelect,
+  isSelected, onSelect, celebrationType = null,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
+  const headRef      = useRef<THREE.Group>(null)
   const leftArmRef   = useRef<THREE.Group>(null)
   const rightArmRef  = useRef<THREE.Group>(null)
   const leftLegRef   = useRef<THREE.Group>(null)
   const rightLegRef  = useRef<THREE.Group>(null)
 
-  const animState = useRef<AnimState>('walking')
-  const idleTimer = useRef(0)
-  const phase     = useRef(Math.random() * Math.PI * 2)
-  const targetPos = useRef(new THREE.Vector3(
+  const animState  = useRef<AnimState>('walking')
+  const idleTimer  = useRef(0)
+  const phase      = useRef(Math.random() * Math.PI * 2)
+  const celebTimer = useRef(0)
+  const targetPos  = useRef(new THREE.Vector3(
     initialPosition[0] + (Math.random() - 0.5) * 6, 0,
     initialPosition[2] + (Math.random() - 0.5) * 6,
   ))
 
   const skinColor = SKIN_TONES[member.avatar.skinTone]
 
+  // Reset all driven transforms when celebrationType changes
+  useEffect(() => {
+    celebTimer.current = 0
+    bodyGroupRef.current?.position.set(0, 0, 0)
+    bodyGroupRef.current && (bodyGroupRef.current.rotation.z = 0)
+    if (leftArmRef.current)  leftArmRef.current.rotation.x  = 0
+    if (rightArmRef.current) rightArmRef.current.rotation.x = 0
+    if (headRef.current)     headRef.current.rotation.x     = 0
+  }, [celebrationType])
+
   function pickNewTarget() {
     animState.current = 'walking'
-    const angle = Math.random() * Math.PI * 2
+    const angle  = Math.random() * Math.PI * 2
     const radius = 1.0 + Math.random() * (bounds * 0.85)
     targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
   }
@@ -159,28 +231,61 @@ export default function MiiCharacter({
     const group = groupRef.current
     if (!group) return
 
+    // ── Celebrate: jump + arms up + confetti ─────────────────────────────────
+    if (celebrationType === 'celebrate') {
+      celebTimer.current += delta
+      const t    = celebTimer.current
+      const body = bodyGroupRef.current
+      // Two bouncing hops using a sin envelope
+      if (body) body.position.y = t < 1.8 ? Math.max(0, Math.sin(t * Math.PI * 1.1) * 0.55) : 0
+      // Arms shoot up quickly then stay raised
+      const armAngle = Math.max(-Math.PI * 0.85, -t * 5)
+      if (leftArmRef.current)  leftArmRef.current.rotation.x  = armAngle
+      if (rightArmRef.current) rightArmRef.current.rotation.x = armAngle
+      return
+    }
+
+    // ── Shame: head droops + arm scratches back of head ───────────────────────
+    if (celebrationType === 'shame') {
+      celebTimer.current += delta
+      const t = celebTimer.current
+      // Head hangs forward
+      if (headRef.current) headRef.current.rotation.x = Math.min(0.48, t * 1.2)
+      // Right arm rises up with a scratching oscillation
+      if (rightArmRef.current) {
+        const raise   = Math.min(1, t * 1.8)
+        const scratch = Math.sin(t * 7) * 0.16
+        rightArmRef.current.rotation.x = -raise * 2.1 + scratch
+      }
+      // Gentle ashamed sway
+      if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 1.4) * 0.04
+      return
+    }
+
+    // ── Face camera when selected ─────────────────────────────────────────────
     if (isSelected) {
-      // smoothly rotate to face the camera (local +Z toward world +Z = rotation.y → 0)
       let dy = -group.rotation.y
       while (dy >  Math.PI) dy -= Math.PI * 2
       while (dy < -Math.PI) dy += Math.PI * 2
       group.rotation.y += dy * Math.min(1, 10 * delta)
       return
     }
+
+    // ── Normal walk / idle ────────────────────────────────────────────────────
     phase.current += delta
     const t    = phase.current
     const body = bodyGroupRef.current
 
     if (animState.current === 'walking') {
-      const dx = targetPos.current.x - group.position.x
-      const dz = targetPos.current.z - group.position.z
+      const dx   = targetPos.current.x - group.position.x
+      const dz   = targetPos.current.z - group.position.z
       const dist = Math.sqrt(dx*dx + dz*dz)
       if (dist < 0.15) {
         animState.current = Math.random() < 0.5 ? 'idle_bob' : 'idle_sway'
         idleTimer.current = 2 + Math.random() * 3.5
-        if (leftArmRef.current)  leftArmRef.current.rotation.x = 0
+        if (leftArmRef.current)  leftArmRef.current.rotation.x  = 0
         if (rightArmRef.current) rightArmRef.current.rotation.x = 0
-        if (leftLegRef.current)  leftLegRef.current.rotation.x = 0
+        if (leftLegRef.current)  leftLegRef.current.rotation.x  = 0
         if (rightLegRef.current) rightLegRef.current.rotation.x = 0
       } else {
         const spd = 1.4
@@ -188,10 +293,10 @@ export default function MiiCharacter({
         group.position.z = Math.max(-bounds, Math.min(bounds, group.position.z + (dz/dist)*spd*delta))
         group.rotation.y = Math.atan2(dx, dz)
         const sw = Math.sin(t*5.5)*0.44
-        if (leftArmRef.current)  leftArmRef.current.rotation.x =  sw
+        if (leftArmRef.current)  leftArmRef.current.rotation.x  =  sw
         if (rightArmRef.current) rightArmRef.current.rotation.x = -sw
-        if (leftLegRef.current)  leftLegRef.current.rotation.x = -sw
-        if (rightLegRef.current) rightLegRef.current.rotation.x =  sw
+        if (leftLegRef.current)  leftLegRef.current.rotation.x  = -sw
+        if (rightLegRef.current) rightLegRef.current.rotation.x  =  sw
       }
     } else if (animState.current === 'idle_bob') {
       idleTimer.current -= delta
@@ -216,6 +321,14 @@ export default function MiiCharacter({
     >
       <SelectionRing visible={isSelected} />
 
+      {celebrationType === 'celebrate' && <CelebrationParticles />}
+
+      {celebrationType === 'shame' && (
+        <Html position={[0, 2.55, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>👎</div>
+        </Html>
+      )}
+
       <group ref={bodyGroupRef}>
         <group ref={leftLegRef} position={[-0.12, 0.65, 0]}>
           <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color="#1e293b" /></mesh>
@@ -235,7 +348,7 @@ export default function MiiCharacter({
           <mesh position={[0.02, -0.45, 0]}><sphereGeometry args={[0.074, 8, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
         </group>
         <mesh position={[0, 1.21, 0]}><cylinderGeometry args={[0.1, 0.1, 0.18, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
-        <group position={[0, 1.5, 0]}>
+        <group ref={headRef} position={[0, 1.5, 0]}>
           <mesh><sphereGeometry args={[0.28, 20, 20]} /><meshStandardMaterial color={skinColor} /></mesh>
           <mesh position={[-0.1, 0.04, 0.261]}><sphereGeometry args={[0.04, 8, 8]} /><meshStandardMaterial color="#fff" /></mesh>
           <mesh position={[-0.1, 0.04, 0.276]}><sphereGeometry args={[0.023, 8, 8]} /><meshStandardMaterial color="#1a1a1a" /></mesh>

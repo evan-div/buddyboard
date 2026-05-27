@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useMemo, useRef, useState } from 'react'
+import { Suspense, useMemo, useRef, useState, useEffect } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -98,7 +98,7 @@ interface CardProps {
   remainingGive: number
   remainingTake: number
   onClose: () => void
-  onSubmitted: () => void
+  onSubmitted: (type: 'celebrate' | 'shame') => void
 }
 
 function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, onClose, onSubmitted }: CardProps) {
@@ -125,7 +125,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
         points: mode === 'give' ? points : -points,
         reason: fullReason,
       }])
-      onSubmitted()
+      onSubmitted(mode === 'give' ? 'celebrate' : 'shame')
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
@@ -272,6 +272,8 @@ function Scene({
   cameraLocked,
   onUnlock,
   onSelect,
+  animatingUid,
+  animationType,
 }: {
   members: GroupMember[]
   selectedUid: string | null
@@ -279,6 +281,8 @@ function Scene({
   cameraLocked: boolean
   onUnlock: () => void
   onSelect: (member: GroupMember, pos: [number, number, number]) => void
+  animatingUid: string | null
+  animationType: 'celebrate' | 'shame' | null
 }) {
   const orbitRef = useRef<any>(null)
 
@@ -305,6 +309,7 @@ function Scene({
           bounds={5.5}
           isSelected={selectedUid === member.uid}
           onSelect={onSelect}
+          celebrationType={member.uid === animatingUid ? animationType : null}
         />
       ))}
       <OrbitControls
@@ -335,12 +340,17 @@ interface Props {
 export default function MiiPlaza({
   members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null)
   const [focusPos, setFocusPos]             = useState<[number, number, number] | null>(null)
   const [cameraLocked, setCameraLocked]     = useState(false)
   const [headScreenY, setHeadScreenY]       = useState<number>(0)
+  const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
+  const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
+
+  useEffect(() => () => { if (animTimerRef.current) clearTimeout(animTimerRef.current) }, [])
 
   function handleSelect(member: GroupMember, pos: [number, number, number]) {
     const [fx, fy, fz] = pos
@@ -398,6 +408,8 @@ export default function MiiPlaza({
             cameraLocked={cameraLocked}
             onUnlock={() => setCameraLocked(false)}
             onSelect={handleSelect}
+            animatingUid={animatingUid}
+            animationType={animationType}
           />
         </Suspense>
       </Canvas>
@@ -418,7 +430,18 @@ export default function MiiPlaza({
             remainingGive={remainingGive}
             remainingTake={remainingTake}
             onClose={handleClose}
-            onSubmitted={() => { onPointsSubmitted(); handleClose() }}
+            onSubmitted={(type) => {
+              onPointsSubmitted()
+              const uid = selectedMember!.uid
+              handleClose()
+              if (animTimerRef.current) clearTimeout(animTimerRef.current)
+              setAnimatingUid(uid)
+              setAnimationType(type)
+              animTimerRef.current = setTimeout(() => {
+                setAnimatingUid(null)
+                setAnimationType(null)
+              }, type === 'celebrate' ? 3500 : 4200)
+            }}
           />
         </div>
       )}
