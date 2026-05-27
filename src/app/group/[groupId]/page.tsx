@@ -568,7 +568,10 @@ export default function GroupPage() {
           <MiiPlaza
             members={members}
             currentUid={user.uid}
-            onGivePoints={() => setShowPointsModal(true)}
+            groupId={groupId}
+            remainingGive={dailyStats.remainingGive}
+            remainingTake={dailyStats.remainingTake}
+            onPointsSubmitted={loadGroupData}
           />
         ) : (
           <FeedTab groupId={groupId} members={members} />
