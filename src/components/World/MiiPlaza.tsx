@@ -113,8 +113,8 @@ function GrassFloor() {
         <meshStandardMaterial map={baseTex} roughness={0.95} />
       </mesh>
       {/* Blade instances sit on top for 3D raised-grass texture */}
-      <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} />
-      <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} />
+      <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
+      <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
     </group>
   )
 }
