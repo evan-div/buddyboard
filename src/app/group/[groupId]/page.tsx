@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
@@ -15,6 +16,8 @@ import {
 } from '@/lib/firestore'
 import { copyToClipboard } from '@/lib/utils'
 import type { Group, GroupMember, Transaction, PointsAllocation } from '@/lib/types'
+
+const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 
 // ─── Points Modal ─────────────────────────────────────────────────────────────
 
@@ -418,7 +421,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'leaderboard' | 'feed'>('leaderboard')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'feed'>('plaza')
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
@@ -536,14 +539,14 @@ export default function GroupPage() {
           {/* Tabs */}
           <div className="flex gap-4 mt-3">
             <button
-              onClick={() => setActiveTab('leaderboard')}
+              onClick={() => setActiveTab('plaza')}
               className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                activeTab === 'leaderboard'
+                activeTab === 'plaza'
                   ? 'border-indigo-500 text-indigo-400'
                   : 'border-transparent text-gray-500 hover:text-gray-300'
               }`}
             >
-              Leaderboard
+              Plaza
             </button>
             <button
               onClick={() => setActiveTab('feed')}
@@ -561,12 +564,11 @@ export default function GroupPage() {
 
       {/* Content */}
       <main className="max-w-lg mx-auto px-4 py-5">
-        {activeTab === 'leaderboard' ? (
-          <LeaderboardTab
+        {activeTab === 'plaza' ? (
+          <MiiPlaza
             members={members}
             currentUid={user.uid}
-            remainingGive={dailyStats.remainingGive}
-            remainingTake={dailyStats.remainingTake}
+            onGivePoints={() => setShowPointsModal(true)}
           />
         ) : (
           <FeedTab groupId={groupId} members={members} />
