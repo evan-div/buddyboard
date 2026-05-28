@@ -351,7 +351,7 @@ const HOLD_HEIGHT = 1.8
 const GRAVITY     = 26
 const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
-const IMPACT_DAZE = 10
+const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
 
 interface PhysState {
@@ -454,7 +454,7 @@ function PhysicsUpdater({
           const impactSpeed = phys.vel.length()
           if (impactSpeed >= IMPACT_DAZE) {
             // Snap immediately to face-forward fallen pose on impact
-            group.rotation.x = 0.62 + (Math.random() - 0.5) * 0.12
+            group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
             group.rotation.z = (Math.random() - 0.5) * 0.3
             setCharMode(uid, 'dazed')
           } else if (impactSpeed >= IMPACT_MAD) {
