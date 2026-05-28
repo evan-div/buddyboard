@@ -451,14 +451,17 @@ function PhysicsUpdater({
         if (phys.pos.y <= 0) {
           phys.pos.y = 0
           phys.angVel.set(0, 0, 0)
-          group.rotation.x = 0
-          group.rotation.z = 0
           const impactSpeed = phys.vel.length()
           if (impactSpeed >= IMPACT_DAZE) {
+            // Keep tumble rotation — PhysicsUpdater will lerp it to face-down
             setCharMode(uid, 'dazed')
           } else if (impactSpeed >= IMPACT_MAD) {
+            group.rotation.x = 0
+            group.rotation.z = 0
             setCharMode(uid, 'mad')
           } else {
+            group.rotation.x = 0
+            group.rotation.z = 0
             setCharMode(uid, null)
           }
         }
@@ -466,11 +469,17 @@ function PhysicsUpdater({
         group.position.copy(phys.pos)
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
+        // Lerp group toward a face-down sprawl
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 1.15, Math.min(1, delta * 4))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,    Math.min(1, delta * 3))
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
       } else if (phys.mode === 'waking') {
         phys.modeTimer += delta
+        // Lerp group back to upright as they recover
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 1.8))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 2.5))
         if (phys.modeTimer >= 1.5) {
           setCharMode(uid, null)
         }
