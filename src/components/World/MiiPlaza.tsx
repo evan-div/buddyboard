@@ -988,7 +988,7 @@ function Scene({
 
   return (
     <>
-      <color attach="background" args={['#9fb4c7']} />
+      {/* sky is transparent — CSS gradient on the container div shows through */}
       <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
@@ -1102,12 +1102,12 @@ export default function MiiPlaza({
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: '#9fb4c7',
+        background: 'linear-gradient(to bottom, #1a3060 0%, #3d4890 22%, #b04870 48%, #e87040 68%, #f4a830 85%, #ffd87a 100%)',
       }}
     >
       <Canvas
         camera={{ position: [9, 8, 9], fov: 55 }}
-        gl={{ antialias: true }}
+        gl={{ antialias: true, alpha: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
       >
