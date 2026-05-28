@@ -116,6 +116,15 @@ function GrassFloor() {
       {/* Blade instances sit on top for 3D raised-grass texture */}
       <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
+      {/* Spire — dirt body + stone base below the grass */}
+      <mesh position={[0, -3.5, 0]}>
+        <boxGeometry args={[FSIZE, 7, FSIZE]} />
+        <meshStandardMaterial color="#6B4226" roughness={0.95} />
+      </mesh>
+      <mesh position={[0, -9, 0]}>
+        <boxGeometry args={[FSIZE - 3, 4, FSIZE - 3]} />
+        <meshStandardMaterial color="#6a6a6a" roughness={0.98} />
+      </mesh>
     </group>
   )
 }
@@ -716,24 +725,51 @@ function PhysicsUpdater({
 
 // ─── Sky / Clouds ────────────────────────────────────────────────────────────
 
+// Cloud layer wraps around the spire — inner ring hugs the plaza edge,
+// middle/outer rings extend the cloud horizon in all directions.
 const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
-  { pos: [-9, 9.5, -10], scale: 1.0 },
-  { pos: [  6, 11,  -13], scale: 1.3 },
-  { pos: [ -3, 10,  -16], scale: 0.85 },
-  { pos: [ 10,  9,   -8], scale: 0.7 },
-  { pos: [ -7, 12,  -20], scale: 1.15 },
-  { pos: [  1, 10.5, -6], scale: 0.65 },
+  // Inner ring — just outside the plaza edge (radius ~16)
+  { pos: [ 16,  1,   0], scale: 2.2 },
+  { pos: [ 11,  2,  11], scale: 2.0 },
+  { pos: [  0,  1,  16], scale: 2.2 },
+  { pos: [-11,  2,  11], scale: 2.0 },
+  { pos: [-16,  1,   0], scale: 2.2 },
+  { pos: [-11,  1, -11], scale: 2.0 },
+  { pos: [  0,  2, -16], scale: 2.2 },
+  { pos: [ 11,  1, -11], scale: 2.0 },
+  // Middle ring (radius ~22)
+  { pos: [ 22,  0,   0], scale: 2.8 },
+  { pos: [ 16,  0,  16], scale: 2.5 },
+  { pos: [  0, -1,  22], scale: 2.8 },
+  { pos: [-16,  0,  16], scale: 2.5 },
+  { pos: [-22,  1,   0], scale: 2.8 },
+  { pos: [-16, -1, -16], scale: 2.5 },
+  { pos: [  0,  0, -22], scale: 2.8 },
+  { pos: [ 16, -1, -16], scale: 2.5 },
+  // Outer ring (radius ~30)
+  { pos: [ 30, -1,   0], scale: 3.5 },
+  { pos: [ 21, -2,  21], scale: 3.0 },
+  { pos: [  0, -1,  30], scale: 3.5 },
+  { pos: [-21, -2,  21], scale: 3.0 },
+  { pos: [-30,  0,   0], scale: 3.5 },
+  { pos: [-21, -1, -21], scale: 3.0 },
+  { pos: [  0, -2, -30], scale: 3.5 },
+  { pos: [ 21, -1, -21], scale: 3.0 },
 ]
 
 const PUFF_OFFSETS: [number, number, number][] = [
   [0, 0, 0],
-  [0.9, -0.15, 0.1],
+  [0.9, -0.15,  0.1],
   [-0.85, -0.1, 0.05],
-  [0.4, 0.4, -0.1],
-  [-0.4, 0.35, 0.1],
-  [0, 0, 0.7],
+  [0.4,   0.4, -0.1],
+  [-0.4,  0.35, 0.1],
+  [0,     0,    0.7],
+  [0.5,  -0.1, -0.6],
+  [-0.5, -0.2, -0.65],
+  [0.2,   0.15, 1.0],
+  [-0.2,  0.2, -1.0],
 ]
-const PUFF_SIZES = [0.9, 0.7, 0.65, 0.6, 0.55, 0.55]
+const PUFF_SIZES = [0.9, 0.7, 0.65, 0.6, 0.55, 0.55, 0.5, 0.5, 0.45, 0.45]
 
 const cloudGeo = new THREE.SphereGeometry(1, 7, 5)
 const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, metalness: 0 })
@@ -952,7 +988,7 @@ function Scene({
 
   return (
     <>
-      <color attach="background" args={['#a8d8f0']} />
+      <color attach="background" args={['#9fb4c7']} />
       <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
@@ -1066,7 +1102,7 @@ export default function MiiPlaza({
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: '#a8d8f0',
+        background: '#9fb4c7',
       }}
     >
       <Canvas
