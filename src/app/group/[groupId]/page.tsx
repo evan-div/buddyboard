@@ -593,6 +593,7 @@ export default function GroupPage() {
             remainingGive={dailyStats.remainingGive}
             remainingTake={dailyStats.remainingTake}
             onPointsSubmitted={refreshGroupData}
+            onAvatarUpdated={refreshGroupData}
           />
         ) : (
           <FeedTab groupId={groupId} members={members} />

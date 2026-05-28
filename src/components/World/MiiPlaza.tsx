@@ -5,8 +5,9 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
-import { giveOrTakePoints } from '@/lib/firestore'
-import type { GroupMember } from '@/lib/types'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar } from '@/lib/firestore'
+import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS } from '@/lib/avatarDefaults'
+import type { GroupMember, AvatarConfig } from '@/lib/types'
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
@@ -341,6 +342,187 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+// ─── Self Card (own character customization) ──────────────────────────────────
+
+const HAIR_STYLE_OPTIONS: { value: AvatarConfig['hairStyle']; label: string }[] = [
+  { value: 'bald',     label: 'Bald'     },
+  { value: 'short',    label: 'Short'    },
+  { value: 'medium',   label: 'Med'      },
+  { value: 'long',     label: 'Long'     },
+  { value: 'curly',    label: 'Curly'    },
+  { value: 'wavy',     label: 'Wavy'     },
+  { value: 'mohawk',   label: 'Mohawk'   },
+  { value: 'ponytail', label: 'Ponytail' },
+]
+
+const ACCESSORY_OPTIONS: { value: AvatarConfig['accessory']; label: string }[] = [
+  { value: 'none',       label: 'None'    },
+  { value: 'glasses',    label: 'Glasses' },
+  { value: 'sunglasses', label: 'Shades'  },
+  { value: 'hat',        label: 'Hat'     },
+  { value: 'crown',      label: 'Crown'   },
+  { value: 'headband',   label: 'Headband'},
+]
+
+function SwatchBtn({ color, selected, onClick }: { color: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      width: 24, height: 24, borderRadius: '50%', background: color,
+      border: 'none', cursor: 'pointer',
+      outline: selected ? '3px solid #6366f1' : '2px solid transparent',
+      outlineOffset: 2,
+      transform: selected ? 'scale(1.18)' : 'scale(1)',
+      transition: 'all 0.1s',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.22)',
+    }} />
+  )
+}
+
+function PillBtn({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '4px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
+      fontSize: 11, fontWeight: 600,
+      background: selected ? '#6366f1' : '#f3f4f6',
+      color: selected ? '#fff' : '#555',
+      transition: 'all 0.1s',
+    }}>{label}</button>
+  )
+}
+
+function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
+  member: GroupMember
+  groupId: string
+  onClose: () => void
+  onAvatarUpdated?: () => void
+}) {
+  const [draft, setDraft] = useState<AvatarConfig>(() => ({ ...member.avatar }))
+  const [tab, setTab]     = useState<'look' | 'colors' | 'extras'>('look')
+  const [saving, setSaving] = useState(false)
+  const [saved,  setSaved]  = useState(false)
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(member.avatar)
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await Promise.all([
+        updateUserAvatar(member.uid, draft),
+        updateMemberAvatar(groupId, member.uid, draft),
+      ])
+      onAvatarUpdated?.()
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      console.error('Failed to save avatar:', e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sLabel: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, color: '#aaa',
+    textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 7,
+  }
+
+  return (
+    <div style={{
+      background: '#fff', borderRadius: 20, padding: '16px 16px 18px', width: 270,
+      boxShadow: '0 20px 60px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.12)',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: '#111', letterSpacing: -0.3 }}>{member.displayName}</div>
+          <div style={{ fontSize: 11, color: '#6366f1', marginTop: 2, fontWeight: 600 }}>Customize your look</div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 14 }}>
+        {(['look', 'colors', 'extras'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            flex: 1, padding: '6px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
+            fontWeight: 700, fontSize: 11,
+            background: tab === t ? '#fff' : 'transparent',
+            color: tab === t ? '#6366f1' : '#888',
+            boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+            transition: 'all 0.12s',
+          }}>
+            {t === 'look' ? 'Look' : t === 'colors' ? 'Colors' : 'Extras'}
+          </button>
+        ))}
+      </div>
+
+      {/* Look: skin tone + hair style */}
+      {tab === 'look' && (
+        <div>
+          <div style={sLabel}>Skin Tone</div>
+          <div style={{ display: 'flex', gap: 7, marginBottom: 14 }}>
+            {(Object.entries(SKIN_TONES) as [AvatarConfig['skinTone'], string][]).map(([key, hex]) => (
+              <SwatchBtn key={key} color={hex} selected={draft.skinTone === key}
+                onClick={() => setDraft(d => ({ ...d, skinTone: key }))} />
+            ))}
+          </div>
+          <div style={sLabel}>Hair Style</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {HAIR_STYLE_OPTIONS.map(({ value, label }) => (
+              <PillBtn key={value} label={label} selected={draft.hairStyle === value}
+                onClick={() => setDraft(d => ({ ...d, hairStyle: value }))} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Colors: hair + shirt */}
+      {tab === 'colors' && (
+        <div>
+          <div style={sLabel}>Hair Color</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+            {HAIR_COLORS.map(hex => (
+              <SwatchBtn key={hex} color={hex} selected={draft.hairColor === hex}
+                onClick={() => setDraft(d => ({ ...d, hairColor: hex }))} />
+            ))}
+          </div>
+          <div style={sLabel}>Shirt Color</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {SHIRT_COLORS.map(hex => (
+              <SwatchBtn key={hex} color={hex} selected={draft.shirtColor === hex}
+                onClick={() => setDraft(d => ({ ...d, shirtColor: hex }))} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Extras: accessory */}
+      {tab === 'extras' && (
+        <div>
+          <div style={sLabel}>Accessory</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {ACCESSORY_OPTIONS.map(({ value, label }) => (
+              <PillBtn key={value} label={label} selected={draft.accessory === value}
+                onClick={() => setDraft(d => ({ ...d, accessory: value }))} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save */}
+      <button onClick={handleSave} disabled={saving || !dirty || saved} style={{
+        width: '100%', padding: '11px 0', borderRadius: 12,
+        border: 'none', cursor: dirty && !saving && !saved ? 'pointer' : 'default',
+        fontWeight: 800, fontSize: 13, color: '#fff', marginTop: 14,
+        background: saved ? '#22c55e' : dirty ? '#6366f1' : '#d1d5db',
+        transition: 'background 0.15s',
+      }}>
+        {saved ? '✓ Saved!' : saving ? 'Saving…' : dirty ? 'Save Changes' : 'No Changes'}
+      </button>
     </div>
   )
 }
@@ -795,10 +977,11 @@ interface Props {
   remainingGive: number
   remainingTake: number
   onPointsSubmitted: () => void
+  onAvatarUpdated?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted,
+  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted, onAvatarUpdated,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -874,7 +1057,7 @@ export default function MiiPlaza({
         </Suspense>
       </Canvas>
 
-      {/* Member card — right of character, vertically aligned to head level */}
+      {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
         <div style={{
           position: 'absolute',
@@ -883,26 +1066,35 @@ export default function MiiPlaza({
           zIndex: 10,
           pointerEvents: 'auto',
         }}>
-          <MemberCard
-            member={selectedMember}
-            currentUid={currentUid}
-            groupId={groupId}
-            remainingGive={remainingGive}
-            remainingTake={remainingTake}
-            onClose={handleClose}
-            onSubmitted={(type) => {
-              onPointsSubmitted()
-              const uid = selectedMember!.uid
-              handleClose()
-              if (animTimerRef.current) clearTimeout(animTimerRef.current)
-              setAnimatingUid(uid)
-              setAnimationType(type)
-              animTimerRef.current = setTimeout(() => {
-                setAnimatingUid(null)
-                setAnimationType(null)
-              }, type === 'celebrate' ? 3500 : 4200)
-            }}
-          />
+          {selectedMember.uid === currentUid ? (
+            <SelfCard
+              member={selectedMember}
+              groupId={groupId}
+              onClose={handleClose}
+              onAvatarUpdated={onAvatarUpdated}
+            />
+          ) : (
+            <MemberCard
+              member={selectedMember}
+              currentUid={currentUid}
+              groupId={groupId}
+              remainingGive={remainingGive}
+              remainingTake={remainingTake}
+              onClose={handleClose}
+              onSubmitted={(type) => {
+                onPointsSubmitted()
+                const uid = selectedMember!.uid
+                handleClose()
+                if (animTimerRef.current) clearTimeout(animTimerRef.current)
+                setAnimatingUid(uid)
+                setAnimationType(type)
+                animTimerRef.current = setTimeout(() => {
+                  setAnimatingUid(null)
+                  setAnimationType(null)
+                }, type === 'celebrate' ? 3500 : 4200)
+              }}
+            />
+          )}
         </div>
       )}
 

@@ -71,6 +71,11 @@ export async function updateUserAvatar(uid: string, avatar: AvatarConfig): Promi
   await updateDoc(userRef, { avatar })
 }
 
+export async function updateMemberAvatar(groupId: string, uid: string, avatar: AvatarConfig): Promise<void> {
+  const memberRef = doc(db, 'groups', groupId, 'members', uid)
+  await updateDoc(memberRef, { avatar })
+}
+
 export async function updateUserDisplayName(uid: string, displayName: string): Promise<void> {
   const userRef = doc(db, 'users', uid)
   await updateDoc(userRef, { displayName })
