@@ -1066,7 +1066,7 @@ export default function MiiPlaza({
       }}
     >
       <Canvas
-        camera={{ position: [0, 8, 12], fov: 48 }}
+        camera={{ position: [12, 8, 0], fov: 48 }}
         gl={{ antialias: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
