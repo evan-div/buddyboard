@@ -12,7 +12,7 @@ import type { GroupMember, AvatarConfig } from '@/lib/types'
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
 const FSIZE      = 26
-const PATCH_GRID = 16                               // 16×16 checker squares
+const PATCH_GRID = 10                               // 10×10 checker squares
 const PATCH_W    = FSIZE / PATCH_GRID               // 1.625 per patch
 const N_BLADES   = 3000                             // blades per patch (3D texture only)
 const BLADE_H    = 0.16
@@ -122,12 +122,12 @@ function GrassFloor() {
 
 // ─── Camera Controller ────────────────────────────────────────────────────────
 
-// Camera zooms in from behind/below looking slightly upward past the head,
+// Camera zooms in from the right/below looking slightly upward past the head,
 // so the character sits in the lower frame and the card floats above them.
 const ZOOM_OFFSET_Y    =  2.2   // camera height above ground
-const ZOOM_OFFSET_Z    =  5.0   // camera distance behind character
+const ZOOM_OFFSET_X    =  5.0   // camera distance to the right of character
 const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
-const DEFAULT_CAM_POS  = new THREE.Vector3(0, 8, 12)
+const DEFAULT_CAM_POS  = new THREE.Vector3(12, 8, 0)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
 function CameraController({
@@ -149,7 +149,7 @@ function CameraController({
       wasLocked.current  = true
       unlockSent.current = false
       const [fx, fy, fz] = focusPos
-      const goal     = new THREE.Vector3(fx, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_Z)
+      const goal     = new THREE.Vector3(fx + ZOOM_OFFSET_X, fy + ZOOM_OFFSET_Y, fz)
       const lookGoal = new THREE.Vector3(fx, fy + ZOOM_LOOKAT_Y, fz)
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
@@ -1031,7 +1031,7 @@ export default function MiiPlaza({
       const h = container.clientHeight
       // Project where the character's head will appear once the camera settles
       const tempCam = new THREE.PerspectiveCamera(48, w / h, 0.1, 100)
-      tempCam.position.set(fx, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_Z)
+      tempCam.position.set(fx + ZOOM_OFFSET_X, fy + ZOOM_OFFSET_Y, fz)
       tempCam.lookAt(fx, fy + ZOOM_LOOKAT_Y, fz)
       tempCam.updateMatrixWorld()
       const headNDC = new THREE.Vector3(fx, fy + 1.8, fz).project(tempCam)
