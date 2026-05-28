@@ -777,11 +777,24 @@ const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
   { pos: [-32, -5, -32], scale: 4.5 },
   { pos: [  0, -6, -45], scale: 5.0 },
   { pos: [ 32, -5, -32], scale: 4.5 },
-  // Horizon fill
-  { pos: [ 38, -5,  20], scale: 4.2 },
-  { pos: [-20, -6,  38], scale: 4.2 },
-  { pos: [-38, -5, -20], scale: 4.2 },
-  { pos: [ 20, -6, -38], scale: 4.2 },
+  // Far outer ring (radius ~60, y=-6 to -7)
+  { pos: [ 60, -6,   0], scale: 6.0 },
+  { pos: [ 42, -7,  42], scale: 5.5 },
+  { pos: [  0, -6,  60], scale: 6.0 },
+  { pos: [-42, -7,  42], scale: 5.5 },
+  { pos: [-60, -6,   0], scale: 6.0 },
+  { pos: [-42, -6, -42], scale: 5.5 },
+  { pos: [  0, -7, -60], scale: 6.0 },
+  { pos: [ 42, -6, -42], scale: 5.5 },
+  // Horizon ring (radius ~85, y=-7 to -8)
+  { pos: [ 85, -7,   0], scale: 7.5 },
+  { pos: [ 60, -8,  60], scale: 7.0 },
+  { pos: [  0, -7,  85], scale: 7.5 },
+  { pos: [-60, -8,  60], scale: 7.0 },
+  { pos: [-85, -7,   0], scale: 7.5 },
+  { pos: [-60, -7, -60], scale: 7.0 },
+  { pos: [  0, -8, -85], scale: 7.5 },
+  { pos: [ 60, -7, -60], scale: 7.0 },
 ]
 
 const PUFF_OFFSETS: [number, number, number][] = [
@@ -826,12 +839,27 @@ function CloudGroup({ pos, scale }: { pos: [number, number, number]; scale: numb
 }
 
 function Clouds() {
+  const fadeTex = useMemo(() => {
+    const size = 1024, c = size / 2
+    const cv  = document.createElement('canvas')
+    cv.width = cv.height = size
+    const ctx = cv.getContext('2d')!
+    const g = ctx.createRadialGradient(c, c, c * 0.05, c, c, c)
+    g.addColorStop(0.00, 'rgba(244,244,244,0.88)')
+    g.addColorStop(0.45, 'rgba(244,244,244,0.82)')
+    g.addColorStop(0.72, 'rgba(244,244,244,0.55)')
+    g.addColorStop(1.00, 'rgba(244,244,244,0.00)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, size, size)
+    return new THREE.CanvasTexture(cv)
+  }, [])
+
   return (
     <>
-      {/* Solid base fills gaps between puff groups */}
+      {/* Gradient base — opaque under spire, fades to transparent at horizon */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -4, 0]}>
-        <planeGeometry args={[400, 400]} />
-        <meshStandardMaterial color="#f0f0f0" transparent opacity={0.78} depthWrite={false} />
+        <planeGeometry args={[700, 700]} />
+        <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
       {CLOUD_DEFS.map((c, i) => (
         <CloudGroup key={i} pos={c.pos} scale={c.scale} />
