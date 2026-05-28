@@ -453,7 +453,9 @@ function PhysicsUpdater({
           phys.angVel.set(0, 0, 0)
           const impactSpeed = phys.vel.length()
           if (impactSpeed >= IMPACT_DAZE) {
-            // Keep tumble rotation — PhysicsUpdater will lerp it to face-down
+            // Snap immediately to face-forward fallen pose on impact
+            group.rotation.x = 0.62 + (Math.random() - 0.5) * 0.12
+            group.rotation.z = (Math.random() - 0.5) * 0.3
             setCharMode(uid, 'dazed')
           } else if (impactSpeed >= IMPACT_MAD) {
             group.rotation.x = 0
@@ -469,15 +471,13 @@ function PhysicsUpdater({
         group.position.copy(phys.pos)
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
-        // Lerp group toward a face-down slump (0.7 rad = 40° — toes barely in grass, hidden by blades)
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0.7, Math.min(1, delta * 4))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,   Math.min(1, delta * 3))
+        // Hold the fallen pose — rotation was snapped on landing, no lerp needed
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
       } else if (phys.mode === 'waking') {
         phys.modeTimer += delta
-        // Lerp group back to upright as they recover
+        // Lerp back to upright as they recover
         group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 1.8))
         group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 2.5))
         if (phys.modeTimer >= 1.5) {
