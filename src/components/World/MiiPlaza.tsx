@@ -536,8 +536,14 @@ function Scene({
     }
   }, [])
 
-  const handlePickupStart = useCallback((member: GroupMember, pos: [number, number, number]) => {
+  const handlePickupStart = useCallback((member: GroupMember) => {
     if (cameraLocked || draggingUid.current) return
+
+    // Always use the character's live position, not the stale spawn position
+    const group = charGroups.current.get(member.uid)
+    const pos: [number, number, number] = group
+      ? [group.position.x, group.position.y, group.position.z]
+      : [0, 0, 0]
 
     pendingPickup.current = { uid: member.uid, member, pos }
 
@@ -651,7 +657,7 @@ function Scene({
           onSelect={onSelect}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
-          onPickupStart={() => handlePickupStart(member, positions[i])}
+          onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
             else   charGroups.current.delete(uid)
