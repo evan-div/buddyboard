@@ -348,6 +348,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
 // ─── Physics / drag constants ─────────────────────────────────────────────────
 
 const HOLD_HEIGHT = 1.8
+const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
 const GRAVITY     = 26
 const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
@@ -382,7 +383,7 @@ function PhysicsUpdater({
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
-  const holdPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -HOLD_HEIGHT), [])
+  const holdPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -(HOLD_HEIGHT - HEAD_HEIGHT)), [])
   const prevCursor = useRef(new THREE.Vector3())
   const hitPoint   = useMemo(() => new THREE.Vector3(), [])
 
@@ -642,8 +643,8 @@ function Scene({
 
       const group = charGroups.current.get(pickup.uid)
       const startPos = group
-        ? group.position.clone().setY(HOLD_HEIGHT)
-        : new THREE.Vector3(pos[0], HOLD_HEIGHT, pos[2])
+        ? group.position.clone().setY(HOLD_HEIGHT - HEAD_HEIGHT)
+        : new THREE.Vector3(pos[0], HOLD_HEIGHT - HEAD_HEIGHT, pos[2])
 
       dragCursorVel.current.set(0, 0, 0)
       dragCursor.current.copy(startPos)

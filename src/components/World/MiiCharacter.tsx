@@ -264,13 +264,12 @@ export default function MiiCharacter({
     }
     // When returning to normal, pick a new walk target from current position
     if (dragMode === null && groupRef.current) {
-      const p = groupRef.current.position
       groupRef.current.rotation.x = 0
       groupRef.current.rotation.z = 0
       animState.current = 'walking'
       const angle  = Math.random() * Math.PI * 2
       const radius = 1.0 + Math.random() * (bounds * 0.85)
-      targetPos.current.set(p.x + Math.cos(angle) * radius, 0, p.z + Math.sin(angle) * radius)
+      targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
