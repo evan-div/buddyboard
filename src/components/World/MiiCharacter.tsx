@@ -464,8 +464,9 @@ export default function MiiCharacter({
       selectedTimer.current += delta
       const t = selectedTimer.current
 
-      // Always face the camera
-      let dy = -group.rotation.y
+      // Face toward the camera (45° isometric from +X+Z → character faces π/4)
+      const TARGET_FACING = Math.PI / 4
+      let dy = TARGET_FACING - group.rotation.y
       while (dy >  Math.PI) dy -= Math.PI * 2
       while (dy < -Math.PI) dy += Math.PI * 2
       group.rotation.y += dy * Math.min(1, 10 * delta)
