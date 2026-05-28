@@ -470,6 +470,64 @@ function PhysicsUpdater({
 
 // ─── 3D Scene ─────────────────────────────────────────────────────────────────
 
+// ─── Sky / Clouds ────────────────────────────────────────────────────────────
+
+const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
+  { pos: [-9, 9.5, -10], scale: 1.0 },
+  { pos: [  6, 11,  -13], scale: 1.3 },
+  { pos: [ -3, 10,  -16], scale: 0.85 },
+  { pos: [ 10,  9,   -8], scale: 0.7 },
+  { pos: [ -7, 12,  -20], scale: 1.15 },
+  { pos: [  1, 10.5, -6], scale: 0.65 },
+]
+
+const PUFF_OFFSETS: [number, number, number][] = [
+  [0, 0, 0],
+  [0.9, -0.15, 0.1],
+  [-0.85, -0.1, 0.05],
+  [0.4, 0.4, -0.1],
+  [-0.4, 0.35, 0.1],
+  [0, 0, 0.7],
+]
+const PUFF_SIZES = [0.9, 0.7, 0.65, 0.6, 0.55, 0.55]
+
+const cloudGeo = new THREE.SphereGeometry(1, 7, 5)
+const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, metalness: 0 })
+
+function CloudGroup({ pos, scale }: { pos: [number, number, number]; scale: number }) {
+  const groupRef = useRef<THREE.Group>(null)
+  const offset   = useRef(Math.random() * Math.PI * 2)
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return
+    groupRef.current.position.x = pos[0] + Math.sin(clock.elapsedTime * 0.04 + offset.current) * 1.5
+  })
+  return (
+    <group ref={groupRef} position={pos}>
+      {PUFF_OFFSETS.map((off, i) => (
+        <mesh
+          key={i}
+          geometry={cloudGeo}
+          material={cloudMat}
+          position={[off[0] * scale, off[1] * scale, off[2] * scale]}
+          scale={PUFF_SIZES[i] * scale}
+        />
+      ))}
+    </group>
+  )
+}
+
+function Clouds() {
+  return (
+    <>
+      {CLOUD_DEFS.map((c, i) => (
+        <CloudGroup key={i} pos={c.pos} scale={c.scale} />
+      ))}
+    </>
+  )
+}
+
+// ─── Scene ───────────────────────────────────────────────────────────────────
+
 function Scene({
   members,
   selectedUid,
@@ -642,10 +700,12 @@ function Scene({
 
   return (
     <>
+      <color attach="background" args={['#a8d8f0']} />
       <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
+      <Clouds />
       <GrassFloor />
       {members.map((member, i) => (
         <MiiCharacter
@@ -753,7 +813,7 @@ export default function MiiPlaza({
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: '#f5f2ec',
+        background: '#a8d8f0',
       }}
     >
       <Canvas
