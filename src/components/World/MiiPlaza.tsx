@@ -767,32 +767,27 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   return defs
 })()
 
-// Y-axis billboard: rotates around Y only so the cloud silhouette always reads from the side
+// Full-sphere billboard via THREE.Sprite — always faces the camera on every axis, no visible edges
 function CloudSprite({ pos, texture, width }: {
   pos: [number, number, number]
   texture: THREE.Texture
   width: number
 }) {
-  const ref    = useRef<THREE.Mesh>(null)
+  const ref    = useRef<THREE.Sprite>(null)
   const driftT = useRef(Math.random() * Math.PI * 2)
   const height = width * (1080 / 1920)  // preserve 16:9 SVG aspect ratio
 
-  useFrame(({ camera, clock }) => {
+  useFrame(({ clock }) => {
     if (!ref.current) return
     const t = clock.elapsedTime * 0.022 + driftT.current
     ref.current.position.x = pos[0] + Math.sin(t)       * 1.5
     ref.current.position.z = pos[2] + Math.cos(t * 0.6) * 1.2
-    ref.current.rotation.y = Math.atan2(
-      camera.position.x - ref.current.position.x,
-      camera.position.z - ref.current.position.z,
-    )
   })
 
   return (
-    <mesh ref={ref} position={pos}>
-      <planeGeometry args={[width, height]} />
-      <meshBasicMaterial map={texture} transparent alphaTest={0.01} depthWrite={false} side={THREE.DoubleSide} />
-    </mesh>
+    <sprite ref={ref} position={pos} scale={[width, height, 1]}>
+      <spriteMaterial map={texture} transparent alphaTest={0.01} depthWrite={false} />
+    </sprite>
   )
 }
 
@@ -1128,7 +1123,7 @@ export default function MiiPlaza({
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: 'linear-gradient(to bottom, #0d2244 0%, #1a5090 28%, #3a8ec0 58%, #72b8da 80%, #a8d8f0 100%)',
+        background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
       }}
     >
       <Canvas
