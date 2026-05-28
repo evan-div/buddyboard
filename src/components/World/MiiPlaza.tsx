@@ -988,8 +988,8 @@ function Scene({
         target={[0, 0.6, 0]}
         minDistance={3}
         maxDistance={20}
-        maxPolarAngle={Math.PI / 2.15}
-        enablePan
+        enableRotate={false}
+        enablePan={false}
         makeDefault
       />
     </>
