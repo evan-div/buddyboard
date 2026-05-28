@@ -122,12 +122,12 @@ function GrassFloor() {
 
 // ─── Camera Controller ────────────────────────────────────────────────────────
 
-// Camera zooms in from the right/below looking slightly upward past the head,
-// so the character sits in the lower frame and the card floats above them.
-const ZOOM_OFFSET_Y    =  2.2   // camera height above ground
-const ZOOM_OFFSET_X    =  5.0   // camera distance to the right of character
+// True 45° isometric default view — equal X and Z so the plaza reads as a diamond.
+// Zoom-in pulls the camera diagonally toward the character from the same angle.
+const ZOOM_OFFSET_Y    =  2.2   // camera height above character when zoomed
+const ZOOM_OFFSET_XZ   =  3.5   // equal X and Z diagonal offset when zoomed
 const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
-const DEFAULT_CAM_POS  = new THREE.Vector3(12, 8, 0)
+const DEFAULT_CAM_POS  = new THREE.Vector3(9, 15, 9)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
 function CameraController({
@@ -149,7 +149,7 @@ function CameraController({
       wasLocked.current  = true
       unlockSent.current = false
       const [fx, fy, fz] = focusPos
-      const goal     = new THREE.Vector3(fx + ZOOM_OFFSET_X, fy + ZOOM_OFFSET_Y, fz)
+      const goal     = new THREE.Vector3(fx + ZOOM_OFFSET_XZ, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_XZ)
       const lookGoal = new THREE.Vector3(fx, fy + ZOOM_LOOKAT_Y, fz)
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
@@ -987,7 +987,7 @@ function Scene({
         enabled={!cameraLocked}
         target={[0, 0.6, 0]}
         minDistance={3}
-        maxDistance={20}
+        maxDistance={28}
         enableRotate={false}
         enablePan={false}
         makeDefault
@@ -1030,8 +1030,8 @@ export default function MiiPlaza({
       const w = container.clientWidth
       const h = container.clientHeight
       // Project where the character's head will appear once the camera settles
-      const tempCam = new THREE.PerspectiveCamera(48, w / h, 0.1, 100)
-      tempCam.position.set(fx + ZOOM_OFFSET_X, fy + ZOOM_OFFSET_Y, fz)
+      const tempCam = new THREE.PerspectiveCamera(55, w / h, 0.1, 100)
+      tempCam.position.set(fx + ZOOM_OFFSET_XZ, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_XZ)
       tempCam.lookAt(fx, fy + ZOOM_LOOKAT_Y, fz)
       tempCam.updateMatrixWorld()
       const headNDC = new THREE.Vector3(fx, fy + 1.8, fz).project(tempCam)
@@ -1066,7 +1066,7 @@ export default function MiiPlaza({
       }}
     >
       <Canvas
-        camera={{ position: [12, 8, 0], fov: 48 }}
+        camera={{ position: [9, 15, 9], fov: 55 }}
         gl={{ antialias: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
