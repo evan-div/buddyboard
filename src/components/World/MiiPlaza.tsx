@@ -725,36 +725,59 @@ function PhysicsUpdater({
 
 // ─── Sky / Clouds ────────────────────────────────────────────────────────────
 
-// Cloud layer wraps around the spire — inner ring hugs the plaza edge,
-// middle/outer rings extend the cloud horizon in all directions.
+// Clouds sit BELOW the grass level, wrapping around the spire mid-section.
+// Spire dirt runs y=0→-7, so cloud layer targets y=-4 to y=-1.
 const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
-  // Inner ring — just outside the plaza edge (radius ~16)
-  { pos: [ 16,  1,   0], scale: 2.2 },
-  { pos: [ 11,  2,  11], scale: 2.0 },
-  { pos: [  0,  1,  16], scale: 2.2 },
-  { pos: [-11,  2,  11], scale: 2.0 },
-  { pos: [-16,  1,   0], scale: 2.2 },
-  { pos: [-11,  1, -11], scale: 2.0 },
-  { pos: [  0,  2, -16], scale: 2.2 },
-  { pos: [ 11,  1, -11], scale: 2.0 },
-  // Middle ring (radius ~22)
-  { pos: [ 22,  0,   0], scale: 2.8 },
-  { pos: [ 16,  0,  16], scale: 2.5 },
-  { pos: [  0, -1,  22], scale: 2.8 },
-  { pos: [-16,  0,  16], scale: 2.5 },
-  { pos: [-22,  1,   0], scale: 2.8 },
-  { pos: [-16, -1, -16], scale: 2.5 },
-  { pos: [  0,  0, -22], scale: 2.8 },
-  { pos: [ 16, -1, -16], scale: 2.5 },
-  // Outer ring (radius ~30)
-  { pos: [ 30, -1,   0], scale: 3.5 },
-  { pos: [ 21, -2,  21], scale: 3.0 },
-  { pos: [  0, -1,  30], scale: 3.5 },
-  { pos: [-21, -2,  21], scale: 3.0 },
-  { pos: [-30,  0,   0], scale: 3.5 },
-  { pos: [-21, -1, -21], scale: 3.0 },
-  { pos: [  0, -2, -30], scale: 3.5 },
-  { pos: [ 21, -1, -21], scale: 3.0 },
+  // Tight ring hugging the spire sides (radius ~14-16)
+  { pos: [ 14, -1,   0], scale: 2.5 },
+  { pos: [ 10, -2,  10], scale: 2.3 },
+  { pos: [  0, -1,  14], scale: 2.5 },
+  { pos: [-10, -2,  10], scale: 2.3 },
+  { pos: [-14, -1,   0], scale: 2.5 },
+  { pos: [-10, -1, -10], scale: 2.3 },
+  { pos: [  0, -2, -14], scale: 2.5 },
+  { pos: [ 10, -1, -10], scale: 2.3 },
+  // Inner ring (radius ~20)
+  { pos: [ 20, -2,   0], scale: 3.0 },
+  { pos: [ 14, -3,  14], scale: 2.8 },
+  { pos: [  0, -2,  20], scale: 3.0 },
+  { pos: [-14, -3,  14], scale: 2.8 },
+  { pos: [-20, -2,   0], scale: 3.0 },
+  { pos: [-14, -2, -14], scale: 2.8 },
+  { pos: [  0, -3, -20], scale: 3.0 },
+  { pos: [ 14, -2, -14], scale: 2.8 },
+  // Filler between rings
+  { pos: [ 17, -2,  10], scale: 2.6 },
+  { pos: [-10, -3,  17], scale: 2.6 },
+  { pos: [-17, -2, -10], scale: 2.6 },
+  { pos: [ 10, -3, -17], scale: 2.6 },
+  // Middle ring (radius ~30)
+  { pos: [ 30, -3,   0], scale: 3.8 },
+  { pos: [ 21, -4,  21], scale: 3.5 },
+  { pos: [  0, -3,  30], scale: 3.8 },
+  { pos: [-21, -4,  21], scale: 3.5 },
+  { pos: [-30, -3,   0], scale: 3.8 },
+  { pos: [-21, -3, -21], scale: 3.5 },
+  { pos: [  0, -4, -30], scale: 3.8 },
+  { pos: [ 21, -3, -21], scale: 3.5 },
+  // Outer ring (radius ~45)
+  { pos: [ 45, -4,   0], scale: 4.5 },
+  { pos: [ 32, -5,  32], scale: 4.2 },
+  { pos: [  0, -4,  45], scale: 4.5 },
+  { pos: [-32, -5,  32], scale: 4.2 },
+  { pos: [-45, -4,   0], scale: 4.5 },
+  { pos: [-32, -4, -32], scale: 4.2 },
+  { pos: [  0, -5, -45], scale: 4.5 },
+  { pos: [ 32, -4, -32], scale: 4.2 },
+  // Extra fill to close gaps
+  { pos: [ 26, -3,  10], scale: 3.2 },
+  { pos: [ -8, -4,  26], scale: 3.2 },
+  { pos: [-26, -3,  -8], scale: 3.2 },
+  { pos: [  8, -4, -26], scale: 3.2 },
+  { pos: [ 38, -4,  18], scale: 4.0 },
+  { pos: [-18, -5,  38], scale: 4.0 },
+  { pos: [-38, -4, -18], scale: 4.0 },
+  { pos: [ 18, -5, -38], scale: 4.0 },
 ]
 
 const PUFF_OFFSETS: [number, number, number][] = [
@@ -779,7 +802,9 @@ function CloudGroup({ pos, scale }: { pos: [number, number, number]; scale: numb
   const offset   = useRef(Math.random() * Math.PI * 2)
   useFrame(({ clock }) => {
     if (!groupRef.current) return
-    groupRef.current.position.x = pos[0] + Math.sin(clock.elapsedTime * 0.04 + offset.current) * 1.5
+    const t = clock.elapsedTime * 0.035 + offset.current
+    groupRef.current.position.x = pos[0] + Math.sin(t) * 2.0
+    groupRef.current.position.z = pos[2] + Math.cos(t * 0.7) * 1.5
   })
   return (
     <group ref={groupRef} position={pos}>
@@ -1102,7 +1127,7 @@ export default function MiiPlaza({
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: 'linear-gradient(to bottom, #1a3060 0%, #3d4890 22%, #b04870 48%, #e87040 68%, #f4a830 85%, #ffd87a 100%)',
+        background: 'linear-gradient(to bottom, #0d2244 0%, #1a5090 28%, #3a8ec0 58%, #72b8da 80%, #a8d8f0 100%)',
       }}
     >
       <Canvas
