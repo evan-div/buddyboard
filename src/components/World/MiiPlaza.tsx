@@ -1141,7 +1141,7 @@ export default function MiiPlaza({
           pointerEvents: 'none',
           whiteSpace: 'nowrap',
         }}>
-          Hold to carry · Drag to rotate · Scroll to zoom · Tap a Mii to interact
+          Hold to carry · Scroll to zoom · Tap a Mii to interact
         </div>
       )}
     </div>
