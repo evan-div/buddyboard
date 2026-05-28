@@ -109,7 +109,7 @@ function GrassFloor() {
   return (
     <group>
       {/* Solid checkerboard base — canvas texture guarantees full coverage */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
         <planeGeometry args={[FSIZE, FSIZE]} />
         <meshStandardMaterial map={baseTex} roughness={0.95} />
       </mesh>
