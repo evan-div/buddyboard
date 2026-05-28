@@ -725,59 +725,63 @@ function PhysicsUpdater({
 
 // ─── Sky / Clouds ────────────────────────────────────────────────────────────
 
-// Clouds sit BELOW the grass level, wrapping around the spire mid-section.
-// Spire dirt runs y=0→-7, so cloud layer targets y=-4 to y=-1.
+// Clouds sit well below grass level, wrapping mid-spire (dirt runs y=0→-7).
 const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
-  // Tight ring hugging the spire sides (radius ~14-16)
-  { pos: [ 14, -1,   0], scale: 2.5 },
-  { pos: [ 10, -2,  10], scale: 2.3 },
-  { pos: [  0, -1,  14], scale: 2.5 },
-  { pos: [-10, -2,  10], scale: 2.3 },
-  { pos: [-14, -1,   0], scale: 2.5 },
-  { pos: [-10, -1, -10], scale: 2.3 },
-  { pos: [  0, -2, -14], scale: 2.5 },
-  { pos: [ 10, -1, -10], scale: 2.3 },
-  // Inner ring (radius ~20)
-  { pos: [ 20, -2,   0], scale: 3.0 },
-  { pos: [ 14, -3,  14], scale: 2.8 },
-  { pos: [  0, -2,  20], scale: 3.0 },
-  { pos: [-14, -3,  14], scale: 2.8 },
-  { pos: [-20, -2,   0], scale: 3.0 },
-  { pos: [-14, -2, -14], scale: 2.8 },
-  { pos: [  0, -3, -20], scale: 3.0 },
-  { pos: [ 14, -2, -14], scale: 2.8 },
-  // Filler between rings
-  { pos: [ 17, -2,  10], scale: 2.6 },
-  { pos: [-10, -3,  17], scale: 2.6 },
-  { pos: [-17, -2, -10], scale: 2.6 },
-  { pos: [ 10, -3, -17], scale: 2.6 },
-  // Middle ring (radius ~30)
-  { pos: [ 30, -3,   0], scale: 3.8 },
-  { pos: [ 21, -4,  21], scale: 3.5 },
-  { pos: [  0, -3,  30], scale: 3.8 },
-  { pos: [-21, -4,  21], scale: 3.5 },
-  { pos: [-30, -3,   0], scale: 3.8 },
-  { pos: [-21, -3, -21], scale: 3.5 },
-  { pos: [  0, -4, -30], scale: 3.8 },
-  { pos: [ 21, -3, -21], scale: 3.5 },
-  // Outer ring (radius ~45)
-  { pos: [ 45, -4,   0], scale: 4.5 },
-  { pos: [ 32, -5,  32], scale: 4.2 },
-  { pos: [  0, -4,  45], scale: 4.5 },
-  { pos: [-32, -5,  32], scale: 4.2 },
-  { pos: [-45, -4,   0], scale: 4.5 },
-  { pos: [-32, -4, -32], scale: 4.2 },
-  { pos: [  0, -5, -45], scale: 4.5 },
-  { pos: [ 32, -4, -32], scale: 4.2 },
-  // Extra fill to close gaps
-  { pos: [ 26, -3,  10], scale: 3.2 },
-  { pos: [ -8, -4,  26], scale: 3.2 },
-  { pos: [-26, -3,  -8], scale: 3.2 },
-  { pos: [  8, -4, -26], scale: 3.2 },
-  { pos: [ 38, -4,  18], scale: 4.0 },
-  { pos: [-18, -5,  38], scale: 4.0 },
-  { pos: [-38, -4, -18], scale: 4.0 },
-  { pos: [ 18, -5, -38], scale: 4.0 },
+  // Tight on the spire edge (radius ~13-15, y=-2 to -3)
+  { pos: [ 13, -2,   0], scale: 2.8 },
+  { pos: [  9, -3,   9], scale: 2.6 },
+  { pos: [  0, -2,  13], scale: 2.8 },
+  { pos: [ -9, -3,   9], scale: 2.6 },
+  { pos: [-13, -2,   0], scale: 2.8 },
+  { pos: [ -9, -2,  -9], scale: 2.6 },
+  { pos: [  0, -3, -13], scale: 2.8 },
+  { pos: [  9, -2,  -9], scale: 2.6 },
+  // Second ring (radius ~20, y=-3 to -4)
+  { pos: [ 20, -3,   0], scale: 3.2 },
+  { pos: [ 14, -4,  14], scale: 3.0 },
+  { pos: [  0, -3,  20], scale: 3.2 },
+  { pos: [-14, -4,  14], scale: 3.0 },
+  { pos: [-20, -3,   0], scale: 3.2 },
+  { pos: [-14, -3, -14], scale: 3.0 },
+  { pos: [  0, -4, -20], scale: 3.2 },
+  { pos: [ 14, -3, -14], scale: 3.0 },
+  // Gap fillers between rings
+  { pos: [ 17, -3,   9], scale: 2.9 },
+  { pos: [ -9, -4,  17], scale: 2.9 },
+  { pos: [-17, -3,  -9], scale: 2.9 },
+  { pos: [  9, -4, -17], scale: 2.9 },
+  { pos: [ 17, -4,  -7], scale: 2.8 },
+  { pos: [ -7, -3,  17], scale: 2.8 },
+  { pos: [-17, -4,   7], scale: 2.8 },
+  { pos: [  7, -3, -17], scale: 2.8 },
+  // Middle ring (radius ~30, y=-4 to -5)
+  { pos: [ 30, -4,   0], scale: 4.0 },
+  { pos: [ 21, -5,  21], scale: 3.8 },
+  { pos: [  0, -4,  30], scale: 4.0 },
+  { pos: [-21, -5,  21], scale: 3.8 },
+  { pos: [-30, -4,   0], scale: 4.0 },
+  { pos: [-21, -4, -21], scale: 3.8 },
+  { pos: [  0, -5, -30], scale: 4.0 },
+  { pos: [ 21, -4, -21], scale: 3.8 },
+  // Middle filler
+  { pos: [ 26, -4,  13], scale: 3.4 },
+  { pos: [-13, -5,  26], scale: 3.4 },
+  { pos: [-26, -4, -13], scale: 3.4 },
+  { pos: [ 13, -5, -26], scale: 3.4 },
+  // Outer ring (radius ~45, y=-5 to -6)
+  { pos: [ 45, -5,   0], scale: 5.0 },
+  { pos: [ 32, -6,  32], scale: 4.5 },
+  { pos: [  0, -5,  45], scale: 5.0 },
+  { pos: [-32, -6,  32], scale: 4.5 },
+  { pos: [-45, -5,   0], scale: 5.0 },
+  { pos: [-32, -5, -32], scale: 4.5 },
+  { pos: [  0, -6, -45], scale: 5.0 },
+  { pos: [ 32, -5, -32], scale: 4.5 },
+  // Horizon fill
+  { pos: [ 38, -5,  20], scale: 4.2 },
+  { pos: [-20, -6,  38], scale: 4.2 },
+  { pos: [-38, -5, -20], scale: 4.2 },
+  { pos: [ 20, -6, -38], scale: 4.2 },
 ]
 
 const PUFF_OFFSETS: [number, number, number][] = [
@@ -824,6 +828,11 @@ function CloudGroup({ pos, scale }: { pos: [number, number, number]; scale: numb
 function Clouds() {
   return (
     <>
+      {/* Solid base fills gaps between puff groups */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -4, 0]}>
+        <planeGeometry args={[400, 400]} />
+        <meshStandardMaterial color="#f0f0f0" transparent opacity={0.78} depthWrite={false} />
+      </mesh>
       {CLOUD_DEFS.map((c, i) => (
         <CloudGroup key={i} pos={c.pos} scale={c.scale} />
       ))}
