@@ -124,7 +124,7 @@ function GrassFloor() {
 
 // True 45° isometric default view — equal X and Z so the plaza reads as a diamond.
 // Zoom-in pulls the camera diagonally toward the character from the same angle.
-const ZOOM_OFFSET_Y    =  2.2   // camera height above character when zoomed
+const ZOOM_OFFSET_Y    =  3.5   // camera height above character when zoomed
 const ZOOM_OFFSET_XZ   =  3.5   // equal X and Z diagonal offset when zoomed
 const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
 const DEFAULT_CAM_POS  = new THREE.Vector3(9, 8, 9)
@@ -618,9 +618,11 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, hitPoint.x, 0.14)
+          const clampedX = THREE.MathUtils.clamp(hitPoint.x, -WALL_BOUND, WALL_BOUND)
+          const clampedZ = THREE.MathUtils.clamp(hitPoint.z, -WALL_BOUND, WALL_BOUND)
+          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, clampedX, 0.14)
           phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
-          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, hitPoint.z, 0.14)
+          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, clampedZ, 0.14)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
