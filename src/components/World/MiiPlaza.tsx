@@ -358,6 +358,7 @@ interface PhysState {
   mode: DragMode
   pos: THREE.Vector3
   vel: THREE.Vector3
+  angVel: THREE.Vector3
   modeTimer: number
   gentleDrop: boolean
 }
@@ -408,6 +409,9 @@ function PhysicsUpdater({
         if (phys && group) {
           phys.pos.lerp(hitPoint, 0.14)
           group.position.copy(phys.pos)
+          // Tilt body to follow drag direction — feels like hauling dead weight
+          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
+          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, -dragCursorVel.current.x * 0.022, 0.12)
         }
       }
     }
@@ -422,21 +426,33 @@ function PhysicsUpdater({
         phys.vel.y -= GRAVITY * delta
         phys.pos.addScaledVector(phys.vel, delta)
 
+        // Tumble: apply angular velocity to group rotation
+        group.rotation.x += phys.angVel.x * delta
+        group.rotation.y += phys.angVel.y * delta
+        group.rotation.z += phys.angVel.z * delta
+        const angDrag = Math.pow(0.984, delta * 60)
+        phys.angVel.multiplyScalar(angDrag)
+
         // Wall collisions (x and z)
         if (Math.abs(phys.pos.x) > WALL_BOUND) {
           phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
           phys.vel.x *= -0.1
           phys.vel.z *= 0.6
+          phys.angVel.z *= -0.5
         }
         if (Math.abs(phys.pos.z) > WALL_BOUND) {
           phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
           phys.vel.z *= -0.1
           phys.vel.x *= 0.6
+          phys.angVel.x *= -0.5
         }
 
         // Ground collision
         if (phys.pos.y <= 0) {
           phys.pos.y = 0
+          phys.angVel.set(0, 0, 0)
+          group.rotation.x = 0
+          group.rotation.z = 0
           const impactSpeed = phys.vel.length()
           if (impactSpeed >= IMPACT_DAZE) {
             setCharMode(uid, 'dazed')
@@ -579,12 +595,14 @@ function Scene({
         return next
       })
     } else {
-      const pos = existing?.pos ?? (charGroups.current.get(uid)?.position.clone() ?? new THREE.Vector3())
-      const vel = existing?.vel ?? new THREE.Vector3()
+      const pos    = existing?.pos    ?? (charGroups.current.get(uid)?.position.clone() ?? new THREE.Vector3())
+      const vel    = existing?.vel    ?? new THREE.Vector3()
+      const angVel = existing?.angVel ?? new THREE.Vector3()
       physicsMap.current.set(uid, {
         mode,
         pos,
         vel,
+        angVel,
         modeTimer: 0,
         gentleDrop: false,
       })
@@ -625,6 +643,7 @@ function Scene({
         mode: 'held',
         pos: startPos,
         vel: new THREE.Vector3(),
+        angVel: new THREE.Vector3(),
         modeTimer: 0,
         gentleDrop: false,
       })
@@ -667,6 +686,11 @@ function Scene({
             Math.max(2, speed * 0.22),
             dragCursorVel.current.z,
           )
+          phys.angVel.set(
+            (Math.random() - 0.5) * speed * 0.55,
+            (Math.random() - 0.5) * speed * 0.30,
+            (Math.random() - 0.5) * speed * 0.70,
+          )
           phys.mode = 'flying'
           setDragModeMap(prev => {
             const next = new Map(prev)
@@ -679,8 +703,8 @@ function Scene({
         const phys = physicsMap.current.get(uid)
         if (phys) {
           phys.gentleDrop = true
-          // Drop to ground gently
           phys.vel.set(0, -2, 0)
+          phys.angVel.set(0, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 1.5)
           phys.mode = 'flying'
           setDragModeMap(prev => {
             const next = new Map(prev)

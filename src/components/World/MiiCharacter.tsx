@@ -265,6 +265,8 @@ export default function MiiCharacter({
     // When returning to normal, pick a new walk target from current position
     if (dragMode === null && groupRef.current) {
       const p = groupRef.current.position
+      groupRef.current.rotation.x = 0
+      groupRef.current.rotation.z = 0
       animState.current = 'walking'
       const angle  = Math.random() * Math.PI * 2
       const radius = 1.0 + Math.random() * (bounds * 0.85)
@@ -314,28 +316,27 @@ export default function MiiCharacter({
 
     // ── Drag mode: flying ────────────────────────────────────────────────────
     if (dragMode === 'flying') {
-      dragTimer.current += delta
-      const t = dragTimer.current
-      // Wild chaotic flailing
+      // Limbs fling outward by inertia — spread-eagle ragdoll pose.
+      // The whole-body tumble comes from group.rotation set in MiiPlaza.
       if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = Math.sin(t * 14.0 + 0.0) * 1.4
-        leftArmRef.current.rotation.z  = Math.sin(t * 11.0 + 1.0) * 1.0
+        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -0.25, 0.12)
+        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.4,  0.12)
       }
       if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = Math.sin(t * 13.0 + 2.0) * 1.4
-        rightArmRef.current.rotation.z = Math.sin(t * 15.0 + 0.5) * 1.0
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -0.25, 0.12)
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,   1.4, 0.12)
       }
       if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = Math.sin(t * 16.0 + 1.2) * 1.2
-        leftLegRef.current.rotation.z  = Math.sin(t * 10.0 + 3.0) * 0.4
+        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  -0.3, 0.12)
+        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  -0.4, 0.12)
       }
       if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = Math.sin(t * 15.0 + 2.5) * 1.2
-        rightLegRef.current.rotation.z = Math.sin(t * 12.0 + 0.8) * 0.4
+        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, -0.3, 0.12)
+        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z,   0.4, 0.12)
       }
-      // Slow body spin
       if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.z = t * 2.5
+        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.1)
+        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.1)
       }
       return
     }
