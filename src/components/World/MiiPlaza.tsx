@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar } from '@/lib/firestore'
@@ -725,126 +725,86 @@ function PhysicsUpdater({
 
 // ─── Sky / Clouds ────────────────────────────────────────────────────────────
 
-// Clouds sit well below grass level, wrapping mid-spire (dirt runs y=0→-7).
-const CLOUD_DEFS: { pos: [number, number, number]; scale: number }[] = [
-  // Tight on the spire edge (radius ~13-15, y=-2 to -3)
-  { pos: [ 13, -2,   0], scale: 2.8 },
-  { pos: [  9, -3,   9], scale: 2.6 },
-  { pos: [  0, -2,  13], scale: 2.8 },
-  { pos: [ -9, -3,   9], scale: 2.6 },
-  { pos: [-13, -2,   0], scale: 2.8 },
-  { pos: [ -9, -2,  -9], scale: 2.6 },
-  { pos: [  0, -3, -13], scale: 2.8 },
-  { pos: [  9, -2,  -9], scale: 2.6 },
-  // Second ring (radius ~20, y=-3 to -4)
-  { pos: [ 20, -3,   0], scale: 3.2 },
-  { pos: [ 14, -4,  14], scale: 3.0 },
-  { pos: [  0, -3,  20], scale: 3.2 },
-  { pos: [-14, -4,  14], scale: 3.0 },
-  { pos: [-20, -3,   0], scale: 3.2 },
-  { pos: [-14, -3, -14], scale: 3.0 },
-  { pos: [  0, -4, -20], scale: 3.2 },
-  { pos: [ 14, -3, -14], scale: 3.0 },
-  // Gap fillers between rings
-  { pos: [ 17, -3,   9], scale: 2.9 },
-  { pos: [ -9, -4,  17], scale: 2.9 },
-  { pos: [-17, -3,  -9], scale: 2.9 },
-  { pos: [  9, -4, -17], scale: 2.9 },
-  { pos: [ 17, -4,  -7], scale: 2.8 },
-  { pos: [ -7, -3,  17], scale: 2.8 },
-  { pos: [-17, -4,   7], scale: 2.8 },
-  { pos: [  7, -3, -17], scale: 2.8 },
-  // Middle ring (radius ~30, y=-4 to -5)
-  { pos: [ 30, -4,   0], scale: 4.0 },
-  { pos: [ 21, -5,  21], scale: 3.8 },
-  { pos: [  0, -4,  30], scale: 4.0 },
-  { pos: [-21, -5,  21], scale: 3.8 },
-  { pos: [-30, -4,   0], scale: 4.0 },
-  { pos: [-21, -4, -21], scale: 3.8 },
-  { pos: [  0, -5, -30], scale: 4.0 },
-  { pos: [ 21, -4, -21], scale: 3.8 },
-  // Middle filler
-  { pos: [ 26, -4,  13], scale: 3.4 },
-  { pos: [-13, -5,  26], scale: 3.4 },
-  { pos: [-26, -4, -13], scale: 3.4 },
-  { pos: [ 13, -5, -26], scale: 3.4 },
-  // Outer ring (radius ~45, y=-5 to -6)
-  { pos: [ 45, -5,   0], scale: 5.0 },
-  { pos: [ 32, -6,  32], scale: 4.5 },
-  { pos: [  0, -5,  45], scale: 5.0 },
-  { pos: [-32, -6,  32], scale: 4.5 },
-  { pos: [-45, -5,   0], scale: 5.0 },
-  { pos: [-32, -5, -32], scale: 4.5 },
-  { pos: [  0, -6, -45], scale: 5.0 },
-  { pos: [ 32, -5, -32], scale: 4.5 },
-  // Far outer ring (radius ~60, y=-6 to -7)
-  { pos: [ 60, -6,   0], scale: 6.0 },
-  { pos: [ 42, -7,  42], scale: 5.5 },
-  { pos: [  0, -6,  60], scale: 6.0 },
-  { pos: [-42, -7,  42], scale: 5.5 },
-  { pos: [-60, -6,   0], scale: 6.0 },
-  { pos: [-42, -6, -42], scale: 5.5 },
-  { pos: [  0, -7, -60], scale: 6.0 },
-  { pos: [ 42, -6, -42], scale: 5.5 },
-  // Horizon ring (radius ~85, y=-7 to -8)
-  { pos: [ 85, -7,   0], scale: 7.5 },
-  { pos: [ 60, -8,  60], scale: 7.0 },
-  { pos: [  0, -7,  85], scale: 7.5 },
-  { pos: [-60, -8,  60], scale: 7.0 },
-  { pos: [-85, -7,   0], scale: 7.5 },
-  { pos: [-60, -7, -60], scale: 7.0 },
-  { pos: [  0, -8, -85], scale: 7.5 },
-  { pos: [ 60, -7, -60], scale: 7.0 },
-]
+// Seeded LCG so sprite positions are deterministic across renders
+function seededRandom(seed: number) {
+  let s = seed | 0
+  return () => {
+    s = (Math.imul(1664525, s) + 1013904223) | 0
+    return (s >>> 0) / 4294967295
+  }
+}
 
-const PUFF_OFFSETS: [number, number, number][] = [
-  [0, 0, 0],
-  [0.9, -0.15,  0.1],
-  [-0.85, -0.1, 0.05],
-  [0.4,   0.4, -0.1],
-  [-0.4,  0.35, 0.1],
-  [0,     0,    0.7],
-  [0.5,  -0.1, -0.6],
-  [-0.5, -0.2, -0.65],
-  [0.2,   0.15, 1.0],
-  [-0.2,  0.2, -1.0],
-]
-const PUFF_SIZES = [0.9, 0.7, 0.65, 0.6, 0.55, 0.55, 0.5, 0.5, 0.45, 0.45]
+interface SpriteDef {
+  pos: [number, number, number]
+  texIdx: number
+  width: number
+}
 
-const cloudGeo = new THREE.SphereGeometry(1, 7, 5)
-const cloudMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, metalness: 0 })
-
-function CloudGroup({ pos, scale }: { pos: [number, number, number]; scale: number }) {
-  const groupRef = useRef<THREE.Group>(null)
-  const offset   = useRef(Math.random() * Math.PI * 2)
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return
-    const t = clock.elapsedTime * 0.035 + offset.current
-    groupRef.current.position.x = pos[0] + Math.sin(t) * 2.0
-    groupRef.current.position.z = pos[2] + Math.cos(t * 0.7) * 1.5
+// 114 sprites in 5 concentric rings — inner ring hugs the spire, outer fades to horizon
+const SPRITE_DEFS: SpriteDef[] = (() => {
+  const r    = seededRandom(42)
+  const defs: SpriteDef[] = []
+  const rings = [
+    { count: 20, r0: 13, r1: 18, y0: -3.0, y1: -4.0, w0:  8, w1: 14 },
+    { count: 24, r0: 19, r1: 28, y0: -4.0, y1: -5.5, w0: 11, w1: 18 },
+    { count: 26, r0: 29, r1: 43, y0: -5.0, y1: -7.0, w0: 15, w1: 24 },
+    { count: 24, r0: 44, r1: 65, y0: -6.0, y1: -8.0, w0: 20, w1: 32 },
+    { count: 20, r0: 66, r1: 95, y0: -7.0, y1: -9.0, w0: 26, w1: 44 },
+  ]
+  rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
+    for (let i = 0; i < count; i++) {
+      const angle  = (i / count) * Math.PI * 2 + r() * 0.45 - 0.225
+      const radius = r0 + r() * (r1 - r0)
+      const y      = y0 + r() * (y1 - y0)
+      const width  = w0 + r() * (w1 - w0)
+      defs.push({
+        pos: [Math.cos(angle) * radius, y, Math.sin(angle) * radius] as [number, number, number],
+        texIdx: Math.floor(r() * 3),
+        width,
+      })
+    }
   })
+  return defs
+})()
+
+// Y-axis billboard: rotates around Y only so the cloud silhouette always reads from the side
+function CloudSprite({ pos, texture, width }: {
+  pos: [number, number, number]
+  texture: THREE.Texture
+  width: number
+}) {
+  const ref    = useRef<THREE.Mesh>(null)
+  const driftT = useRef(Math.random() * Math.PI * 2)
+  const height = width * (1080 / 1920)  // preserve 16:9 SVG aspect ratio
+
+  useFrame(({ camera, clock }) => {
+    if (!ref.current) return
+    const t = clock.elapsedTime * 0.022 + driftT.current
+    ref.current.position.x = pos[0] + Math.sin(t)       * 1.5
+    ref.current.position.z = pos[2] + Math.cos(t * 0.6) * 1.2
+    ref.current.rotation.y = Math.atan2(
+      camera.position.x - ref.current.position.x,
+      camera.position.z - ref.current.position.z,
+    )
+  })
+
   return (
-    <group ref={groupRef} position={pos}>
-      {PUFF_OFFSETS.map((off, i) => (
-        <mesh
-          key={i}
-          geometry={cloudGeo}
-          material={cloudMat}
-          position={[off[0] * scale, off[1] * scale, off[2] * scale]}
-          scale={PUFF_SIZES[i] * scale}
-        />
-      ))}
-    </group>
+    <mesh ref={ref} position={pos}>
+      <planeGeometry args={[width, height]} />
+      <meshBasicMaterial map={texture} transparent alphaTest={0.01} depthWrite={false} side={THREE.DoubleSide} />
+    </mesh>
   )
 }
 
 function Clouds() {
+  const [tex1, tex2, tex3] = useTexture(['/Cloud1.svg', '/Cloud2.svg', '/Cloud3.svg'])
+
   const fadeTex = useMemo(() => {
     const size = 1024, c = size / 2
-    const cv  = document.createElement('canvas')
-    cv.width = cv.height = size
-    const ctx = cv.getContext('2d')!
-    const g = ctx.createRadialGradient(c, c, c * 0.05, c, c, c)
+    const cv   = document.createElement('canvas')
+    cv.width   = cv.height = size
+    const ctx  = cv.getContext('2d')!
+    const g    = ctx.createRadialGradient(c, c, c * 0.05, c, c, c)
     g.addColorStop(0.00, 'rgba(244,244,244,0.88)')
     g.addColorStop(0.45, 'rgba(244,244,244,0.82)')
     g.addColorStop(0.72, 'rgba(244,244,244,0.55)')
@@ -854,6 +814,8 @@ function Clouds() {
     return new THREE.CanvasTexture(cv)
   }, [])
 
+  const texArr = [tex1, tex2, tex3]
+
   return (
     <>
       {/* Gradient base — opaque under spire, fades to transparent at horizon */}
@@ -861,8 +823,8 @@ function Clouds() {
         <planeGeometry args={[700, 700]} />
         <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
-      {CLOUD_DEFS.map((c, i) => (
-        <CloudGroup key={i} pos={c.pos} scale={c.scale} />
+      {SPRITE_DEFS.map((def, i) => (
+        <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
     </>
   )
@@ -1055,7 +1017,9 @@ function Scene({
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
-      <Clouds />
+      <Suspense fallback={null}>
+        <Clouds />
+      </Suspense>
       <GrassFloor />
       {members.map((member, i) => (
         <MiiCharacter
