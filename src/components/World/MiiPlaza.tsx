@@ -469,9 +469,9 @@ function PhysicsUpdater({
         group.position.copy(phys.pos)
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
-        // Lerp group toward a face-down sprawl
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 1.15, Math.min(1, delta * 4))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,    Math.min(1, delta * 3))
+        // Lerp group toward a face-down slump (0.7 rad = 40° — toes barely in grass, hidden by blades)
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0.7, Math.min(1, delta * 4))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,   Math.min(1, delta * 3))
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }

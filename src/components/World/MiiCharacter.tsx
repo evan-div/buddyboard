@@ -344,29 +344,33 @@ export default function MiiCharacter({
     // ── Drag mode: dazed ────────────────────────────────────────────────────
     if (dragMode === 'dazed') {
       dragTimer.current += delta
-      // Group is lerping to face-down in MiiPlaza — keep body neutral, limbs splayed
+      // Group tilts to ~40° face-down in MiiPlaza. Body stays neutral so nothing
+      // compounds the tilt. Limbs hang limp alongside the body — no starfish.
       if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.07)
-        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.07)
+        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.08)
+        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.08)
       }
       if (headRef.current) {
-        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0, 0.07)
+        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0.25, 0.06)
+        headRef.current.rotation.z = THREE.MathUtils.lerp(headRef.current.rotation.z, 0.18, 0.06)
       }
+      // Arms dangle limp — slight forward droop, z close to zero so they don't spread
       if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0,    0.07)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.3, 0.07)
+        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0.25, 0.07)
+        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -0.18, 0.07)
       }
       if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0,   0.07)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  1.3, 0.07)
+        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0.25, 0.07)
+        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.18, 0.07)
       }
+      // Legs hang straight — the 40° group tilt puts them on the ground naturally
       if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0,    0.07)
-        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  -0.3, 0.07)
+        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.08)
+        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  0, 0.08)
       }
       if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0,   0.07)
-        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z,  0.3, 0.07)
+        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.08)
+        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z, 0, 0.08)
       }
       return
     }
