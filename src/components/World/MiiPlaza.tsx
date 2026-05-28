@@ -348,7 +348,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
 // ─── Physics / drag constants ─────────────────────────────────────────────────
 
 const HOLD_HEIGHT = 1.8
-const GRAVITY     = 14
+const GRAVITY     = 26
 const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 10
@@ -406,7 +406,7 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          phys.pos.lerp(hitPoint, 0.3)
+          phys.pos.lerp(hitPoint, 0.14)
           group.position.copy(phys.pos)
         }
       }
@@ -425,11 +425,13 @@ function PhysicsUpdater({
         // Wall collisions (x and z)
         if (Math.abs(phys.pos.x) > WALL_BOUND) {
           phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
-          phys.vel.x *= -0.4
+          phys.vel.x *= -0.1
+          phys.vel.z *= 0.6
         }
         if (Math.abs(phys.pos.z) > WALL_BOUND) {
           phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
-          phys.vel.z *= -0.4
+          phys.vel.z *= -0.1
+          phys.vel.x *= 0.6
         }
 
         // Ground collision
@@ -662,7 +664,7 @@ function Scene({
         if (phys) {
           phys.vel.set(
             dragCursorVel.current.x,
-            Math.max(4, speed * 0.4),
+            Math.max(2, speed * 0.22),
             dragCursorVel.current.z,
           )
           phys.mode = 'flying'
