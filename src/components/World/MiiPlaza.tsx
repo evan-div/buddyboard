@@ -383,7 +383,7 @@ function PhysicsUpdater({
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
-  const holdPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -(HOLD_HEIGHT - HEAD_HEIGHT)), [])
+  const holdPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -HOLD_HEIGHT), [])
   const prevCursor = useRef(new THREE.Vector3())
   const hitPoint   = useMemo(() => new THREE.Vector3(), [])
 
@@ -408,7 +408,9 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          phys.pos.lerp(hitPoint, 0.14)
+          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, hitPoint.x, 0.14)
+          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
+          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, hitPoint.z, 0.14)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
