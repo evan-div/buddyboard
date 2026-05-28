@@ -51,6 +51,32 @@ export const SHIRT_COLORS = [
   '#92400E', // Brown
 ]
 
+export const PANTS_COLORS = [
+  '#1E293B', // Dark Navy
+  '#111827', // Almost Black
+  '#374151', // Charcoal
+  '#6B7280', // Gray
+  '#F9FAFB', // Off-white
+  '#1D4ED8', // Denim Blue
+  '#065F46', // Dark Green
+  '#7F1D1D', // Maroon
+  '#78350F', // Brown
+  '#A3A07A', // Khaki
+]
+
+export const SHOES_COLORS = [
+  '#111827', // Black
+  '#F9FAFB', // White
+  '#6B3A2A', // Brown
+  '#C4956A', // Tan
+  '#DC2626', // Red
+  '#1D4ED8', // Blue
+  '#15803D', // Green
+  '#D97706', // Tan/Gold
+  '#9CA3AF', // Light Gray
+  '#374151', // Dark Gray
+]
+
 export const DEFAULT_AVATAR: AvatarConfig = {
   backgroundColor: '#6366F1',
   skinTone: 'medium',
@@ -60,4 +86,6 @@ export const DEFAULT_AVATAR: AvatarConfig = {
   mouthStyle: 'smile',
   accessory: 'none',
   shirtColor: '#3B82F6',
+  pantsColor: '#1E293B',
+  shoesColor: '#111827',
 }

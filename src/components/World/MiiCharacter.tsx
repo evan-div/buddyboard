@@ -588,12 +588,12 @@ export default function MiiCharacter({
 
       <group ref={bodyGroupRef}>
         <group ref={leftLegRef} position={[-0.12, 0.65, 0]}>
-          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color="#1e293b" /></mesh>
-          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color="#111" /></mesh>
+          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color={member.avatar.pantsColor ?? '#1e293b'} /></mesh>
+          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color={member.avatar.shoesColor ?? '#111'} /></mesh>
         </group>
         <group ref={rightLegRef} position={[0.12, 0.65, 0]}>
-          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color="#1e293b" /></mesh>
-          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color="#111" /></mesh>
+          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color={member.avatar.pantsColor ?? '#1e293b'} /></mesh>
+          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color={member.avatar.shoesColor ?? '#111'} /></mesh>
         </group>
         <mesh position={[0, 0.9, 0]}><boxGeometry args={[0.52, 0.5, 0.3]} /><meshStandardMaterial color={member.avatar.shirtColor} /></mesh>
         <group ref={leftArmRef} position={[-0.32, 1.08, 0]}>

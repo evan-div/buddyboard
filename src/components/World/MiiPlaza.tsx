@@ -6,7 +6,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar } from '@/lib/firestore'
-import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS } from '@/lib/avatarDefaults'
+import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
 import type { GroupMember, AvatarConfig } from '@/lib/types'
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
@@ -401,7 +401,7 @@ function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
   onAvatarUpdated?: () => void
 }) {
   const [draft, setDraft] = useState<AvatarConfig>(() => ({ ...member.avatar }))
-  const [tab, setTab]     = useState<'look' | 'colors' | 'extras'>('look')
+  const [tab, setTab]     = useState<'look' | 'shirt' | 'pants' | 'shoes' | 'extras'>('look')
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
 
@@ -428,6 +428,7 @@ function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
     fontSize: 10, fontWeight: 700, color: '#aaa',
     textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 7,
   }
+  const swatchRow: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }
 
   return (
     <div style={{
@@ -444,23 +445,24 @@ function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
       </div>
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 14 }}>
-        {(['look', 'colors', 'extras'] as const).map(t => (
+      {/* Tab bar — 5 tabs */}
+      <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 2, marginBottom: 14 }}>
+        {(['look', 'shirt', 'pants', 'shoes', 'extras'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
-            flex: 1, padding: '6px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
-            fontWeight: 700, fontSize: 11,
+            flex: 1, padding: '5px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
+            fontWeight: 700, fontSize: 10,
             background: tab === t ? '#fff' : 'transparent',
             color: tab === t ? '#6366f1' : '#888',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
             transition: 'all 0.12s',
+            textTransform: 'capitalize',
           }}>
-            {t === 'look' ? 'Look' : t === 'colors' ? 'Colors' : 'Extras'}
+            {t}
           </button>
         ))}
       </div>
 
-      {/* Look: skin tone + hair style */}
+      {/* Look: skin tone + hair style + hair color */}
       {tab === 'look' && (
         <div>
           <div style={sLabel}>Skin Tone</div>
@@ -471,30 +473,56 @@ function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
             ))}
           </div>
           <div style={sLabel}>Hair Style</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 14 }}>
             {HAIR_STYLE_OPTIONS.map(({ value, label }) => (
               <PillBtn key={value} label={label} selected={draft.hairStyle === value}
                 onClick={() => setDraft(d => ({ ...d, hairStyle: value }))} />
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Colors: hair + shirt */}
-      {tab === 'colors' && (
-        <div>
           <div style={sLabel}>Hair Color</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+          <div style={swatchRow}>
             {HAIR_COLORS.map(hex => (
               <SwatchBtn key={hex} color={hex} selected={draft.hairColor === hex}
                 onClick={() => setDraft(d => ({ ...d, hairColor: hex }))} />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Shirt */}
+      {tab === 'shirt' && (
+        <div>
           <div style={sLabel}>Shirt Color</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={swatchRow}>
             {SHIRT_COLORS.map(hex => (
               <SwatchBtn key={hex} color={hex} selected={draft.shirtColor === hex}
                 onClick={() => setDraft(d => ({ ...d, shirtColor: hex }))} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pants */}
+      {tab === 'pants' && (
+        <div>
+          <div style={sLabel}>Pants Color</div>
+          <div style={swatchRow}>
+            {PANTS_COLORS.map(hex => (
+              <SwatchBtn key={hex} color={hex} selected={(draft.pantsColor ?? '#1e293b') === hex}
+                onClick={() => setDraft(d => ({ ...d, pantsColor: hex }))} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Shoes */}
+      {tab === 'shoes' && (
+        <div>
+          <div style={sLabel}>Shoes Color</div>
+          <div style={swatchRow}>
+            {SHOES_COLORS.map(hex => (
+              <SwatchBtn key={hex} color={hex} selected={(draft.shoesColor ?? '#111827') === hex}
+                onClick={() => setDraft(d => ({ ...d, shoesColor: hex }))} />
             ))}
           </div>
         </div>

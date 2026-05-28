@@ -7,6 +7,8 @@ export type AvatarConfig = {
   mouthStyle: 'smile' | 'grin' | 'neutral' | 'smirk'
   accessory: 'none' | 'glasses' | 'sunglasses' | 'hat' | 'crown' | 'headband'
   shirtColor: string  // hex color
+  pantsColor: string  // hex color
+  shoesColor: string  // hex color
 }
 
 export type User = {
