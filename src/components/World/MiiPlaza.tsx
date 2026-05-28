@@ -127,7 +127,7 @@ function GrassFloor() {
 const ZOOM_OFFSET_Y    =  2.2   // camera height above character when zoomed
 const ZOOM_OFFSET_XZ   =  3.5   // equal X and Z diagonal offset when zoomed
 const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
-const DEFAULT_CAM_POS  = new THREE.Vector3(9, 10, 9)
+const DEFAULT_CAM_POS  = new THREE.Vector3(9, 8, 9)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
 function CameraController({
@@ -646,17 +646,19 @@ function PhysicsUpdater({
         const angDrag = Math.pow(0.984, delta * 60)
         phys.angVel.multiplyScalar(angDrag)
 
-        // Wall collisions (x and z)
+        // Wall collisions (x and z) — also kill upward momentum so they don't rocket skyward
         if (Math.abs(phys.pos.x) > WALL_BOUND) {
           phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
           phys.vel.x *= -0.1
-          phys.vel.z *= 0.6
+          phys.vel.y *= 0.25
+          phys.vel.z *= 0.4
           phys.angVel.z *= -0.5
         }
         if (Math.abs(phys.pos.z) > WALL_BOUND) {
           phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
           phys.vel.z *= -0.1
-          phys.vel.x *= 0.6
+          phys.vel.y *= 0.25
+          phys.vel.x *= 0.4
           phys.angVel.x *= -0.5
         }
 
@@ -1066,7 +1068,7 @@ export default function MiiPlaza({
       }}
     >
       <Canvas
-        camera={{ position: [9, 10, 9], fov: 55 }}
+        camera={{ position: [9, 8, 9], fov: 55 }}
         gl={{ antialias: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
