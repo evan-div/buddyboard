@@ -117,12 +117,12 @@ function GrassFloor() {
       <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
       {/* Spire — dirt body + stone base below the grass */}
-      <mesh position={[0, -3.5, 0]}>
-        <boxGeometry args={[FSIZE, 7, FSIZE]} />
+      <mesh position={[0, -12, 0]}>
+        <boxGeometry args={[FSIZE, 24, FSIZE]} />
         <meshStandardMaterial color="#6B4226" roughness={0.95} />
       </mesh>
-      <mesh position={[0, -9, 0]}>
-        <boxGeometry args={[FSIZE - 3, 4, FSIZE - 3]} />
+      <mesh position={[0, -27, 0]}>
+        <boxGeometry args={[FSIZE - 3, 6, FSIZE - 3]} />
         <meshStandardMaterial color="#6a6a6a" roughness={0.98} />
       </mesh>
     </group>
