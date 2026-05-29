@@ -57,18 +57,15 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
       setCloudsIn(true)
       setWhiteIn(true)
     } else if (phase === 'exiting') {
-      // White fades first, then clouds sweep back out
-      setWhiteIn(false)
-      ts.push(setTimeout(() => {
-        // Double rAF ensures the browser has painted cloudsIn=true before we change it,
-        // so the CSS transition from covX → idleX actually fires.
+      // White and clouds start together — as white clears, clouds are already sweeping outward.
+      // Double rAF guarantees a painted covered-frame exists before we flip both states.
+      requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            setCloudsIn(false)
-          })
+          setCloudsIn(false)
+          setWhiteIn(false)
         })
-        ts.push(setTimeout(() => cbDone.current?.(), 1300))
-      }, 300))
+      })
+      ts.push(setTimeout(() => cbDone.current?.(), 1100))
     } else {
       // idle / done
       setCloudsIn(false)
