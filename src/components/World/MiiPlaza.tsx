@@ -1059,6 +1059,21 @@ function Scene({
 
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
+// Fires onReady after N rendered frames — guarantees WebGL has actually painted.
+function ReadySignal({ onReady, afterFrames = 3 }: { onReady: () => void; afterFrames?: number }) {
+  const count = useRef(0)
+  const fired = useRef(false)
+  useFrame(() => {
+    if (fired.current) return
+    count.current++
+    if (count.current >= afterFrames) {
+      fired.current = true
+      onReady()
+    }
+  })
+  return null
+}
+
 interface Props {
   members: GroupMember[]
   currentUid: string
@@ -1067,10 +1082,11 @@ interface Props {
   remainingTake: number
   onPointsSubmitted: () => void
   onAvatarUpdated?: () => void
+  onReady?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted, onAvatarUpdated,
+  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1144,6 +1160,7 @@ export default function MiiPlaza({
             animationType={animationType}
           />
         </Suspense>
+        {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
 
       {/* Card overlay — avatar editor for self, give/take for others */}

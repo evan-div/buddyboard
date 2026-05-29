@@ -436,12 +436,9 @@ export default function GroupPage() {
     }
   }, [user, authLoading, router])
 
-  // Once auth + data are both ready, give R3F a moment to init then reveal
-  useEffect(() => {
-    if (authLoading || loading) return
-    const t = setTimeout(() => setWipePhase('exiting'), 600)
-    return () => clearTimeout(t)
-  }, [authLoading, loading])
+  const handlePlazaReady = useCallback(() => {
+    setWipePhase('exiting')
+  }, [])
 
   // Load group data (shows loading spinner — use only on initial load)
   const loadGroupData = useCallback(async () => {
@@ -599,6 +596,7 @@ export default function GroupPage() {
                 remainingTake={dailyStats.remainingTake}
                 onPointsSubmitted={refreshGroupData}
                 onAvatarUpdated={refreshGroupData}
+                onReady={handlePlazaReady}
               />
             ) : (
               <FeedTab groupId={groupId} members={members} />
