@@ -360,8 +360,9 @@ type FeedTabProps = {
   members: GroupMember[]
 }
 
-const CARD_ROTATIONS = [-2.5, 1.2, -1.8, 2.2, -0.8, 1.5, -2.0, 0.5, 2.5, -1.2]
-const CARD_OVERLAP = '-110px'
+const CARD_ROTATIONS = [-7, 4, -9, 6, -3, 8, -5, 2, 10, -6]
+const CARD_OFFSETS  = [10, -20, 25, -10, 30, -25, 5, -30, 15, -15]
+const CARD_OVERLAP  = '-60px'
 
 function FeedTab({ groupId, members }: FeedTabProps) {
   const [feed, setFeed] = useState<Transaction[]>([])
@@ -426,6 +427,7 @@ function FeedTab({ groupId, members }: FeedTabProps) {
             marginTop: i === 0 ? 0 : CARD_OVERLAP,
             position: 'relative',
             zIndex: feed.length - i,
+            transform: `translateX(${CARD_OFFSETS[i % CARD_OFFSETS.length]}px)`,
           }}
         >
           <FeedItem
