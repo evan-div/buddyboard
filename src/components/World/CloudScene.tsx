@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useRef } from 'react'
+import { memo, Suspense, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { useTexture } from '@react-three/drei'
 import * as THREE from 'three'
@@ -91,7 +91,7 @@ function CloudsScene() {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-export default function CloudScene() {
+export default memo(function CloudScene() {
   return (
     <div style={{
       position: 'absolute',
@@ -109,4 +109,4 @@ export default function CloudScene() {
       </Canvas>
     </div>
   )
-}
+})

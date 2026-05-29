@@ -65,7 +65,7 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
     })
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const ts: ReturnType<typeof setTimeout>[] = []
 
     function sweepIn(animated: boolean) {
