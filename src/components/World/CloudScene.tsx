@@ -1,7 +1,7 @@
 'use client'
 
-import { memo, Suspense, useRef } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { memo, Suspense, useEffect, useRef } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 import { wipeActive } from '@/lib/wipeState'
@@ -74,6 +74,21 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
+// Drives the render loop: requests a new frame unless the wipe is covering the scene.
+function RenderController() {
+  const { invalidate } = useThree()
+  useEffect(() => {
+    let id: number
+    const tick = () => {
+      if (!wipeActive.current) invalidate()
+      id = requestAnimationFrame(tick)
+    }
+    id = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(id)
+  }, [invalidate])
+  return null
+}
+
 // ─── Scene ────────────────────────────────────────────────────────────────────
 
 function CloudsScene() {
@@ -100,10 +115,12 @@ export default memo(function CloudScene() {
       background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
     }}>
       <Canvas
+        frameloop="demand"
         camera={{ position: [0, 4, 22], fov: 65 }}
         gl={{ antialias: true, alpha: true }}
         style={{ width: '100%', height: '100%' }}
       >
+        <RenderController />
         <Suspense fallback={null}>
           <CloudsScene />
         </Suspense>
