@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import CloudScene from '@/components/World/CloudScene'
+import CloudWipe from '@/components/World/CloudWipe'
+import type { WipePhase } from '@/components/World/CloudWipe'
 import { getUserGroups, createGroup, joinGroup } from '@/lib/firestore'
 import type { Group } from '@/lib/types'
 
@@ -199,20 +201,12 @@ export default function DashboardPage() {
   const [groupsFetched, setGroupsFetched] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
-  const [transitioning, setTransitioning] = useState(false)
+  const [wipePhase, setWipePhase] = useState<WipePhase>('idle')
   const [pendingGroupId, setPendingGroupId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
-
-  useEffect(() => {
-    if (!transitioning || !pendingGroupId) return
-    const timer = setTimeout(() => {
-      router.push(`/group/${pendingGroupId}`)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [transitioning, pendingGroupId, router])
 
   async function fetchGroups() {
     if (!user || groupsFetched) return
@@ -235,7 +229,7 @@ export default function DashboardPage() {
 
   function startWipe(groupId: string) {
     setPendingGroupId(groupId)
-    setTransitioning(true)
+    setWipePhase('entering')
   }
 
   function handleGroupCreated(groupId: string) {
@@ -364,15 +358,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Cloud wipe overlay */}
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 200,
-          background: 'white',
-          opacity: transitioning ? 1 : 0,
-          transition: 'opacity 0.4s ease-out',
-          pointerEvents: transitioning ? 'auto' : 'none',
-        }}
+      <CloudWipe
+        phase={wipePhase}
+        onCovered={() => { if (pendingGroupId) router.push(`/group/${pendingGroupId}`) }}
       />
 
       {showCreate && (

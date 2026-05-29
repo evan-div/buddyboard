@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import CloudWipe from '@/components/World/CloudWipe'
+import type { WipePhase } from '@/components/World/CloudWipe'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import FeedItem from '@/components/Feed/FeedItem'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
@@ -422,7 +424,7 @@ export default function GroupPage() {
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'plaza' | 'feed'>('plaza')
-  const [curtain, setCurtain] = useState(true)
+  const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
@@ -434,11 +436,12 @@ export default function GroupPage() {
     }
   }, [user, authLoading, router])
 
-  // Fade out the entry curtain after mount
+  // Once data is loaded, give R3F a moment to initialise then reveal
   useEffect(() => {
-    const t = setTimeout(() => setCurtain(false), 50)
+    if (loading) return
+    const t = setTimeout(() => setWipePhase('exiting'), 1000)
     return () => clearTimeout(t)
-  }, [])
+  }, [loading])
 
   // Load group data (shows loading spinner — use only on initial load)
   const loadGroupData = useCallback(async () => {
@@ -503,14 +506,17 @@ export default function GroupPage() {
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center animate-pulse">
-            <span className="text-white font-bold text-sm">BB</span>
+      <>
+        <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center animate-pulse">
+              <span className="text-white font-bold text-sm">BB</span>
+            </div>
+            <p className="text-gray-400 text-sm">Loading group...</p>
           </div>
-          <p className="text-gray-400 text-sm">Loading group...</p>
         </div>
-      </div>
+        <CloudWipe phase={wipePhase} />
+      </>
     )
   }
 
@@ -518,17 +524,20 @@ export default function GroupPage() {
 
   if (!group) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
-        <div className="text-center">
-          <p className="text-white font-bold text-lg mb-2">Group not found</p>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="text-indigo-400 hover:text-indigo-300 text-sm"
-          >
-            Back to Dashboard
-          </button>
+      <>
+        <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
+          <div className="text-center">
+            <p className="text-white font-bold text-lg mb-2">Group not found</p>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="text-indigo-400 hover:text-indigo-300 text-sm"
+            >
+              Back to Dashboard
+            </button>
+          </div>
         </div>
-      </div>
+        <CloudWipe phase={wipePhase} />
+      </>
     )
   }
 
@@ -632,16 +641,7 @@ export default function GroupPage() {
         />
       )}
 
-      {/* Entry curtain — fades out to reveal plaza */}
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 100,
-          background: 'white',
-          opacity: curtain ? 1 : 0,
-          transition: 'opacity 0.9s ease-in',
-          pointerEvents: 'none',
-        }}
-      />
+      <CloudWipe phase={wipePhase} />
     </div>
   )
 }
