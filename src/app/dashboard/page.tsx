@@ -208,22 +208,20 @@ export default function DashboardPage() {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
 
-  async function fetchGroups() {
-    if (!user || groupsFetched) return
+  // Fetch groups when the groups view is opened (lazy, once)
+  useEffect(() => {
+    if (view !== 'groups' || !user || groupsFetched) return
     setLoadingGroups(true)
-    try {
-      const userGroups = await getUserGroups(user.uid)
-      setGroups(userGroups)
-      setGroupsFetched(true)
-    } catch (err) {
-      console.error('Error loading groups:', err)
-    } finally {
-      setLoadingGroups(false)
-    }
-  }
+    getUserGroups(user.uid)
+      .then(userGroups => {
+        setGroups(userGroups)
+        setGroupsFetched(true)
+      })
+      .catch(err => console.error('Error loading groups:', err))
+      .finally(() => setLoadingGroups(false))
+  }, [view, user, groupsFetched])
 
   function handleMyGroups() {
-    fetchGroups()
     setView('groups')
   }
 
