@@ -10,34 +10,35 @@ interface Props {
   onDone?: () => void
 }
 
-const SLIDE = 'transform 0.65s cubic-bezier(0.4, 0, 0.2, 1)'
+// Each cloud is an independent element — no panel containers.
+// Left-group flies from off-screen-left and rests in the right half.
+// Right-group flies from off-screen-right and rests in the left half.
+// They cross through the centre during both entry and exit.
+type Cloud = { src: string; top: string; idleX: string; covX: string; w: string }
 
-type Cloud = { src: string; top: string; left: string; width: string }
-
-// Left panel — clouds staggered top→bottom, slightly overhanging left edge
-const LEFT_CLOUDS: Cloud[] = [
-  { src: '/Cloud2.svg', top: '0%',  left: '-18%', width: '130%' },
-  { src: '/Cloud1.svg', top: '20%', left: '-22%', width: '140%' },
-  { src: '/Cloud3.svg', top: '40%', left: '-14%', width: '125%' },
-  { src: '/Cloud2.svg', top: '60%', left: '-20%', width: '134%' },
-  { src: '/Cloud1.svg', top: '80%', left: '-12%', width: '120%' },
+const L_CLOUDS: Cloud[] = [
+  { src: '/Cloud2.svg', top: '0%',  idleX: '-110vw', covX: '30vw', w: '70vw' },
+  { src: '/Cloud1.svg', top: '20%', idleX: '-110vw', covX: '18vw', w: '80vw' },
+  { src: '/Cloud3.svg', top: '41%', idleX: '-110vw', covX: '38vw', w: '65vw' },
+  { src: '/Cloud2.svg', top: '62%', idleX: '-110vw', covX: '25vw', w: '75vw' },
+  { src: '/Cloud1.svg', top: '82%', idleX: '-110vw', covX: '12vw', w: '70vw' },
 ]
 
-// Right panel — different SVG order and vertical offsets for variety
-const RIGHT_CLOUDS: Cloud[] = [
-  { src: '/Cloud3.svg', top: '10%', left: '-20%', width: '128%' },
-  { src: '/Cloud2.svg', top: '29%', left: '-16%', width: '122%' },
-  { src: '/Cloud1.svg', top: '49%', left: '-24%', width: '140%' },
-  { src: '/Cloud3.svg', top: '68%', left: '-14%', width: '124%' },
-  { src: '/Cloud2.svg', top: '86%', left: '-20%', width: '130%' },
+const R_CLOUDS: Cloud[] = [
+  { src: '/Cloud3.svg', top: '10%', idleX: '110vw',  covX: '-45vw', w: '70vw' },
+  { src: '/Cloud1.svg', top: '30%', idleX: '110vw',  covX: '-32vw', w: '80vw' },
+  { src: '/Cloud2.svg', top: '51%', idleX: '110vw',  covX: '-50vw', w: '65vw' },
+  { src: '/Cloud3.svg', top: '72%', idleX: '110vw',  covX: '-38vw', w: '75vw' },
+  { src: '/Cloud2.svg', top: '91%', idleX: '110vw',  covX: '-28vw', w: '70vw' },
 ]
+
+const ALL_CLOUDS = [...L_CLOUDS, ...R_CLOUDS]
+const MOVE = 'transform 0.95s cubic-bezier(0.4, 0, 0.2, 1)'
 
 export default function CloudWipe({ phase, onCovered, onDone }: Props) {
-  // Initialise from prop so 'covered' phase renders correctly on first mount
-  const [panelsIn, setPanelsIn] = useState(phase === 'covered')
-  const [whiteIn, setWhiteIn]   = useState(phase === 'covered')
+  const [cloudsIn, setCloudsIn] = useState(phase === 'covered')
+  const [whiteIn,  setWhiteIn]  = useState(phase === 'covered')
 
-  // Keep callbacks in refs so effects never go stale
   const cbCovered = useRef(onCovered)
   const cbDone    = useRef(onDone)
   useEffect(() => { cbCovered.current = onCovered }, [onCovered])
@@ -47,62 +48,61 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
     const ts: ReturnType<typeof setTimeout>[] = []
 
     if (phase === 'entering') {
-      setPanelsIn(true)
-      ts.push(setTimeout(() => {
-        setWhiteIn(true)
-        ts.push(setTimeout(() => cbCovered.current?.(), 250))
-      }, 650))
+      setCloudsIn(true)
+      // White washes in while clouds are crossing the centre
+      ts.push(setTimeout(() => setWhiteIn(true), 550))
+      // Navigate once white is fully opaque
+      ts.push(setTimeout(() => cbCovered.current?.(), 900))
     } else if (phase === 'covered') {
-      setPanelsIn(true)
+      setCloudsIn(true)
       setWhiteIn(true)
     } else if (phase === 'exiting') {
+      // White fades first, then clouds sweep back out
       setWhiteIn(false)
       ts.push(setTimeout(() => {
-        setPanelsIn(false)
-        ts.push(setTimeout(() => cbDone.current?.(), 650))
-      }, 250))
+        setCloudsIn(false)
+        ts.push(setTimeout(() => cbDone.current?.(), 950))
+      }, 300))
     } else {
       // idle / done
-      setPanelsIn(false)
+      setCloudsIn(false)
       setWhiteIn(false)
     }
 
     return () => ts.forEach(clearTimeout)
   }, [phase])
 
-  const active = panelsIn || whiteIn
-
-  const panel = (side: 'left' | 'right', translateOut: string, clouds: Cloud[]) => (
-    <div style={{
-      position: 'fixed', top: 0, bottom: 0, [side]: 0,
-      width: '55%',
-      zIndex: 200,
-      overflow: 'hidden',
-      transition: SLIDE,
-      transform: panelsIn ? 'translateX(0%)' : `translateX(${translateOut})`,
-      pointerEvents: active ? 'auto' : 'none',
-    }}>
-      {clouds.map((c, i) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={i} src={c.src} alt="" style={{
-          position: 'absolute', top: c.top, left: c.left, width: c.width,
-          opacity: 0.88, userSelect: 'none', pointerEvents: 'none',
-        }} />
-      ))}
-    </div>
-  )
+  const active = cloudsIn || whiteIn
 
   return (
     <>
-      {panel('left',  '-100%', LEFT_CLOUDS)}
-      {panel('right', '100%',  RIGHT_CLOUDS)}
+      {ALL_CLOUDS.map((c, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={i}
+          src={c.src}
+          alt=""
+          style={{
+            position: 'fixed',
+            top: c.top,
+            left: 0,
+            width: c.w,
+            zIndex: 200,
+            transform: `translateX(${cloudsIn ? c.covX : c.idleX})`,
+            transition: MOVE,
+            opacity: 0.95,
+            pointerEvents: active ? 'auto' : 'none',
+            userSelect: 'none',
+          }}
+        />
+      ))}
 
-      {/* White flash — covers the centre join and signals full coverage */}
+      {/* White flash — covers centre overlap and signals full coverage */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 201,
         background: 'white',
         opacity: whiteIn ? 1 : 0,
-        transition: 'opacity 0.25s ease',
+        transition: 'opacity 0.3s ease',
         pointerEvents: whiteIn ? 'auto' : 'none',
       }} />
     </>

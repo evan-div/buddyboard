@@ -436,12 +436,12 @@ export default function GroupPage() {
     }
   }, [user, authLoading, router])
 
-  // Once data is loaded, give R3F a moment to initialise then reveal
+  // Once auth + data are both ready, give R3F a moment to init then reveal
   useEffect(() => {
-    if (loading) return
-    const t = setTimeout(() => setWipePhase('exiting'), 1000)
+    if (authLoading || loading) return
+    const t = setTimeout(() => setWipePhase('exiting'), 600)
     return () => clearTimeout(t)
-  }, [loading])
+  }, [authLoading, loading])
 
   // Load group data (shows loading spinner — use only on initial load)
   const loadGroupData = useCallback(async () => {
