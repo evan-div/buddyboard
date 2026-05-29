@@ -4,6 +4,7 @@ import { memo, Suspense, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { useTexture } from '@react-three/drei'
 import * as THREE from 'three'
+import { wipeActive } from '@/lib/wipeState'
 
 // ─── Seeded RNG ───────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ function CloudSprite({ pos, texture, width }: {
   const height = width * (1080 / 1920)
 
   useFrame(({ clock }) => {
-    if (!ref.current) return
+    if (wipeActive.current || !ref.current) return
     const t = clock.elapsedTime * 0.05 + driftT.current
     ref.current.position.x = pos[0] + Math.sin(t)        * 4.0
     ref.current.position.z = pos[2] + Math.cos(t * 0.65) * 3.0
