@@ -10,7 +10,6 @@ interface Props {
   onDone?: () => void
 }
 
-const SKY = 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)'
 const SLIDE = 'transform 0.65s cubic-bezier(0.4, 0, 0.2, 1)'
 
 type Cloud = { src: string; top: string; left: string; width: string }
@@ -77,7 +76,6 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
     <div style={{
       position: 'fixed', top: 0, bottom: 0, [side]: 0,
       width: '55%',
-      background: SKY,
       zIndex: 200,
       overflow: 'hidden',
       transition: SLIDE,
