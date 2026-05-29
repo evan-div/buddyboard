@@ -31,6 +31,8 @@ export default function FeedItem({ transaction, members, rotation = 0 }: FeedIte
         transform: `rotate(${rotation}deg)`,
         transformOrigin: 'center center',
         position: 'relative',
+        width: '220px',
+        margin: '0 auto',
       }}
     >
       {/* Recipient avatar with emoji badge */}
