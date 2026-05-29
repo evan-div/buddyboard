@@ -777,9 +777,9 @@ function CloudSprite({ pos, texture, width }: {
 
   useFrame(({ clock }) => {
     if (!ref.current) return
-    const t = clock.elapsedTime * 0.022 + driftT.current
-    ref.current.position.x = pos[0] + Math.sin(t)       * 1.5
-    ref.current.position.z = pos[2] + Math.cos(t * 0.6) * 1.2
+    const t = clock.elapsedTime * 0.05 + driftT.current
+    ref.current.position.x = pos[0] + Math.sin(t)        * 4.0
+    ref.current.position.z = pos[2] + Math.cos(t * 0.65) * 3.0
   })
 
   return (
