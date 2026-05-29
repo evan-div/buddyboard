@@ -422,6 +422,7 @@ export default function GroupPage() {
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'plaza' | 'feed'>('plaza')
+  const [curtain, setCurtain] = useState(true)
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
@@ -432,6 +433,12 @@ export default function GroupPage() {
       router.push('/')
     }
   }, [user, authLoading, router])
+
+  // Fade out the entry curtain after mount
+  useEffect(() => {
+    const t = setTimeout(() => setCurtain(false), 50)
+    return () => clearTimeout(t)
+  }, [])
 
   // Load group data (shows loading spinner — use only on initial load)
   const loadGroupData = useCallback(async () => {
@@ -624,6 +631,17 @@ export default function GroupPage() {
           onSubmitted={handlePointsSubmitted}
         />
       )}
+
+      {/* Entry curtain — fades out to reveal plaza */}
+      <div
+        style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          background: 'white',
+          opacity: curtain ? 1 : 0,
+          transition: 'opacity 0.9s ease-in',
+          pointerEvents: 'none',
+        }}
+      />
     </div>
   )
 }

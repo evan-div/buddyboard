@@ -210,7 +210,7 @@ export default function DashboardPage() {
     if (!transitioning || !pendingGroupId) return
     const timer = setTimeout(() => {
       router.push(`/group/${pendingGroupId}`)
-    }, 700)
+    }, 500)
     return () => clearTimeout(timer)
   }, [transitioning, pendingGroupId, router])
 
@@ -370,7 +370,7 @@ export default function DashboardPage() {
           position: 'fixed', inset: 0, zIndex: 200,
           background: 'white',
           opacity: transitioning ? 1 : 0,
-          transition: 'opacity 0.6s ease-in',
+          transition: 'opacity 0.4s ease-out',
           pointerEvents: transitioning ? 'auto' : 'none',
         }}
       />
