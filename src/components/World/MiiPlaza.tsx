@@ -741,6 +741,8 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   const r    = seededRandom(42)
   const defs: SpriteDef[] = []
   const rings = [
+    { count: 20, r0: 15, r1: 30, y0:  3.0, y1:  6.0, w0: 14, w1: 22 },  // foreground — near camera, above plaza
+    { count: 18, r0: 28, r1: 45, y0:  1.5, y1:  4.0, w0: 18, w1: 28 },  // mid foreground
     { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  6, w1: 11 },  // wraps the spire
     { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  9, w1: 15 },
     { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0: 12, w1: 20 },
