@@ -250,7 +250,7 @@ export default function DashboardPage() {
 
   if (authLoading) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center" style={{ background: '#3476c8' }}>
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#3476c8' }}>
         <div className="w-10 h-10 rounded-full bg-white/30 animate-pulse" />
       </div>
     )
@@ -259,11 +259,11 @@ export default function DashboardPage() {
   if (!user || !userProfile) return null
 
   return (
-    <div className="fixed inset-0">
+    <div style={{ position: 'fixed', inset: 0 }}>
       <CloudScene />
 
       {/* Centered card */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+      <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
         <div className="w-full max-w-[300px] bg-white rounded-2xl shadow-2xl p-7">
 
           {view === 'welcome' ? (
@@ -366,8 +366,9 @@ export default function DashboardPage() {
 
       {/* Cloud wipe overlay */}
       <div
-        className="fixed inset-0 z-[200] bg-white"
         style={{
+          position: 'fixed', inset: 0, zIndex: 200,
+          background: 'white',
           opacity: transitioning ? 1 : 0,
           transition: 'opacity 0.6s ease-in',
           pointerEvents: transitioning ? 'auto' : 'none',
