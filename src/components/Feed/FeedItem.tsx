@@ -3,62 +3,133 @@
 import type { Transaction, GroupMember } from '@/lib/types'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
-import { timeAgo, formatPoints } from '@/lib/utils'
+import { timeAgo } from '@/lib/utils'
 
 type FeedItemProps = {
   transaction: Transaction
   members: GroupMember[]
+  rotation?: number
 }
 
-export default function FeedItem({ transaction, members }: FeedItemProps) {
+export default function FeedItem({ transaction, members, rotation = 0 }: FeedItemProps) {
   const isPositive = transaction.points > 0
+  const pts = Math.abs(transaction.points)
 
-  const giverMember = members.find((m) => m.uid === transaction.fromUid)
+  const recipientMember = members.find((m) => m.uid === transaction.toUid)
+  const emoji = isPositive ? '😊' : '😬'
 
   return (
     <div
-      className={`rounded-xl p-4 border transition-colors ${
-        isPositive
-          ? 'bg-green-500/5 border-green-500/15'
-          : 'bg-red-500/5 border-red-500/15'
-      }`}
+      style={{
+        background: 'white',
+        borderRadius: '24px',
+        padding: '24px 24px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+        transform: `rotate(${rotation}deg)`,
+        transformOrigin: 'center center',
+        position: 'relative',
+      }}
     >
-      <div className="flex items-start gap-3">
-        {/* Giver avatar */}
-        <div className="flex-shrink-0">
-          <AvatarDisplay
-            config={giverMember?.avatar ?? DEFAULT_AVATAR}
-            size={32}
-          />
+      {/* Recipient avatar with emoji badge */}
+      <div style={{ position: 'relative', marginBottom: '14px' }}>
+        <div
+          style={{
+            width: 84,
+            height: 84,
+            borderRadius: '50%',
+            overflow: 'hidden',
+            border: '3px solid #f3f4f6',
+          }}
+        >
+          <AvatarDisplay config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={84} />
         </div>
-
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-200 leading-snug">
-            <span className="font-semibold text-white">{transaction.fromName}</span>
-            {' '}
-            <span className={isPositive ? 'text-green-400' : 'text-red-400'}>
-              {isPositive ? 'gave' : 'took'}
-            </span>
-            {' '}
-            <span className={`font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-              {formatPoints(transaction.points)}
-            </span>
-            {' '}
-            {isPositive ? 'to' : 'from'}{' '}
-            <span className="font-semibold text-white">{transaction.toName}</span>
-          </p>
-
-          {transaction.reason && (
-            <p className="text-gray-400 text-xs mt-1 italic">
-              &ldquo;{transaction.reason}&rdquo;
-            </p>
-          )}
-
-          <p className="text-gray-600 text-xs mt-1.5">
-            {timeAgo(transaction.createdAt)}
-          </p>
-        </div>
+        <span
+          style={{
+            position: 'absolute',
+            bottom: -4,
+            right: -8,
+            fontSize: '24px',
+            lineHeight: 1,
+            filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))',
+          }}
+        >
+          {emoji}
+        </span>
       </div>
+
+      {/* Points */}
+      <div
+        style={{
+          fontSize: '46px',
+          fontWeight: 900,
+          color: isPositive ? '#16a34a' : '#dc2626',
+          lineHeight: 1,
+          marginBottom: '8px',
+          letterSpacing: '-1px',
+        }}
+      >
+        {isPositive ? `+${pts}` : `-${pts}`}
+      </div>
+
+      {/* From line */}
+      <p style={{ fontSize: '15px', color: '#6b7280', marginBottom: '4px' }}>
+        <em>from</em>{' '}
+        <strong style={{ color: '#111827' }}>{transaction.fromName}</strong>
+      </p>
+
+      {/* Time */}
+      <p style={{ fontSize: '11px', color: '#d1d5db', marginBottom: transaction.reason ? '16px' : '0' }}>
+        {timeAgo(transaction.createdAt)}
+      </p>
+
+      {/* Quote */}
+      {transaction.reason && (
+        <div style={{ position: 'relative', width: '100%', padding: '0 8px', marginBottom: '8px' }}>
+          <span
+            style={{
+              position: 'absolute',
+              top: -16,
+              left: -2,
+              fontSize: '56px',
+              color: '#e5e7eb',
+              lineHeight: 1,
+              fontFamily: 'Georgia, serif',
+              userSelect: 'none',
+            }}
+          >
+            &ldquo;
+          </span>
+          <p
+            style={{
+              fontSize: '13px',
+              color: '#374151',
+              textAlign: 'center',
+              fontStyle: 'italic',
+              lineHeight: 1.55,
+              padding: '4px 20px',
+            }}
+          >
+            {transaction.reason}
+          </p>
+          <span
+            style={{
+              position: 'absolute',
+              bottom: -26,
+              right: -2,
+              fontSize: '56px',
+              color: '#e5e7eb',
+              lineHeight: 1,
+              fontFamily: 'Georgia, serif',
+              userSelect: 'none',
+            }}
+          >
+            &rdquo;
+          </span>
+        </div>
+      )}
     </div>
   )
 }

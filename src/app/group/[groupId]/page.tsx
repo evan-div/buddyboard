@@ -360,6 +360,8 @@ type FeedTabProps = {
   members: GroupMember[]
 }
 
+const CARD_ROTATIONS = [-2.5, 1.2, -1.8, 2.2, -0.8, 1.5, -2.0, 0.5, 2.5, -1.2]
+
 function FeedTab({ groupId, members }: FeedTabProps) {
   const [feed, setFeed] = useState<Transaction[]>([])
   const [feedLoading, setFeedLoading] = useState(true)
@@ -375,17 +377,29 @@ function FeedTab({ groupId, members }: FeedTabProps) {
 
   if (feedLoading) {
     return (
-      <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="bg-gray-900 rounded-xl p-4 border border-gray-800 animate-pulse">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-gray-700 flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div className="h-3 bg-gray-700 rounded w-3/4" />
-                <div className="h-2.5 bg-gray-800 rounded w-1/2" />
-                <div className="h-2 bg-gray-800 rounded w-1/4" />
-              </div>
-            </div>
+      <div style={{ position: 'relative', paddingBottom: '32px' }}>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            style={{
+              marginTop: i === 0 ? 0 : '-80px',
+              position: 'relative',
+              zIndex: 3 - i,
+              background: 'white',
+              borderRadius: '24px',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '12px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+              transform: `rotate(${CARD_ROTATIONS[i]}deg)`,
+              opacity: 0.7,
+            }}
+          >
+            <div style={{ width: 84, height: 84, borderRadius: '50%', background: '#f3f4f6' }} />
+            <div style={{ width: 80, height: 36, borderRadius: '8px', background: '#f3f4f6' }} />
+            <div style={{ width: 120, height: 16, borderRadius: '6px', background: '#f3f4f6' }} />
           </div>
         ))}
       </div>
@@ -403,9 +417,22 @@ function FeedTab({ groupId, members }: FeedTabProps) {
   }
 
   return (
-    <div className="space-y-3">
-      {feed.map((tx) => (
-        <FeedItem key={tx.id} transaction={tx} members={members} />
+    <div style={{ position: 'relative', paddingBottom: '32px' }}>
+      {feed.map((tx, i) => (
+        <div
+          key={tx.id}
+          style={{
+            marginTop: i === 0 ? 0 : '-80px',
+            position: 'relative',
+            zIndex: feed.length - i,
+          }}
+        >
+          <FeedItem
+            transaction={tx}
+            members={members}
+            rotation={CARD_ROTATIONS[i % CARD_ROTATIONS.length]}
+          />
+        </div>
       ))}
     </div>
   )
