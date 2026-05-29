@@ -504,9 +504,10 @@ export default function GroupPage() {
     await loadGroupData()
   }
 
-  if (authLoading || loading) {
-    return (
-      <>
+  return (
+    <>
+      {/* Loading state */}
+      {(authLoading || loading) && (
         <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
           <div className="flex flex-col items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center animate-pulse">
@@ -515,16 +516,10 @@ export default function GroupPage() {
             <p className="text-gray-400 text-sm">Loading group...</p>
           </div>
         </div>
-        <CloudWipe phase={wipePhase} />
-      </>
-    )
-  }
+      )}
 
-  if (!user || !userProfile) return null
-
-  if (!group) {
-    return (
-      <>
+      {/* Not found state */}
+      {!authLoading && !loading && !group && (
         <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
           <div className="text-center">
             <p className="text-white font-bold text-lg mb-2">Group not found</p>
@@ -536,112 +531,107 @@ export default function GroupPage() {
             </button>
           </div>
         </div>
-        <CloudWipe phase={wipePhase} />
-      </>
-    )
-  }
-
-  return (
-    <div className="min-h-screen bg-[#0f0f13] pb-24">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-b border-gray-800">
-        <div className="max-w-lg mx-auto px-4 py-3">
-          {/* Top row: back + group name + invite code */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="text-gray-400 hover:text-white transition-colors text-xl leading-none flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800"
-              aria-label="Back"
-            >
-              ←
-            </button>
-
-            <h1 className="text-white font-bold text-base flex-1 truncate">
-              {group.name}
-            </h1>
-
-            {/* Invite code chip */}
-            <button
-              onClick={handleCopyInviteCode}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold tracking-widest transition-all flex-shrink-0 ${
-                copied
-                  ? 'bg-green-500/15 border-green-500/40 text-green-400'
-                  : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
-              }`}
-            >
-              {copied ? '✓ Copied!' : group.inviteCode}
-            </button>
-          </div>
-
-          {/* Tabs */}
-          <div className="flex gap-4 mt-3">
-            <button
-              onClick={() => setActiveTab('plaza')}
-              className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                activeTab === 'plaza'
-                  ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              Plaza
-            </button>
-            <button
-              onClick={() => setActiveTab('feed')}
-              className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                activeTab === 'feed'
-                  ? 'border-indigo-500 text-indigo-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              Feed
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="max-w-lg mx-auto px-4 py-5">
-        {activeTab === 'plaza' ? (
-          <MiiPlaza
-            members={members}
-            currentUid={user.uid}
-            groupId={groupId}
-            remainingGive={dailyStats.remainingGive}
-            remainingTake={dailyStats.remainingTake}
-            onPointsSubmitted={refreshGroupData}
-            onAvatarUpdated={refreshGroupData}
-          />
-        ) : (
-          <FeedTab groupId={groupId} members={members} />
-        )}
-      </main>
-
-      {/* Sticky bottom bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-t border-gray-800">
-        <div className="max-w-lg mx-auto px-4 py-3">
-          <button
-            onClick={() => setShowPointsModal(true)}
-            className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold py-3.5 rounded-2xl transition-all shadow-lg shadow-indigo-500/25 text-base"
-          >
-            ⭐ Give / Take Points
-          </button>
-        </div>
-      </div>
-
-      {/* Points Modal */}
-      {showPointsModal && (
-        <PointsModal
-          groupId={groupId}
-          currentUid={user.uid}
-          members={members}
-          remainingGive={dailyStats.remainingGive}
-          remainingTake={dailyStats.remainingTake}
-          onClose={() => setShowPointsModal(false)}
-          onSubmitted={handlePointsSubmitted}
-        />
       )}
 
+      {/* Main content — only when data is ready */}
+      {!authLoading && !loading && group && user && userProfile && (
+        <div className="min-h-screen bg-[#0f0f13] pb-24">
+          {/* Header */}
+          <header className="sticky top-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-b border-gray-800">
+            <div className="max-w-lg mx-auto px-4 py-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => router.push('/dashboard')}
+                  className="text-gray-400 hover:text-white transition-colors text-xl leading-none flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800"
+                  aria-label="Back"
+                >
+                  ←
+                </button>
+
+                <h1 className="text-white font-bold text-base flex-1 truncate">
+                  {group.name}
+                </h1>
+
+                <button
+                  onClick={handleCopyInviteCode}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold tracking-widest transition-all flex-shrink-0 ${
+                    copied
+                      ? 'bg-green-500/15 border-green-500/40 text-green-400'
+                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
+                  }`}
+                >
+                  {copied ? '✓ Copied!' : group.inviteCode}
+                </button>
+              </div>
+
+              <div className="flex gap-4 mt-3">
+                <button
+                  onClick={() => setActiveTab('plaza')}
+                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
+                    activeTab === 'plaza'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Plaza
+                </button>
+                <button
+                  onClick={() => setActiveTab('feed')}
+                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
+                    activeTab === 'feed'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Feed
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-lg mx-auto px-4 py-5">
+            {activeTab === 'plaza' ? (
+              <MiiPlaza
+                members={members}
+                currentUid={user.uid}
+                groupId={groupId}
+                remainingGive={dailyStats.remainingGive}
+                remainingTake={dailyStats.remainingTake}
+                onPointsSubmitted={refreshGroupData}
+                onAvatarUpdated={refreshGroupData}
+              />
+            ) : (
+              <FeedTab groupId={groupId} members={members} />
+            )}
+          </main>
+
+          <div className="fixed bottom-0 left-0 right-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-t border-gray-800">
+            <div className="max-w-lg mx-auto px-4 py-3">
+              <button
+                onClick={() => setShowPointsModal(true)}
+                className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold py-3.5 rounded-2xl transition-all shadow-lg shadow-indigo-500/25 text-base"
+              >
+                ⭐ Give / Take Points
+              </button>
+            </div>
+          </div>
+
+          {showPointsModal && (
+            <PointsModal
+              groupId={groupId}
+              currentUid={user.uid}
+              members={members}
+              remainingGive={dailyStats.remainingGive}
+              remainingTake={dailyStats.remainingTake}
+              onClose={() => setShowPointsModal(false)}
+              onSubmitted={handlePointsSubmitted}
+            />
+          )}
+        </div>
+      )}
+
+      {/* CloudWipe — fixed position in tree so it never remounts mid-animation */}
       <CloudWipe phase={wipePhase} />
-    </div>
+    </>
   )
 }
