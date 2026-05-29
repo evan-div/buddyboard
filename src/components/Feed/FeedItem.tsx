@@ -22,38 +22,38 @@ export default function FeedItem({ transaction, members, rotation = 0 }: FeedIte
     <div
       style={{
         background: 'white',
-        borderRadius: '24px',
-        padding: '24px 24px 20px',
+        borderRadius: '20px',
+        padding: '16px 20px 14px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+        boxShadow: '0 6px 24px rgba(0,0,0,0.20)',
         transform: `rotate(${rotation}deg)`,
         transformOrigin: 'center center',
         position: 'relative',
       }}
     >
       {/* Recipient avatar with emoji badge */}
-      <div style={{ position: 'relative', marginBottom: '14px' }}>
+      <div style={{ position: 'relative', marginBottom: '8px' }}>
         <div
           style={{
-            width: 84,
-            height: 84,
+            width: 52,
+            height: 52,
             borderRadius: '50%',
             overflow: 'hidden',
-            border: '3px solid #f3f4f6',
+            border: '2px solid #f3f4f6',
           }}
         >
-          <AvatarDisplay config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={84} />
+          <AvatarDisplay config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={52} />
         </div>
         <span
           style={{
             position: 'absolute',
-            bottom: -4,
-            right: -8,
-            fontSize: '24px',
+            bottom: -3,
+            right: -6,
+            fontSize: '16px',
             lineHeight: 1,
-            filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))',
+            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
           }}
         >
           {emoji}
@@ -63,37 +63,37 @@ export default function FeedItem({ transaction, members, rotation = 0 }: FeedIte
       {/* Points */}
       <div
         style={{
-          fontSize: '46px',
+          fontSize: '30px',
           fontWeight: 900,
           color: isPositive ? '#16a34a' : '#dc2626',
           lineHeight: 1,
-          marginBottom: '8px',
-          letterSpacing: '-1px',
+          marginBottom: '4px',
+          letterSpacing: '-0.5px',
         }}
       >
         {isPositive ? `+${pts}` : `-${pts}`}
       </div>
 
       {/* From line */}
-      <p style={{ fontSize: '15px', color: '#6b7280', marginBottom: '4px' }}>
+      <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>
         <em>from</em>{' '}
         <strong style={{ color: '#111827' }}>{transaction.fromName}</strong>
       </p>
 
       {/* Time */}
-      <p style={{ fontSize: '11px', color: '#d1d5db', marginBottom: transaction.reason ? '16px' : '0' }}>
+      <p style={{ fontSize: '10px', color: '#d1d5db', marginBottom: transaction.reason ? '10px' : '0' }}>
         {timeAgo(transaction.createdAt)}
       </p>
 
       {/* Quote */}
       {transaction.reason && (
-        <div style={{ position: 'relative', width: '100%', padding: '0 8px', marginBottom: '8px' }}>
+        <div style={{ position: 'relative', width: '100%', padding: '0 6px', marginBottom: '6px' }}>
           <span
             style={{
               position: 'absolute',
-              top: -16,
+              top: -10,
               left: -2,
-              fontSize: '56px',
+              fontSize: '36px',
               color: '#e5e7eb',
               lineHeight: 1,
               fontFamily: 'Georgia, serif',
@@ -104,12 +104,12 @@ export default function FeedItem({ transaction, members, rotation = 0 }: FeedIte
           </span>
           <p
             style={{
-              fontSize: '13px',
+              fontSize: '11px',
               color: '#374151',
               textAlign: 'center',
               fontStyle: 'italic',
-              lineHeight: 1.55,
-              padding: '4px 20px',
+              lineHeight: 1.4,
+              padding: '2px 16px',
             }}
           >
             {transaction.reason}
@@ -117,9 +117,9 @@ export default function FeedItem({ transaction, members, rotation = 0 }: FeedIte
           <span
             style={{
               position: 'absolute',
-              bottom: -26,
+              bottom: -18,
               right: -2,
-              fontSize: '56px',
+              fontSize: '36px',
               color: '#e5e7eb',
               lineHeight: 1,
               fontFamily: 'Georgia, serif',

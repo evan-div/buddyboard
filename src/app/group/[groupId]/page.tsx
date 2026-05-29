@@ -361,6 +361,7 @@ type FeedTabProps = {
 }
 
 const CARD_ROTATIONS = [-2.5, 1.2, -1.8, 2.2, -0.8, 1.5, -2.0, 0.5, 2.5, -1.2]
+const CARD_OVERLAP = '-110px'
 
 function FeedTab({ groupId, members }: FeedTabProps) {
   const [feed, setFeed] = useState<Transaction[]>([])
@@ -382,7 +383,7 @@ function FeedTab({ groupId, members }: FeedTabProps) {
           <div
             key={i}
             style={{
-              marginTop: i === 0 ? 0 : '-80px',
+              marginTop: i === 0 ? 0 : CARD_OVERLAP,
               position: 'relative',
               zIndex: 3 - i,
               background: 'white',
@@ -422,7 +423,7 @@ function FeedTab({ groupId, members }: FeedTabProps) {
         <div
           key={tx.id}
           style={{
-            marginTop: i === 0 ? 0 : '-80px',
+            marginTop: i === 0 ? 0 : CARD_OVERLAP,
             position: 'relative',
             zIndex: feed.length - i,
           }}
