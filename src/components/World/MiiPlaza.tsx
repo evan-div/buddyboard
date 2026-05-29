@@ -116,14 +116,10 @@ function GrassFloor() {
       {/* Blade instances sit on top for 3D raised-grass texture */}
       <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
-      {/* Spire — dirt body + stone base below the grass */}
-      <mesh position={[0, -12, 0]}>
-        <boxGeometry args={[FSIZE, 24, FSIZE]} />
+      {/* Spire — single deep column, bottom well beyond any camera angle */}
+      <mesh position={[0, -75, 0]}>
+        <boxGeometry args={[FSIZE, 150, FSIZE]} />
         <meshStandardMaterial color="#6B4226" roughness={0.95} />
-      </mesh>
-      <mesh position={[0, -27, 0]}>
-        <boxGeometry args={[FSIZE - 3, 6, FSIZE - 3]} />
-        <meshStandardMaterial color="#6a6a6a" roughness={0.98} />
       </mesh>
     </group>
   )
