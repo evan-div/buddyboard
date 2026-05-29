@@ -736,16 +736,18 @@ interface SpriteDef {
   width: number
 }
 
-// 114 sprites in 5 concentric rings — inner ring hugs the spire, outer fades to horizon
+// 240 sprites in 7 concentric rings — dense inner wrap, full horizon coverage
 const SPRITE_DEFS: SpriteDef[] = (() => {
   const r    = seededRandom(42)
   const defs: SpriteDef[] = []
   const rings = [
-    { count: 20, r0: 13, r1: 18, y0: -3.0, y1: -4.0, w0:  8, w1: 14 },
-    { count: 24, r0: 19, r1: 28, y0: -4.0, y1: -5.5, w0: 11, w1: 18 },
-    { count: 26, r0: 29, r1: 43, y0: -5.0, y1: -7.0, w0: 15, w1: 24 },
-    { count: 24, r0: 44, r1: 65, y0: -6.0, y1: -8.0, w0: 20, w1: 32 },
-    { count: 20, r0: 66, r1: 95, y0: -7.0, y1: -9.0, w0: 26, w1: 44 },
+    { count: 24, r0:  9, r1: 13, y0: -2.5, y1: -3.5, w0:  6, w1: 11 },
+    { count: 36, r0: 13, r1: 20, y0: -3.0, y1: -4.5, w0:  9, w1: 15 },
+    { count: 40, r0: 20, r1: 32, y0: -4.0, y1: -6.0, w0: 12, w1: 20 },
+    { count: 38, r0: 32, r1: 50, y0: -5.0, y1: -7.5, w0: 16, w1: 26 },
+    { count: 36, r0: 50, r1: 72, y0: -6.0, y1: -8.5, w0: 22, w1: 35 },
+    { count: 34, r0: 72, r1: 100, y0: -7.0, y1: -9.5, w0: 28, w1: 46 },
+    { count: 32, r0: 100, r1: 140, y0: -8.0, y1: -11.0, w0: 36, w1: 58 },
   ]
   rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
     for (let i = 0; i < count; i++) {
