@@ -368,6 +368,32 @@ export async function giveOrTakePoints(
 
 // ============ FEED OPERATIONS ============
 
+export async function getTransactionsSince(
+  groupId: string,
+  since: Date
+): Promise<Transaction[]> {
+  const txRef = collection(db, 'groups', groupId, 'transactions')
+  const q = query(
+    txRef,
+    where('createdAt', '>=', Timestamp.fromDate(since)),
+    orderBy('createdAt', 'desc')
+  )
+  const snap = await getDocs(q)
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      id: data.id ?? d.id,
+      fromUid: data.fromUid,
+      fromName: data.fromName,
+      toUid: data.toUid,
+      toName: data.toName,
+      points: data.points,
+      reason: data.reason,
+      createdAt: fromTimestamp(data.createdAt),
+    } as Transaction
+  })
+}
+
 export function subscribeToFeed(
   groupId: string,
   callback: (transactions: Transaction[]) => void,

@@ -15,6 +15,7 @@ import {
   subscribeToFeed,
   giveOrTakePoints,
   getGroupDailyStats,
+  getTransactionsSince,
 } from '@/lib/firestore'
 import { copyToClipboard } from '@/lib/utils'
 import type { Group, GroupMember, Transaction, PointsAllocation } from '@/lib/types'
@@ -273,82 +274,225 @@ function PointsModal({
 
 // ─── Leaderboard Tab ──────────────────────────────────────────────────────────
 
-type LeaderboardTabProps = {
-  members: GroupMember[]
-  currentUid: string
-  remainingGive: number
-  remainingTake: number
+type Period = 'daily' | 'weekly' | 'monthly' | 'alltime'
+
+type RankedMember = GroupMember & { periodPoints: number }
+
+function getPeriodStart(period: Period): Date | null {
+  if (period === 'alltime') return null
+  const now = new Date()
+  if (period === 'daily') {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  }
+  if (period === 'weekly') {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 7)
+    return d
+  }
+  const d = new Date(now)
+  d.setDate(d.getDate() - 30)
+  return d
 }
 
-function LeaderboardTab({ members, currentUid, remainingGive, remainingTake }: LeaderboardTabProps) {
-  const sorted = [...members].sort((a, b) => b.totalPoints - a.totalPoints)
+function computeRankings(members: GroupMember[], transactions: Transaction[], period: Period): RankedMember[] {
+  if (period === 'alltime') {
+    return [...members]
+      .map((m) => ({ ...m, periodPoints: m.totalPoints }))
+      .sort((a, b) => b.periodPoints - a.periodPoints)
+  }
+  const pointMap: Record<string, number> = {}
+  members.forEach((m) => { pointMap[m.uid] = 0 })
+  transactions.forEach((tx) => {
+    if (pointMap[tx.toUid] !== undefined) pointMap[tx.toUid] += tx.points
+  })
+  return [...members]
+    .map((m) => ({ ...m, periodPoints: pointMap[m.uid] ?? 0 }))
+    .sort((a, b) => b.periodPoints - a.periodPoints)
+}
+
+const PERIOD_LABELS: Record<Period, string> = {
+  daily: 'Today',
+  weekly: 'Week',
+  monthly: 'Month',
+  alltime: 'All Time',
+}
+
+const PODIUM_COLORS = {
+  1: { bg: 'linear-gradient(to bottom, #F5C542, #D4A017)', text: '#7a5800' },
+  2: { bg: 'linear-gradient(to bottom, #C0C0C0, #A0A0A0)', text: '#4a4a4a' },
+  3: { bg: 'linear-gradient(to bottom, #CD7F32, #A0522D)', text: '#5c2e00' },
+} as const
+
+const PODIUM_HEIGHTS = { 1: 88, 2: 64, 3: 48 } as const
+
+function PodiumSlot({ member, rank, period }: { member: RankedMember; rank: 1 | 2 | 3; period: Period }) {
+  const colors = PODIUM_COLORS[rank]
+  const height = PODIUM_HEIGHTS[rank]
+  const isPositive = member.periodPoints > 0
+  const isNegative = member.periodPoints < 0
+  const showChange = period !== 'alltime'
 
   return (
-    <div className="space-y-2">
-      {/* Daily remaining hint */}
-      <div className="flex items-center justify-between bg-gray-900 rounded-xl px-4 py-3 border border-gray-800 mb-4">
-        <span className="text-gray-400 text-sm">Today remaining</span>
-        <div className="flex gap-3 text-sm font-semibold">
-          <span className="text-green-400">{remainingGive} give</span>
-          <span className="text-gray-600">/</span>
-          <span className="text-red-400">{remainingTake} take</span>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+      {/* Avatar */}
+      <div style={{
+        width: rank === 1 ? 60 : 48,
+        height: rank === 1 ? 60 : 48,
+        borderRadius: '50%',
+        overflow: 'hidden',
+        border: `3px solid ${rank === 1 ? '#F5C542' : rank === 2 ? '#C0C0C0' : '#CD7F32'}`,
+        marginBottom: 6,
+        flexShrink: 0,
+      }}>
+        <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={rank === 1 ? 60 : 48} />
       </div>
 
-      {sorted.map((member, index) => {
-        const isCurrentUser = member.uid === currentUid
-        const rank = index + 1
+      {/* Name */}
+      <p style={{
+        fontSize: rank === 1 ? '13px' : '11px',
+        fontWeight: 700,
+        color: 'white',
+        marginBottom: 3,
+        maxWidth: '90px',
+        textAlign: 'center',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {member.displayName}
+      </p>
 
-        return (
-          <div
-            key={member.uid}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
-              isCurrentUser
-                ? 'bg-indigo-500/10 border-indigo-500/30'
-                : 'bg-gray-900 border-gray-800'
+      {/* Points change */}
+      {showChange && (
+        <p style={{
+          fontSize: '11px',
+          fontWeight: 700,
+          color: isPositive ? '#4ade80' : isNegative ? '#f87171' : '#6b7280',
+          marginBottom: 4,
+        }}>
+          {isPositive ? '↑' : isNegative ? '↓' : '–'}{' '}
+          {isPositive ? `+${member.periodPoints}` : member.periodPoints === 0 ? '0' : member.periodPoints}
+        </p>
+      )}
+      {!showChange && (
+        <p style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>
+          {member.periodPoints.toLocaleString()} pts
+        </p>
+      )}
+
+      {/* Pedestal */}
+      <div style={{
+        width: '100%',
+        height,
+        background: colors.bg,
+        borderRadius: '8px 8px 0 0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <span style={{ fontSize: rank === 1 ? '28px' : '22px' }}>
+          {rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember[], currentUid: string, groupId: string }) {
+  const [period, setPeriod] = useState<Period>('alltime')
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const since = getPeriodStart(period)
+    if (!since) { setTransactions([]); return }
+    setLoading(true)
+    getTransactionsSince(groupId, since)
+      .then(setTransactions)
+      .finally(() => setLoading(false))
+  }, [period, groupId])
+
+  const ranked = computeRankings(members, transactions, period)
+  const top3 = ranked.slice(0, 3) as (RankedMember | undefined)[]
+  const rest  = ranked.slice(3)
+
+  const first  = top3[0]
+  const second = top3[1]
+  const third  = top3[2]
+
+  return (
+    <div>
+      {/* Period selector */}
+      <div className="flex bg-gray-900 rounded-xl p-1 gap-1 mb-6 border border-gray-800">
+        {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              period === p ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
             }`}
           >
-            {/* Rank */}
-            <div className="w-8 flex-shrink-0 text-center">
-              {rank === 1 ? (
-                <span className="text-xl">🥇</span>
-              ) : rank === 2 ? (
-                <span className="text-xl">🥈</span>
-              ) : rank === 3 ? (
-                <span className="text-xl">🥉</span>
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <div className="w-6 h-6 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Podium */}
+          {ranked.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', marginBottom: '24px' }}>
+              {second ? (
+                <PodiumSlot member={second} rank={2} period={period} />
               ) : (
-                <span className="text-gray-500 font-bold text-sm">#{rank}</span>
+                <div style={{ flex: 1 }} />
+              )}
+              {first && <PodiumSlot member={first} rank={1} period={period} />}
+              {third ? (
+                <PodiumSlot member={third} rank={3} period={period} />
+              ) : (
+                <div style={{ flex: 1 }} />
               )}
             </div>
+          )}
 
-            {/* Avatar */}
-            <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={40} />
-
-            {/* Name */}
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold text-sm truncate ${isCurrentUser ? 'text-indigo-300' : 'text-white'}`}>
-                {member.displayName}
-                {isCurrentUser && (
-                  <span className="text-indigo-500 text-xs font-normal ml-1">(you)</span>
-                )}
-              </p>
+          {/* Ranks 4+ */}
+          {rest.length > 0 && (
+            <div className="space-y-2">
+              {rest.map((member, i) => {
+                const isCurrentUser = member.uid === currentUid
+                const rank = i + 4
+                const isPositive = period !== 'alltime' && member.periodPoints > 0
+                const isNegative = period !== 'alltime' && member.periodPoints < 0
+                return (
+                  <div
+                    key={member.uid}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+                      isCurrentUser ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-gray-900 border-gray-800'
+                    }`}
+                  >
+                    <span className="text-gray-500 font-bold text-sm w-6 text-center">#{rank}</span>
+                    <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={36} />
+                    <p className={`flex-1 font-semibold text-sm truncate ${isCurrentUser ? 'text-indigo-300' : 'text-white'}`}>
+                      {member.displayName}
+                      {isCurrentUser && <span className="text-indigo-500 text-xs font-normal ml-1">(you)</span>}
+                    </p>
+                    <span className={`text-sm font-bold ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-gray-400'}`}>
+                      {period !== 'alltime'
+                        ? (isPositive ? `↑ +${member.periodPoints}` : isNegative ? `↓ ${member.periodPoints}` : '–')
+                        : `${member.periodPoints.toLocaleString()} pts`}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
-
-            {/* Points */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <span className="text-yellow-400 text-base">⭐</span>
-              <span
-                className={`font-bold text-sm ${
-                  member.totalPoints >= 0 ? 'text-white' : 'text-red-400'
-                }`}
-              >
-                {member.totalPoints.toLocaleString()}
-              </span>
-              <span className="text-gray-500 text-xs">pts</span>
-            </div>
-          </div>
-        )
-      })}
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -453,7 +597,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'feed'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -612,6 +756,16 @@ export default function GroupPage() {
                 >
                   Feed
                 </button>
+                <button
+                  onClick={() => setActiveTab('leaderboard')}
+                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
+                    activeTab === 'leaderboard'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Leaderboard
+                </button>
               </div>
             </div>
           </header>
@@ -628,8 +782,10 @@ export default function GroupPage() {
                 onAvatarUpdated={refreshGroupData}
                 onReady={handlePlazaReady}
               />
-            ) : (
+            ) : activeTab === 'feed' ? (
               <FeedTab groupId={groupId} members={members} />
+            ) : (
+              <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} />
             )}
           </main>
 
