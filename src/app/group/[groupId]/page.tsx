@@ -21,6 +21,7 @@ import { copyToClipboard } from '@/lib/utils'
 import type { Group, GroupMember, Transaction, PointsAllocation } from '@/lib/types'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
+const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
 
 // ─── Points Modal ─────────────────────────────────────────────────────────────
 
@@ -317,87 +318,6 @@ const PERIOD_LABELS: Record<Period, string> = {
   alltime: 'All Time',
 }
 
-const PODIUM_COLORS = {
-  1: { bg: 'linear-gradient(to bottom, #F5C542, #D4A017)', text: '#7a5800' },
-  2: { bg: 'linear-gradient(to bottom, #C0C0C0, #A0A0A0)', text: '#4a4a4a' },
-  3: { bg: 'linear-gradient(to bottom, #CD7F32, #A0522D)', text: '#5c2e00' },
-} as const
-
-const PODIUM_HEIGHTS = { 1: 88, 2: 64, 3: 48 } as const
-
-function PodiumSlot({ member, rank, period }: { member: RankedMember; rank: 1 | 2 | 3; period: Period }) {
-  const colors = PODIUM_COLORS[rank]
-  const height = PODIUM_HEIGHTS[rank]
-  const isPositive = member.periodPoints > 0
-  const isNegative = member.periodPoints < 0
-  const showChange = period !== 'alltime'
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-      {/* Avatar */}
-      <div style={{
-        width: rank === 1 ? 60 : 48,
-        height: rank === 1 ? 60 : 48,
-        borderRadius: '50%',
-        overflow: 'hidden',
-        border: `3px solid ${rank === 1 ? '#F5C542' : rank === 2 ? '#C0C0C0' : '#CD7F32'}`,
-        marginBottom: 6,
-        flexShrink: 0,
-      }}>
-        <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={rank === 1 ? 60 : 48} />
-      </div>
-
-      {/* Name */}
-      <p style={{
-        fontSize: rank === 1 ? '13px' : '11px',
-        fontWeight: 700,
-        color: 'white',
-        marginBottom: 3,
-        maxWidth: '90px',
-        textAlign: 'center',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {member.displayName}
-      </p>
-
-      {/* Points change */}
-      {showChange && (
-        <p style={{
-          fontSize: '11px',
-          fontWeight: 700,
-          color: isPositive ? '#4ade80' : isNegative ? '#f87171' : '#6b7280',
-          marginBottom: 4,
-        }}>
-          {isPositive ? '↑' : isNegative ? '↓' : '–'}{' '}
-          {isPositive ? `+${member.periodPoints}` : member.periodPoints === 0 ? '0' : member.periodPoints}
-        </p>
-      )}
-      {!showChange && (
-        <p style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', marginBottom: 4 }}>
-          {member.periodPoints.toLocaleString()} pts
-        </p>
-      )}
-
-      {/* Pedestal */}
-      <div style={{
-        width: '100%',
-        height,
-        background: colors.bg,
-        borderRadius: '8px 8px 0 0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <span style={{ fontSize: rank === 1 ? '28px' : '22px' }}>
-          {rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}
-        </span>
-      </div>
-    </div>
-  )
-}
-
 function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember[], currentUid: string, groupId: string }) {
   const [period, setPeriod] = useState<Period>('alltime')
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -438,27 +358,22 @@ function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="w-6 h-6 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        <div style={{
+          height: '320px', borderRadius: '16px', marginBottom: '20px',
+          background: 'linear-gradient(to bottom, #1e4fa0, #c8e8f8)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div className="w-6 h-6 rounded-full border-2 border-white border-t-transparent animate-spin" />
         </div>
       ) : (
         <>
-          {/* Podium */}
-          {ranked.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', marginBottom: '24px' }}>
-              {second ? (
-                <PodiumSlot member={second} rank={2} period={period} />
-              ) : (
-                <div style={{ flex: 1 }} />
-              )}
-              {first && <PodiumSlot member={first} rank={1} period={period} />}
-              {third ? (
-                <PodiumSlot member={third} rank={3} period={period} />
-              ) : (
-                <div style={{ flex: 1 }} />
-              )}
-            </div>
-          )}
+          {/* 3D Podium */}
+          <PodiumScene
+            first={ranked[0]}
+            second={ranked[1]}
+            third={ranked[2]}
+            period={period}
+          />
 
           {/* Ranks 4+ */}
           {rest.length > 0 && (
