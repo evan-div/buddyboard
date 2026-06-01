@@ -71,15 +71,16 @@ export function subscribeToNotifications(
   callback: (notifs: GroupNotification[]) => void
 ): () => void {
   const ref = collection(db, 'groups', groupId, 'notifications')
-  const q = query(
-    ref,
-    where('forUid', '==', uid),
-    where('cleared', '==', false),
-    orderBy('createdAt', 'desc')
-  )
-  return onSnapshot(q, (snap) =>
-    callback(snap.docs.map((d) => fromNotifDoc(d.id, d.data())))
-  )
+  // Single-field equality query — no composite index required.
+  // cleared filtering and sorting are done client-side.
+  const q = query(ref, where('forUid', '==', uid), limit(100))
+  return onSnapshot(q, (snap) => {
+    const all = snap.docs.map((d) => fromNotifDoc(d.id, d.data()))
+    const visible = all
+      .filter((n) => !n.cleared)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    callback(visible)
+  })
 }
 
 export async function markNotificationRead(groupId: string, notifId: string): Promise<void> {
