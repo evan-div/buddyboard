@@ -286,7 +286,8 @@ export async function castVote(
   caseId: string,
   voterUid: string,
   vote: 'innocent' | 'guilty',
-  memberUids: string[]
+  memberUids: string[],
+  chiefUid?: string  // Chief (not a party) gets 2 votes
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
 
@@ -298,18 +299,31 @@ export async function castVote(
     if (c.status !== 'in_court') throw new Error('Voting is closed')
     if (c.votes?.[voterUid]) throw new Error('You have already voted')
 
+    // Chief gets 2 votes unless they're a party to the case
+    const effectiveChief =
+      chiefUid && chiefUid !== c.defendantUid && chiefUid !== c.accuserUid
+        ? chiefUid
+        : null
+
+    const voterWeight = (uid: string) => (uid === effectiveChief ? 2 : 1)
+    const totalWeight = memberUids.reduce((s, uid) => s + voterWeight(uid), 0)
+
     const newVotes: Record<string, string> = { ...(c.votes ?? {}), [voterUid]: vote }
-    const total = memberUids.length
-    const innocentCount = Object.values(newVotes).filter((v) => v === 'innocent').length
-    const guiltyCount = Object.values(newVotes).filter((v) => v === 'guilty').length
-    const majority = Math.floor(total / 2) + 1
+    const innocentWeight = Object.entries(newVotes)
+      .filter(([, v]) => v === 'innocent')
+      .reduce((s, [uid]) => s + voterWeight(uid), 0)
+    const guiltyWeight = Object.entries(newVotes)
+      .filter(([, v]) => v === 'guilty')
+      .reduce((s, [uid]) => s + voterWeight(uid), 0)
+    const majority = Math.floor(totalWeight / 2) + 1
 
     let newStatus: CaseStatus = 'in_court'
     let resolved = false
-    if (innocentCount >= majority) { newStatus = 'resolved_innocent'; resolved = true }
-    else if (guiltyCount >= majority) { newStatus = 'resolved_guilty'; resolved = true }
+    if (innocentWeight >= majority) { newStatus = 'resolved_innocent'; resolved = true }
+    else if (guiltyWeight >= majority) { newStatus = 'resolved_guilty'; resolved = true }
 
     const voteUpdate: Record<string, unknown> = { [`votes.${voterUid}`]: vote }
+    if (voterUid === effectiveChief) voteUpdate.chiefVoterUid = voterUid
     if (resolved) {
       voteUpdate.status = newStatus
       voteUpdate.resolvedAt = serverTimestamp()
@@ -434,4 +448,13 @@ export function subscribeToCases(
   return onSnapshot(q, (snap) =>
     callback(snap.docs.map((d) => fromCaseDoc(d.id, d.data())))
   )
+}
+
+// ─── Admin dismiss ────────────────────────────────────────────────────────────
+
+export async function dismissCase(groupId: string, caseId: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId, 'cases', caseId), {
+    status: 'dismissed',
+    resolvedAt: serverTimestamp(),
+  })
 }

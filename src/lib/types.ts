@@ -1,14 +1,14 @@
 export type AvatarConfig = {
-  backgroundColor: string  // hex color for background circle
+  backgroundColor: string
   skinTone: 'light' | 'medium-light' | 'medium' | 'medium-dark' | 'dark'
   hairStyle: 'bald' | 'short' | 'medium' | 'long' | 'curly' | 'wavy' | 'mohawk' | 'ponytail'
-  hairColor: string  // hex color
+  hairColor: string
   eyeStyle: 'normal' | 'happy' | 'cool' | 'sleepy'
   mouthStyle: 'smile' | 'grin' | 'neutral' | 'smirk'
   accessory: 'none' | 'glasses' | 'sunglasses' | 'hat' | 'crown' | 'headband'
-  shirtColor: string  // hex color
-  pantsColor: string  // hex color
-  shoesColor: string  // hex color
+  shirtColor: string
+  pantsColor: string
+  shoesColor: string
 }
 
 export type User = {
@@ -17,17 +17,29 @@ export type User = {
   displayName: string
   avatar: AvatarConfig
   createdAt: Date
-  groups: string[]  // groupIds
+  groups: string[]
+}
+
+export type PlazaPreset = {
+  id: string
+  emoji: string
+  label: string
+  points: number   // positive = give, negative = take
 }
 
 export type Group = {
   id: string
   name: string
   description: string
-  createdBy: string  // uid
-  inviteCode: string  // 6-char uppercase code
+  createdBy: string
+  inviteCode: string
   createdAt: Date
   memberCount: number
+  emoji?: string
+  dailyGiveLimit?: number   // default 100
+  dailyTakeLimit?: number   // default 20
+  timezone?: string
+  presets?: PlazaPreset[]
 }
 
 export type GroupMember = {
@@ -35,10 +47,11 @@ export type GroupMember = {
   displayName: string
   avatar: AvatarConfig
   totalPoints: number
-  dailyPointsGiven: number   // resets daily, max 100
-  dailyPointsTaken: number   // resets daily, max 20
-  lastResetDate: string      // YYYY-MM-DD
+  dailyPointsGiven: number
+  dailyPointsTaken: number
+  lastResetDate: string
   joinedAt: Date
+  isAdmin?: boolean
 }
 
 export type Transaction = {
@@ -47,14 +60,14 @@ export type Transaction = {
   fromName: string
   toUid: string
   toName: string
-  points: number   // positive = give, negative = take
+  points: number
   reason: string
   createdAt: Date
 }
 
 export type PointsAllocation = {
   toUid: string
-  points: number   // positive = give, negative = take
+  points: number
   reason: string
 }
 
@@ -93,6 +106,7 @@ export type CaseStatus =
   | 'in_court'
   | 'resolved_innocent'
   | 'resolved_guilty'
+  | 'dismissed'
 
 export type CourtCase = {
   id: string
@@ -107,5 +121,6 @@ export type CourtCase = {
   createdAt: Date
   courtDeadline?: Date
   votes: Record<string, 'innocent' | 'guilty'>
+  chiefVoterUid?: string
   resolvedAt?: Date
 }

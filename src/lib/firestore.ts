@@ -19,7 +19,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset } from './types'
 
 // Helper to get today's date string YYYY-MM-DD
 function todayString(): string {
@@ -86,9 +86,15 @@ export async function updateUserDisplayName(uid: string, displayName: string): P
 export async function createGroup(
   creatorUid: string,
   name: string,
-  description: string
+  description: string,
+  options?: {
+    emoji?: string
+    dailyGiveLimit?: number
+    dailyTakeLimit?: number
+    timezone?: string
+    presets?: PlazaPreset[]
+  }
 ): Promise<string> {
-  // Fetch creator profile to get displayName and avatar
   const creator = await getUser(creatorUid)
   if (!creator) throw new Error('Creator user not found')
 
@@ -100,7 +106,6 @@ export async function createGroup(
 
   const batch = writeBatch(db)
 
-  // Create group doc
   batch.set(groupRef, {
     id: groupId,
     name,
@@ -109,9 +114,13 @@ export async function createGroup(
     inviteCode,
     createdAt: serverTimestamp(),
     memberCount: 1,
+    emoji: options?.emoji ?? '🏠',
+    dailyGiveLimit: options?.dailyGiveLimit ?? 100,
+    dailyTakeLimit: options?.dailyTakeLimit ?? 20,
+    timezone: options?.timezone ?? 'UTC',
+    presets: options?.presets ?? [],
   })
 
-  // Create member doc for creator
   const memberRef = doc(db, 'groups', groupId, 'members', creatorUid)
   batch.set(memberRef, {
     uid: creatorUid,
@@ -121,6 +130,7 @@ export async function createGroup(
     dailyPointsGiven: 0,
     dailyPointsTaken: 0,
     lastResetDate: today,
+    isAdmin: true,
     joinedAt: serverTimestamp(),
   })
 
@@ -196,6 +206,11 @@ export async function getGroup(groupId: string): Promise<Group | null> {
       inviteCode: data.inviteCode,
       createdAt: fromTimestamp(data.createdAt),
       memberCount: data.memberCount ?? 0,
+      emoji: data.emoji ?? '🏠',
+      dailyGiveLimit: data.dailyGiveLimit ?? 100,
+      dailyTakeLimit: data.dailyTakeLimit ?? 20,
+      timezone: data.timezone ?? 'UTC',
+      presets: data.presets ?? [],
     } as Group
   } catch (error) {
     console.error('Error getting group:', error)
@@ -219,6 +234,7 @@ export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
         dailyPointsTaken: data.dailyPointsTaken ?? 0,
         lastResetDate: data.lastResetDate ?? todayString(),
         joinedAt: fromTimestamp(data.joinedAt),
+        isAdmin: data.isAdmin ?? false,
       } as GroupMember
     })
   } catch (error) {
@@ -264,13 +280,13 @@ export async function leaveGroup(groupId: string, uid: string): Promise<void> {
 export async function giveOrTakePoints(
   groupId: string,
   fromUid: string,
-  allocations: PointsAllocation[]
+  allocations: PointsAllocation[],
+  isChief = false
 ): Promise<void> {
   if (!allocations || allocations.length === 0) {
     throw new Error('No allocations provided')
   }
 
-  // Validate that no allocation targets the giver
   for (const alloc of allocations) {
     if (alloc.toUid === fromUid) {
       throw new Error('You cannot give or take points from yourself')
@@ -280,7 +296,14 @@ export async function giveOrTakePoints(
   const today = todayString()
 
   await runTransaction(db, async (transaction) => {
-    // Get giver's member doc
+    // Read group for configured limits
+    const groupRef = doc(db, 'groups', groupId)
+    const groupSnap = await transaction.get(groupRef)
+    const groupData = groupSnap.data()
+    const baseGiveLimit: number = groupData?.dailyGiveLimit ?? 100
+    const takeLimit: number = groupData?.dailyTakeLimit ?? 20
+    const giveLimit = baseGiveLimit + (isChief ? 25 : 0)
+
     const giverRef = doc(db, 'groups', groupId, 'members', fromUid)
     const giverSnap = await transaction.get(giverRef)
     if (!giverSnap.exists()) {
@@ -291,28 +314,25 @@ export async function giveOrTakePoints(
     let dailyPointsGiven: number = giverData.dailyPointsGiven ?? 0
     let dailyPointsTaken: number = giverData.dailyPointsTaken ?? 0
 
-    // Reset daily counters if needed
     if (giverData.lastResetDate !== today) {
       dailyPointsGiven = 0
       dailyPointsTaken = 0
     }
 
-    // Separate into give (positive) and take (negative)
     const giveAllocations = allocations.filter((a) => a.points > 0)
     const takeAllocations = allocations.filter((a) => a.points < 0)
 
     const totalGiving = giveAllocations.reduce((sum, a) => sum + a.points, 0)
     const totalTaking = takeAllocations.reduce((sum, a) => sum + Math.abs(a.points), 0)
 
-    // Validate daily limits
-    if (dailyPointsGiven + totalGiving > 100) {
+    if (dailyPointsGiven + totalGiving > giveLimit) {
       throw new Error(
-        `Exceeds daily give limit. You have ${100 - dailyPointsGiven} points left to give today.`
+        `Exceeds daily give limit. You have ${giveLimit - dailyPointsGiven} points left to give today.`
       )
     }
     if (dailyPointsTaken + totalTaking > 20) {
       throw new Error(
-        `Exceeds daily take limit. You have ${20 - dailyPointsTaken} points left to take today.`
+        `Exceeds daily take limit. You have ${takeLimit - dailyPointsTaken} points left to take today.`
       )
     }
 
@@ -482,4 +502,56 @@ export async function getGroupDailyStats(
     remainingGive: Math.max(0, 100 - given),
     remainingTake: Math.max(0, 20 - taken),
   }
+}
+
+// ============ ADMIN OPERATIONS ============
+
+export async function banishMember(groupId: string, targetUid: string): Promise<void> {
+  await leaveGroup(groupId, targetUid)
+}
+
+export async function adminSetPoints(
+  groupId: string,
+  targetUid: string,
+  newPoints: number,
+  adminUid: string,
+  adminName: string,
+  targetName: string
+): Promise<void> {
+  const memberRef = doc(db, 'groups', groupId, 'members', targetUid)
+  const memberSnap = await getDoc(memberRef)
+  const currentPoints: number = memberSnap.data()?.totalPoints ?? 0
+  const delta = newPoints - currentPoints
+
+  const batch = writeBatch(db)
+  batch.update(memberRef, { totalPoints: newPoints })
+
+  const txRef = doc(collection(db, 'groups', groupId, 'transactions'))
+  batch.set(txRef, {
+    id: txRef.id,
+    fromUid: adminUid,
+    fromName: `Mayor ${adminName}`,
+    toUid: targetUid,
+    toName: targetName,
+    points: delta,
+    reason: 'Mayor adjustment',
+    createdAt: serverTimestamp(),
+  })
+
+  await batch.commit()
+}
+
+export async function updateGroupSettings(
+  groupId: string,
+  settings: Partial<{
+    name: string
+    emoji: string
+    description: string
+    dailyGiveLimit: number
+    dailyTakeLimit: number
+    timezone: string
+    presets: import('./types').PlazaPreset[]
+  }>
+): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), settings)
 }

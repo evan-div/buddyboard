@@ -18,7 +18,7 @@ import {
   getTransactionsSince,
 } from '@/lib/firestore'
 import { copyToClipboard } from '@/lib/utils'
-import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification } from '@/lib/types'
+import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
 import { subscribeToNotifications, fileAppeal } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
@@ -27,6 +27,7 @@ import NotificationPanel from '@/components/Notifications/NotificationPanel'
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
+const AdminPanel = dynamic(() => import('@/components/Group/AdminPanel'), { ssr: false })
 
 // ─── Points Modal ─────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ type PointsModalProps = {
   members: GroupMember[]
   remainingGive: number
   remainingTake: number
+  isChief?: boolean
+  presets?: PlazaPreset[]
   onClose: () => void
   onSubmitted: () => void
 }
@@ -51,6 +54,8 @@ function PointsModal({
   members,
   remainingGive,
   remainingTake,
+  isChief,
+  presets,
   onClose,
   onSubmitted,
 }: PointsModalProps) {
@@ -61,7 +66,8 @@ function PointsModal({
 
   const otherMembers = members.filter((m) => m.uid !== currentUid)
 
-  const dailyLimit = mode === 'give' ? remainingGive : remainingTake
+  const dailyLimit = mode === 'give' ? remainingGive + (isChief ? 25 : 0) : remainingTake
+  const modePresets = (presets ?? []).filter((p) => mode === 'give' ? p.points > 0 : p.points < 0)
 
   const totalAllocated = otherMembers.reduce((sum, m) => {
     const val = parseInt(allocations[m.uid]?.points ?? '0', 10)
@@ -114,7 +120,7 @@ function PointsModal({
 
     setSubmitting(true)
     try {
-      await giveOrTakePoints(groupId, currentUid, allocs)
+      await giveOrTakePoints(groupId, currentUid, allocs, isChief ?? false)
       onSubmitted()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to submit points.')
@@ -192,6 +198,25 @@ function PointsModal({
                 key={member.uid}
                 className="bg-gray-800 rounded-xl p-3 border border-gray-700"
               >
+                {modePresets.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {modePresets.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          updateAllocation(member.uid, 'points', String(Math.abs(p.points)))
+                          updateAllocation(member.uid, 'reason', p.label)
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-400 hover:border-indigo-500 hover:text-white transition-all"
+                      >
+                        {p.emoji} {p.label}
+                        <span className={`ml-1 font-bold ${p.points > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {p.points > 0 ? `+${p.points}` : p.points}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-3 mb-2">
                   <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={32} />
                   <span className="text-white font-medium text-sm flex-1 truncate">
@@ -323,7 +348,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   alltime: 'All Time',
 }
 
-function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember[], currentUid: string, groupId: string }) {
+function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: { members: GroupMember[], currentUid: string, groupId: string, chiefUid?: string | null, creatorUid?: string }) {
   const [period, setPeriod] = useState<Period>('alltime')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
@@ -400,6 +425,8 @@ function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember
                     <p className={`flex-1 font-semibold text-sm truncate ${isCurrentUser ? 'text-indigo-300' : 'text-white'}`}>
                       {member.displayName}
                       {isCurrentUser && <span className="text-indigo-500 text-xs font-normal ml-1">(you)</span>}
+                      {member.uid === chiefUid && <span className="text-yellow-400 text-xs ml-1" title="Chief">⭐</span>}
+                      {member.uid === creatorUid && <span className="text-violet-400 text-xs ml-1" title="Mayor">👑</span>}
                     </p>
                     <span className={`text-sm font-bold ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-gray-400'}`}>
                       {period !== 'alltime'
@@ -527,6 +554,7 @@ export default function GroupPage() {
   const notifInitialized = useRef(false)
   const [notifications, setNotifications] = useState<GroupNotification[]>([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [pendingAppeal, setPendingAppeal] = useState<{
     transactionId: string
     fromUid: string
@@ -679,6 +707,14 @@ export default function GroupPage() {
     await loadGroupData()
   }
 
+  // Derived: Chief = member with highest positive totalPoints
+  const chiefMember = members.length > 0
+    ? members.reduce((best, m) => m.totalPoints > best.totalPoints ? m : best)
+    : null
+  const chiefUid: string | null = chiefMember && chiefMember.totalPoints > 0 ? chiefMember.uid : null
+  const isCurrentUserChief = !!(user && chiefUid === user.uid)
+  const isMayor = !!(user && group && group.createdBy === user.uid)
+
   return (
     <>
       {/* Loading state */}
@@ -737,6 +773,17 @@ export default function GroupPage() {
                 >
                   {copied ? '✓ Copied!' : group.inviteCode}
                 </button>
+
+                {/* Mayor admin gear */}
+                {isMayor && (
+                  <button
+                    onClick={() => setShowAdminPanel(true)}
+                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                    aria-label="Admin panel"
+                  >
+                    <span style={{ fontSize: '16px' }}>⚙️</span>
+                  </button>
+                )}
 
                 {/* Notification bell */}
                 <button
@@ -828,12 +875,13 @@ export default function GroupPage() {
             ) : activeTab === 'feed' ? (
               <FeedTab groupId={groupId} members={members} />
             ) : activeTab === 'leaderboard' ? (
-              <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} />
+              <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
             ) : (
               <CourtTab
                 groupId={groupId}
                 currentUid={user.uid}
                 memberUids={members.map((m) => m.uid)}
+                chiefUid={chiefUid}
               />
             )}
           </main>
@@ -856,11 +904,24 @@ export default function GroupPage() {
               members={members}
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
+              isChief={isCurrentUserChief}
+              presets={group.presets}
               onClose={() => setShowPointsModal(false)}
               onSubmitted={handlePointsSubmitted}
             />
           )}
         </div>
+      )}
+
+      {showAdminPanel && group && (
+        <AdminPanel
+          group={group}
+          members={members}
+          currentUid={user!.uid}
+          chiefUid={chiefUid}
+          onClose={() => setShowAdminPanel(false)}
+          onRefresh={refreshGroupData}
+        />
       )}
 
       <PointsToastContainer

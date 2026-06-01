@@ -9,6 +9,7 @@ type Props = {
   groupId: string
   currentUid: string
   memberUids: string[]
+  chiefUid?: string | null
 }
 
 function timeLeft(deadline: Date): string {
@@ -34,11 +35,13 @@ function CaseCard({
   currentUid,
   memberUids,
   groupId,
+  chiefUid,
 }: {
   c: CourtCase
   currentUid: string
   memberUids: string[]
   groupId: string
+  chiefUid?: string | null
 }) {
   const [voting, setVoting] = useState(false)
   const userVote = c.votes[currentUid]
@@ -55,7 +58,7 @@ function CaseCard({
   async function vote(v: 'innocent' | 'guilty') {
     setVoting(true)
     try {
-      await castVote(groupId, c.id, currentUid, v, memberUids)
+      await castVote(groupId, c.id, currentUid, v, memberUids, chiefUid ?? undefined)
     } catch (e) {
       console.error(e)
     } finally {
@@ -223,7 +226,7 @@ function CaseCard({
   )
 }
 
-export default function CourtTab({ groupId, currentUid, memberUids }: Props) {
+export default function CourtTab({ groupId, currentUid, memberUids, chiefUid }: Props) {
   const [cases, setCases] = useState<CourtCase[]>([])
 
   useEffect(() => {
@@ -249,7 +252,7 @@ export default function CourtTab({ groupId, currentUid, memberUids }: Props) {
           {title}
         </h3>
         {list.map((c) => (
-          <CaseCard key={c.id} c={c} currentUid={currentUid} memberUids={memberUids} groupId={groupId} />
+          <CaseCard key={c.id} c={c} currentUid={currentUid} memberUids={memberUids} groupId={groupId} chiefUid={chiefUid} />
         ))}
       </div>
     )
