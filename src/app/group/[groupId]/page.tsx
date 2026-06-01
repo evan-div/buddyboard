@@ -804,9 +804,9 @@ export default function GroupPage() {
                         position: 'absolute', top: -6, right: -6,
                         background: '#f35b5a', color: 'white',
                         fontSize: 10, fontWeight: 900,
-                        borderRadius: 99, minWidth: 18, height: 18,
+                        borderRadius: '50%', width: 18, height: 18,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: '0 4px', border: '2px solid white',
+                        border: '2px solid white',
                       }}>
                         {badge}
                       </span>
