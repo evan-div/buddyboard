@@ -755,55 +755,58 @@ export default function GroupPage() {
       {/* Main content — only when data is ready */}
       {!authLoading && !loading && group && user && userProfile && (
         <div className="min-h-screen bg-[#0f0f13]">
-          {/* Header */}
-          <header className="sticky top-0 z-30">
-            <div className="max-w-lg mx-auto px-3 py-3 flex items-center gap-2">
+
+          {/* ── Floating nav overlay ── */}
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 30, pointerEvents: 'none' }}>
+            <div style={{ maxWidth: '512px', margin: '0 auto', padding: '12px', display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'auto' }}>
               {/* Back */}
               <button
                 onClick={() => router.push('/dashboard')}
-                className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-[14px] bg-white font-bold text-gray-700 text-base hover:bg-gray-100 transition-colors shadow-sm"
+                style={{ flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 14, background: 'white', fontWeight: 800, fontSize: 16, color: '#374151', boxShadow: '0 1px 4px rgba(0,0,0,0.15)', border: 'none', cursor: 'pointer' }}
                 aria-label="Back"
               >
                 ←
               </button>
 
               {/* Tab buttons */}
-              <div className="flex gap-1.5 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              <div style={{ display: 'flex', gap: 6, flex: 1, overflowX: 'auto', scrollbarWidth: 'none' }}>
                 {(
                   [
-                    { key: 'plaza',       label: 'PLAZA',       badge: 0             },
+                    { key: 'plaza',       label: 'PLAZA',       badge: 0              },
                     { key: 'feed',        label: 'FEED',        badge: unreadFeedCount },
-                    { key: 'leaderboard', label: 'LEADERBOARD', badge: 0             },
+                    { key: 'leaderboard', label: 'LEADERBOARD', badge: 0              },
                     { key: 'court',       label: 'COURT',       badge: activeCaseCount },
                   ] as const
                 ).map(({ key, label, badge }) => (
                   <button
                     key={key}
                     onClick={() => switchTab(key)}
-                    className="relative flex-shrink-0 px-3.5 py-2.5 rounded-[14px] bg-white font-extrabold text-xs tracking-wider uppercase transition-all hover:bg-gray-50"
                     style={{
+                      position: 'relative',
+                      flexShrink: 0,
+                      padding: '9px 14px',
+                      borderRadius: 14,
+                      background: 'white',
+                      fontWeight: 900,
+                      fontSize: 11,
+                      letterSpacing: '0.07em',
+                      textTransform: 'uppercase',
                       color: activeTab === key ? '#111827' : '#9ca3af',
-                      boxShadow: activeTab === key ? '0 2px 10px rgba(0,0,0,0.18)' : '0 1px 3px rgba(0,0,0,0.1)',
+                      boxShadow: activeTab === key ? '0 3px 12px rgba(0,0,0,0.2)' : '0 1px 4px rgba(0,0,0,0.1)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'box-shadow 0.15s, color 0.15s',
                     }}
                   >
                     {label}
                     {badge > 0 && (
                       <span style={{
-                        position: 'absolute',
-                        top: '-6px',
-                        right: '-6px',
-                        background: '#f35b5a',
-                        color: 'white',
-                        fontSize: '10px',
-                        fontWeight: 900,
-                        borderRadius: '99px',
-                        minWidth: '18px',
-                        height: '18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '0 4px',
-                        border: '2px solid white',
+                        position: 'absolute', top: -6, right: -6,
+                        background: '#f35b5a', color: 'white',
+                        fontSize: 10, fontWeight: 900,
+                        borderRadius: 99, minWidth: 18, height: 18,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '0 4px', border: '2px solid white',
                       }}>
                         {badge}
                       </span>
@@ -818,11 +821,18 @@ export default function GroupPage() {
                 return (
                   <button
                     onClick={() => setShowNotifPanel(true)}
-                    className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-colors ${unreadCount > 0 ? 'bell-wiggle' : ''}`}
-                    style={{ background: unreadCount > 0 ? '#f35b5a' : 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}
+                    className={unreadCount > 0 ? 'bell-wiggle' : ''}
+                    style={{
+                      flexShrink: 0, width: 40, height: 40,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: '50%', border: 'none', cursor: 'pointer',
+                      background: unreadCount > 0 ? '#f35b5a' : 'white',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                      transition: 'background 0.2s',
+                    }}
                     aria-label="Notifications"
                   >
-                    <span style={{ fontSize: '18px' }}>🔔</span>
+                    <span style={{ fontSize: 18 }}>🔔</span>
                   </button>
                 )
               })()}
@@ -831,42 +841,51 @@ export default function GroupPage() {
               {isMayor && (
                 <button
                   onClick={() => setShowAdminPanel(true)}
-                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-white hover:bg-gray-100 transition-colors"
-                  style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}
+                  style={{
+                    flexShrink: 0, width: 40, height: 40,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: '50%', border: 'none', cursor: 'pointer',
+                    background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                  }}
                   aria-label="Admin panel"
                 >
-                  <span style={{ fontSize: '18px' }}>⚙️</span>
+                  <span style={{ fontSize: 18 }}>⚙️</span>
                 </button>
               )}
             </div>
-          </header>
+          </div>
 
-          <main className="max-w-lg mx-auto px-4 py-5">
-            {activeTab === 'plaza' ? (
-              <MiiPlaza
-                members={members}
-                currentUid={user.uid}
-                groupId={groupId}
-                remainingGive={dailyStats.remainingGive}
-                remainingTake={dailyStats.remainingTake}
-                onPointsSubmitted={refreshGroupData}
-                onAvatarUpdated={refreshGroupData}
-                onReady={handlePlazaReady}
-              />
-            ) : activeTab === 'feed' ? (
-              <FeedTab groupId={groupId} members={members} />
-            ) : activeTab === 'leaderboard' ? (
-              <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
-            ) : (
-              <CourtTab
-                groupId={groupId}
-                currentUid={user.uid}
-                memberUids={members.map((m) => m.uid)}
-                chiefUid={chiefUid}
-              />
-            )}
-          </main>
+          {/* ── Plaza: full-screen, nav floats over it ── */}
+          {activeTab === 'plaza' && (
+            <MiiPlaza
+              members={members}
+              currentUid={user.uid}
+              groupId={groupId}
+              remainingGive={dailyStats.remainingGive}
+              remainingTake={dailyStats.remainingTake}
+              onPointsSubmitted={refreshGroupData}
+              onAvatarUpdated={refreshGroupData}
+              onReady={handlePlazaReady}
+            />
+          )}
 
+          {/* ── Other tabs: scrollable content below the floating nav ── */}
+          {activeTab !== 'plaza' && (
+            <div style={{ paddingTop: 72, maxWidth: 512, margin: '0 auto', padding: '72px 16px 32px' }}>
+              {activeTab === 'feed' && <FeedTab groupId={groupId} members={members} />}
+              {activeTab === 'leaderboard' && (
+                <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
+              )}
+              {activeTab === 'court' && (
+                <CourtTab
+                  groupId={groupId}
+                  currentUid={user.uid}
+                  memberUids={members.map((m) => m.uid)}
+                  chiefUid={chiefUid}
+                />
+              )}
+            </div>
+          )}
 
         </div>
       )}
