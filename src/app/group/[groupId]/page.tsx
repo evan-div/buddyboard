@@ -17,9 +17,8 @@ import {
   getGroupDailyStats,
   getTransactionsSince,
 } from '@/lib/firestore'
-import { copyToClipboard } from '@/lib/utils'
 import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
-import { subscribeToNotifications, fileAppeal } from '@/lib/appeals'
+import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
@@ -546,11 +545,13 @@ export default function GroupPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
-  const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
+  const [unreadFeedCount, setUnreadFeedCount] = useState(0)
+  const [activeCaseCount, setActiveCaseCount] = useState(0)
   const seenTxIds = useRef(new Set<string>())
   const notifInitialized = useRef(false)
+  const activeTabRef = useRef(activeTab)
   const [notifications, setNotifications] = useState<GroupNotification[]>([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
@@ -564,6 +565,9 @@ export default function GroupPage() {
   } | null>(null)
   const [appealComment, setAppealComment] = useState('')
   const [filingAppeal, setFilingAppeal] = useState(false)
+
+  // Keep ref in sync so feed subscription can read current tab without deps
+  useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -641,6 +645,10 @@ export default function GroupPage() {
       for (const tx of txs) {
         if (!seenIds.has(tx.id)) {
           seenIds.add(tx.id)
+          // Badge for Feed tab when user isn't looking at it
+          if (activeTabRef.current !== 'feed') {
+            setUnreadFeedCount((prev) => prev + 1)
+          }
           if (tx.toUid === user.uid) {
             const item: PointsToastItem = {
               id: tx.id,
@@ -693,11 +701,18 @@ export default function GroupPage() {
     }
   }
 
-  async function handleCopyInviteCode() {
-    if (!group) return
-    await copyToClipboard(group.inviteCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  // Court cases count for badge
+  useEffect(() => {
+    if (!groupId) return
+    const unsub = subscribeToCases(groupId, (cases) => {
+      setActiveCaseCount(cases.filter((c) => c.status === 'in_court').length)
+    })
+    return unsub
+  }, [groupId])
+
+  function switchTab(tab: typeof activeTab) {
+    setActiveTab(tab)
+    if (tab === 'feed') setUnreadFeedCount(0)
   }
 
   // Derived: Chief = member with highest positive totalPoints
@@ -741,115 +756,88 @@ export default function GroupPage() {
       {!authLoading && !loading && group && user && userProfile && (
         <div className="min-h-screen bg-[#0f0f13]">
           {/* Header */}
-          <header className="sticky top-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-b border-gray-800">
-            <div className="max-w-lg mx-auto px-4 py-3">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => router.push('/dashboard')}
-                  className="text-gray-400 hover:text-white transition-colors text-xl leading-none flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800"
-                  aria-label="Back"
-                >
-                  ←
-                </button>
+          <header className="sticky top-0 z-30">
+            <div className="max-w-lg mx-auto px-3 py-3 flex items-center gap-2">
+              {/* Back */}
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-[14px] bg-white font-bold text-gray-700 text-base hover:bg-gray-100 transition-colors shadow-sm"
+                aria-label="Back"
+              >
+                ←
+              </button>
 
-                <h1 className="text-white font-bold text-base flex-1 truncate">
-                  {group.name}
-                </h1>
-
-                <button
-                  onClick={handleCopyInviteCode}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold tracking-widest transition-all flex-shrink-0 ${
-                    copied
-                      ? 'bg-green-500/15 border-green-500/40 text-green-400'
-                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
-                  }`}
-                >
-                  {copied ? '✓ Copied!' : group.inviteCode}
-                </button>
-
-                {/* Mayor admin gear */}
-                {isMayor && (
+              {/* Tab buttons */}
+              <div className="flex gap-1.5 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                {(
+                  [
+                    { key: 'plaza',       label: 'PLAZA',       badge: 0             },
+                    { key: 'feed',        label: 'FEED',        badge: unreadFeedCount },
+                    { key: 'leaderboard', label: 'LEADERBOARD', badge: 0             },
+                    { key: 'court',       label: 'COURT',       badge: activeCaseCount },
+                  ] as const
+                ).map(({ key, label, badge }) => (
                   <button
-                    onClick={() => setShowAdminPanel(true)}
-                    className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 transition-colors"
-                    aria-label="Admin panel"
+                    key={key}
+                    onClick={() => switchTab(key)}
+                    className="relative flex-shrink-0 px-3.5 py-2.5 rounded-[14px] bg-white font-extrabold text-xs tracking-wider uppercase transition-all hover:bg-gray-50"
+                    style={{
+                      color: activeTab === key ? '#111827' : '#9ca3af',
+                      boxShadow: activeTab === key ? '0 2px 10px rgba(0,0,0,0.18)' : '0 1px 3px rgba(0,0,0,0.1)',
+                    }}
                   >
-                    <span style={{ fontSize: '16px' }}>⚙️</span>
+                    {label}
+                    {badge > 0 && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '-6px',
+                        right: '-6px',
+                        background: '#f35b5a',
+                        color: 'white',
+                        fontSize: '10px',
+                        fontWeight: 900,
+                        borderRadius: '99px',
+                        minWidth: '18px',
+                        height: '18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0 4px',
+                        border: '2px solid white',
+                      }}>
+                        {badge}
+                      </span>
+                    )}
                   </button>
-                )}
-
-                {/* Notification bell */}
-                <button
-                  onClick={() => setShowNotifPanel(true)}
-                  className="relative flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 transition-colors"
-                  aria-label="Notifications"
-                >
-                  <span style={{ fontSize: '16px' }}>🔔</span>
-                  {notifications.filter((n) => !n.read).length > 0 && (
-                    <span style={{
-                      position: 'absolute',
-                      top: '4px',
-                      right: '4px',
-                      background: '#6366f1',
-                      color: 'white',
-                      fontSize: '9px',
-                      fontWeight: 800,
-                      borderRadius: '99px',
-                      minWidth: '14px',
-                      height: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '0 3px',
-                    }}>
-                      {notifications.filter((n) => !n.read).length}
-                    </span>
-                  )}
-                </button>
+                ))}
               </div>
 
-              <div className="flex gap-4 mt-3">
+              {/* Bell */}
+              {(() => {
+                const unreadCount = notifications.filter((n) => !n.read).length
+                return (
+                  <button
+                    onClick={() => setShowNotifPanel(true)}
+                    className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-colors ${unreadCount > 0 ? 'bell-wiggle' : ''}`}
+                    style={{ background: unreadCount > 0 ? '#f35b5a' : 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}
+                    aria-label="Notifications"
+                  >
+                    <span style={{ fontSize: '18px' }}>🔔</span>
+                  </button>
+                )
+              })()}
+
+              {/* Mayor gear */}
+              {isMayor && (
                 <button
-                  onClick={() => setActiveTab('plaza')}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                    activeTab === 'plaza'
-                      ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                  }`}
+                  onClick={() => setShowAdminPanel(true)}
+                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-white hover:bg-gray-100 transition-colors"
+                  style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}
+                  aria-label="Admin panel"
                 >
-                  Plaza
+                  <span style={{ fontSize: '18px' }}>⚙️</span>
                 </button>
-                <button
-                  onClick={() => setActiveTab('feed')}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                    activeTab === 'feed'
-                      ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  Feed
-                </button>
-                <button
-                  onClick={() => setActiveTab('leaderboard')}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors ${
-                    activeTab === 'leaderboard'
-                      ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  Leaderboard
-                </button>
-                <button
-                  onClick={() => setActiveTab('court')}
-                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
-                    activeTab === 'court'
-                      ? 'border-indigo-500 text-indigo-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  Court
-                </button>
-              </div>
+              )}
             </div>
           </header>
 
