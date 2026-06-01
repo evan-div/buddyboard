@@ -546,7 +546,6 @@ export default function GroupPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
-  const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
@@ -701,12 +700,6 @@ export default function GroupPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  async function handlePointsSubmitted() {
-    setShowPointsModal(false)
-    // Refresh data
-    await loadGroupData()
-  }
-
   // Derived: Chief = member with highest positive totalPoints
   const chiefMember = members.length > 0
     ? members.reduce((best, m) => m.totalPoints > best.totalPoints ? m : best)
@@ -746,7 +739,7 @@ export default function GroupPage() {
 
       {/* Main content — only when data is ready */}
       {!authLoading && !loading && group && user && userProfile && (
-        <div className="min-h-screen bg-[#0f0f13] pb-24">
+        <div className="min-h-screen bg-[#0f0f13]">
           {/* Header */}
           <header className="sticky top-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-b border-gray-800">
             <div className="max-w-lg mx-auto px-4 py-3">
@@ -886,30 +879,7 @@ export default function GroupPage() {
             )}
           </main>
 
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-t border-gray-800">
-            <div className="max-w-lg mx-auto px-4 py-3">
-              <button
-                onClick={() => setShowPointsModal(true)}
-                className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold py-3.5 rounded-2xl transition-all shadow-lg shadow-indigo-500/25 text-base"
-              >
-                ⭐ Give / Take Points
-              </button>
-            </div>
-          </div>
 
-          {showPointsModal && (
-            <PointsModal
-              groupId={groupId}
-              currentUid={user.uid}
-              members={members}
-              remainingGive={dailyStats.remainingGive}
-              remainingTake={dailyStats.remainingTake}
-              isChief={isCurrentUserChief}
-              presets={group.presets}
-              onClose={() => setShowPointsModal(false)}
-              onSubmitted={handlePointsSubmitted}
-            />
-          )}
         </div>
       )}
 
