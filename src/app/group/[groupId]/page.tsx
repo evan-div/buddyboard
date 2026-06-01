@@ -757,7 +757,7 @@ export default function GroupPage() {
         <div className="min-h-screen bg-[#0f0f13]">
 
           {/* ── Floating nav overlay ── */}
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 30, pointerEvents: 'none' }}>
+          <div style={{ position: 'fixed', top: 50, left: 0, right: 0, zIndex: 30, pointerEvents: 'none' }}>
             <div style={{ maxWidth: '512px', margin: '0 auto', padding: '12px', display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'auto' }}>
               {/* Back */}
               <button
@@ -871,7 +871,7 @@ export default function GroupPage() {
 
           {/* ── Other tabs: scrollable content below the floating nav ── */}
           {activeTab !== 'plaza' && (
-            <div style={{ paddingTop: 72, maxWidth: 512, margin: '0 auto', padding: '72px 16px 32px' }}>
+            <div style={{ paddingTop: 122, maxWidth: 512, margin: '0 auto', padding: '122px 16px 32px' }}>
               {activeTab === 'feed' && <FeedTab groupId={groupId} members={members} />}
               {activeTab === 'leaderboard' && (
                 <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
