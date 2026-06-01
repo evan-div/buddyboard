@@ -359,7 +359,7 @@ function LeaderboardTab({ members, currentUid, groupId }: { members: GroupMember
 
       {loading ? (
         <div style={{
-          height: '320px', borderRadius: '16px', marginBottom: '20px',
+          height: '400px', borderRadius: '16px', marginBottom: '20px',
           background: 'linear-gradient(to bottom, #1e4fa0, #c8e8f8)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>

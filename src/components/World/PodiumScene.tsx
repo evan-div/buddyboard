@@ -258,7 +258,7 @@ function Scene({ first, second, third, period }: {
 
       {/* Stage floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[22, 14]} />
+        <planeGeometry args={[12, 5]} />
         <meshStandardMaterial color="#dde0ea" roughness={0.85} />
       </mesh>
 
@@ -285,14 +285,15 @@ export default function PodiumScene({ first, second, third, period }: {
 }) {
   return (
     <div style={{
-      height: '320px',
+      height: '400px',
       borderRadius: '16px',
       overflow: 'hidden',
       marginBottom: '20px',
       background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
     }}>
       <Canvas
-        camera={{ position: [0, 4.5, 9], fov: 48 }}
+        camera={{ position: [0, 2.8, 6.5], fov: 58 }}
+        onCreated={({ camera }) => camera.lookAt(0, 2.2, 0)}
         gl={{ antialias: true, alpha: true }}
         shadows
         style={{ width: '100%', height: '100%' }}
