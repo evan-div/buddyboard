@@ -3,13 +3,23 @@
 import { useEffect, useState } from 'react'
 
 export type PointsToastItem = {
-  id: string
+  id: string           // transaction ID
+  fromUid: string
   fromName: string
+  toName: string
   points: number
   reason?: string
 }
 
-function ToastCard({ toast, onDismiss }: { toast: PointsToastItem; onDismiss: () => void }) {
+function ToastCard({
+  toast,
+  onDismiss,
+  onAppeal,
+}: {
+  toast: PointsToastItem
+  onDismiss: () => void
+  onAppeal: () => void
+}) {
   const [visible, setVisible] = useState(false)
   const isPos = toast.points > 0
   const pts = Math.abs(toast.points)
@@ -87,13 +97,39 @@ function ToastCard({ toast, onDismiss }: { toast: PointsToastItem; onDismiss: ()
           &ldquo;{toast.reason}&rdquo;
         </p>
       )}
+
+      {!isPos && (
+        <div style={{ marginTop: '10px', borderTop: '1px solid #f3f4f6', paddingTop: '8px' }}>
+          <button
+            onClick={onAppeal}
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '8px',
+              color: '#dc2626',
+              fontSize: '11px',
+              fontWeight: 700,
+              padding: '4px 12px',
+              cursor: 'pointer',
+              width: '100%',
+            }}
+          >
+            ⚖️ Appeal this
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
-export default function PointsToastContainer({ toasts, onDismiss }: {
+export default function PointsToastContainer({
+  toasts,
+  onDismiss,
+  onAppeal,
+}: {
   toasts: PointsToastItem[]
   onDismiss: (id: string) => void
+  onAppeal: (item: PointsToastItem) => void
 }) {
   if (toasts.length === 0) return null
 
@@ -110,7 +146,11 @@ export default function PointsToastContainer({ toasts, onDismiss }: {
     }}>
       {toasts.map((t) => (
         <div key={t.id} style={{ pointerEvents: 'auto' }}>
-          <ToastCard toast={t} onDismiss={() => onDismiss(t.id)} />
+          <ToastCard
+            toast={t}
+            onDismiss={() => onDismiss(t.id)}
+            onAppeal={() => onAppeal(t)}
+          />
         </div>
       ))}
     </div>

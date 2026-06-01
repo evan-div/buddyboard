@@ -57,3 +57,55 @@ export type PointsAllocation = {
   points: number   // positive = give, negative = take
   reason: string
 }
+
+export type NotificationType =
+  | 'points_received'
+  | 'points_taken'
+  | 'appeal_filed'
+  | 'appeal_accepted'
+  | 'appeal_denied'
+  | 'court_opened'
+  | 'court_resolved'
+
+export type GroupNotification = {
+  id: string
+  forUid: string
+  type: NotificationType
+  transactionId: string
+  caseId?: string
+  fromUid: string
+  fromName: string
+  toName: string
+  points: number
+  reason?: string
+  appealComment?: string
+  userComment?: string
+  outcome?: 'innocent' | 'guilty'
+  read: boolean
+  cleared: boolean
+  createdAt: Date
+}
+
+export type CaseStatus =
+  | 'pending_review'
+  | 'accepted'
+  | 'denied'
+  | 'in_court'
+  | 'resolved_innocent'
+  | 'resolved_guilty'
+
+export type CourtCase = {
+  id: string
+  transactionId: string
+  defendantUid: string
+  defendantName: string
+  accuserUid: string
+  accuserName: string
+  points: number
+  appealComment: string
+  status: CaseStatus
+  createdAt: Date
+  courtDeadline?: Date
+  votes: Record<string, 'innocent' | 'guilty'>
+  resolvedAt?: Date
+}

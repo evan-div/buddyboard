@@ -18,12 +18,15 @@ import {
   getTransactionsSince,
 } from '@/lib/firestore'
 import { copyToClipboard } from '@/lib/utils'
-import type { Group, GroupMember, Transaction, PointsAllocation } from '@/lib/types'
+import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification } from '@/lib/types'
+import { subscribeToNotifications, fileAppeal } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
+import NotificationPanel from '@/components/Notifications/NotificationPanel'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
+const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
 
 // ─── Points Modal ─────────────────────────────────────────────────────────────
 
@@ -514,7 +517,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -522,6 +525,18 @@ export default function GroupPage() {
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
   const seenTxIds = useRef(new Set<string>())
   const notifInitialized = useRef(false)
+  const [notifications, setNotifications] = useState<GroupNotification[]>([])
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [pendingAppeal, setPendingAppeal] = useState<{
+    transactionId: string
+    fromUid: string
+    fromName: string
+    toName: string
+    points: number
+    reason?: string
+  } | null>(null)
+  const [appealComment, setAppealComment] = useState('')
+  const [filingAppeal, setFilingAppeal] = useState(false)
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -602,7 +617,9 @@ export default function GroupPage() {
           if (tx.toUid === user.uid) {
             const item: PointsToastItem = {
               id: tx.id,
+              fromUid: tx.fromUid,
               fromName: tx.fromName,
+              toName: tx.toName,
               points: tx.points,
               reason: tx.reason,
             }
@@ -619,6 +636,35 @@ export default function GroupPage() {
       seenIds.clear()
     }
   }, [user?.uid, groupId])
+
+  // Subscribe to persistent notifications
+  useEffect(() => {
+    if (!user || !groupId) return
+    const unsub = subscribeToNotifications(groupId, user.uid, setNotifications)
+    return unsub
+  }, [user?.uid, groupId])
+
+  async function handleFileAppeal() {
+    if (!pendingAppeal || !userProfile || !appealComment.trim()) return
+    setFilingAppeal(true)
+    try {
+      await fileAppeal(
+        groupId,
+        pendingAppeal.transactionId,
+        user!.uid,
+        userProfile.displayName,
+        pendingAppeal.fromUid,
+        pendingAppeal.fromName,
+        Math.abs(pendingAppeal.points),
+        appealComment.trim(),
+        pendingAppeal.reason
+      )
+      setPendingAppeal(null)
+      setAppealComment('')
+    } finally {
+      setFilingAppeal(false)
+    }
+  }
 
   async function handleCopyInviteCode() {
     if (!group) return
@@ -691,6 +737,35 @@ export default function GroupPage() {
                 >
                   {copied ? '✓ Copied!' : group.inviteCode}
                 </button>
+
+                {/* Notification bell */}
+                <button
+                  onClick={() => setShowNotifPanel(true)}
+                  className="relative flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 transition-colors"
+                  aria-label="Notifications"
+                >
+                  <span style={{ fontSize: '16px' }}>🔔</span>
+                  {notifications.filter((n) => !n.read).length > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '4px',
+                      right: '4px',
+                      background: '#6366f1',
+                      color: 'white',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      borderRadius: '99px',
+                      minWidth: '14px',
+                      height: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 3px',
+                    }}>
+                      {notifications.filter((n) => !n.read).length}
+                    </span>
+                  )}
+                </button>
               </div>
 
               <div className="flex gap-4 mt-3">
@@ -724,6 +799,16 @@ export default function GroupPage() {
                 >
                   Leaderboard
                 </button>
+                <button
+                  onClick={() => setActiveTab('court')}
+                  className={`pb-2 text-sm font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'court'
+                      ? 'border-indigo-500 text-indigo-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Court
+                </button>
               </div>
             </div>
           </header>
@@ -742,8 +827,14 @@ export default function GroupPage() {
               />
             ) : activeTab === 'feed' ? (
               <FeedTab groupId={groupId} members={members} />
-            ) : (
+            ) : activeTab === 'leaderboard' ? (
               <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} />
+            ) : (
+              <CourtTab
+                groupId={groupId}
+                currentUid={user.uid}
+                memberUids={members.map((m) => m.uid)}
+              />
             )}
           </main>
 
@@ -775,7 +866,120 @@ export default function GroupPage() {
       <PointsToastContainer
         toasts={toasts}
         onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+        onAppeal={(item) => {
+          setPendingAppeal({
+            transactionId: item.id,
+            fromUid: item.fromUid,
+            fromName: item.fromName,
+            toName: item.toName,
+            points: item.points,
+            reason: item.reason,
+          })
+          setAppealComment('')
+        }}
       />
+
+      {showNotifPanel && user && (
+        <NotificationPanel
+          groupId={groupId}
+          notifications={notifications}
+          memberUids={members.map((m) => m.uid)}
+          onClose={() => setShowNotifPanel(false)}
+          onAppeal={(notif) => {
+            setShowNotifPanel(false)
+            setPendingAppeal({
+              transactionId: notif.transactionId,
+              fromUid: notif.fromUid,
+              fromName: notif.fromName,
+              toName: notif.toName,
+              points: notif.points,
+              reason: notif.reason,
+            })
+            setAppealComment('')
+          }}
+        />
+      )}
+
+      {/* Appeal modal */}
+      {pendingAppeal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 400,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#0f0f13',
+            borderRadius: '20px 20px 0 0',
+            borderTop: '1px solid #1f2937',
+            padding: '24px 20px 32px',
+            width: '100%',
+            maxWidth: '480px',
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#f9fafb', margin: '0 0 4px' }}>
+              ⚖️ File an Appeal
+            </h3>
+            <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 16px' }}>
+              {Math.abs(pendingAppeal.points)} pts taken by {pendingAppeal.fromName}
+              {pendingAppeal.reason ? ` · "${pendingAppeal.reason}"` : ''}
+            </p>
+            <textarea
+              value={appealComment}
+              onChange={(e) => setAppealComment(e.target.value)}
+              placeholder="Explain why this was unfair..."
+              rows={4}
+              style={{
+                width: '100%',
+                background: '#1a1a22',
+                border: '1px solid #374151',
+                borderRadius: '12px',
+                color: '#f9fafb',
+                fontSize: '14px',
+                padding: '12px 14px',
+                resize: 'none',
+                outline: 'none',
+                boxSizing: 'border-box',
+                marginBottom: '12px',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => { setPendingAppeal(null); setAppealComment('') }}
+                style={{
+                  flex: 1,
+                  background: '#1f2937',
+                  border: '1px solid #374151',
+                  borderRadius: '12px',
+                  color: '#9ca3af',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  padding: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleFileAppeal}
+                disabled={filingAppeal || !appealComment.trim()}
+                style={{
+                  flex: 2,
+                  background: filingAppeal || !appealComment.trim() ? '#312e81' : '#4f46e5',
+                  border: 'none',
+                  borderRadius: '12px',
+                  color: 'white',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  padding: '13px',
+                  cursor: filingAppeal || !appealComment.trim() ? 'default' : 'pointer',
+                  opacity: filingAppeal || !appealComment.trim() ? 0.6 : 1,
+                }}
+              >
+                {filingAppeal ? 'Filing…' : 'Submit Appeal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CloudWipe — fixed position in tree so it never remounts mid-animation */}
       <CloudWipe phase={wipePhase} />

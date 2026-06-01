@@ -355,6 +355,23 @@ export async function giveOrTakePoints(
         reason: alloc.reason,
         createdAt: serverTimestamp(),
       })
+
+      // Create persistent notification for recipient
+      const notifRef = doc(collection(db, 'groups', groupId, 'notifications'))
+      transaction.set(notifRef, {
+        id: notifRef.id,
+        forUid: alloc.toUid,
+        type: alloc.points > 0 ? 'points_received' : 'points_taken',
+        transactionId: txRef.id,
+        fromUid,
+        fromName: giverName,
+        toName: recipientName,
+        points: alloc.points,
+        reason: alloc.reason,
+        read: false,
+        cleared: false,
+        createdAt: serverTimestamp(),
+      })
     }
 
     // Update giver's daily counters and reset date
