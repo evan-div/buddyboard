@@ -769,7 +769,7 @@ export default function GroupPage() {
               </button>
 
               {/* Tab buttons */}
-              <div style={{ display: 'flex', gap: 6, flex: 1, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              <div style={{ display: 'flex', gap: 6, flex: 1, overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 8, paddingRight: 8, marginTop: -8 }}>
                 {(
                   [
                     { key: 'plaza',       label: 'PLAZA',       badge: 0              },
