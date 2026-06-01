@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
@@ -19,6 +19,8 @@ import {
 } from '@/lib/firestore'
 import { copyToClipboard } from '@/lib/utils'
 import type { Group, GroupMember, Transaction, PointsAllocation } from '@/lib/types'
+
+import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
@@ -517,6 +519,9 @@ export default function GroupPage() {
   const [showPointsModal, setShowPointsModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
+  const [toasts, setToasts] = useState<PointsToastItem[]>([])
+  const seenTxIds = useRef(new Set<string>())
+  const notifInitialized = useRef(false)
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -576,6 +581,44 @@ export default function GroupPage() {
   useEffect(() => {
     if (user) loadGroupData()
   }, [user, loadGroupData])
+
+  // Real-time notification subscription — shows toasts when current user receives/loses points
+  useEffect(() => {
+    if (!user || !groupId) return
+
+    const seenIds = seenTxIds.current
+
+    const unsubscribe = subscribeToFeed(groupId, (txs) => {
+      if (!notifInitialized.current) {
+        // First snapshot: record all existing IDs, no toasts
+        txs.forEach((tx) => seenIds.add(tx.id))
+        notifInitialized.current = true
+        return
+      }
+
+      for (const tx of txs) {
+        if (!seenIds.has(tx.id)) {
+          seenIds.add(tx.id)
+          if (tx.toUid === user.uid) {
+            const item: PointsToastItem = {
+              id: tx.id,
+              fromName: tx.fromName,
+              points: tx.points,
+              reason: tx.reason,
+            }
+            setToasts((prev) => [...prev, item])
+            setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== tx.id)), 4500)
+          }
+        }
+      }
+    })
+
+    return () => {
+      unsubscribe()
+      notifInitialized.current = false
+      seenIds.clear()
+    }
+  }, [user?.uid, groupId])
 
   async function handleCopyInviteCode() {
     if (!group) return
@@ -728,6 +771,11 @@ export default function GroupPage() {
           )}
         </div>
       )}
+
+      <PointsToastContainer
+        toasts={toasts}
+        onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+      />
 
       {/* CloudWipe — fixed position in tree so it never remounts mid-animation */}
       <CloudWipe phase={wipePhase} />
