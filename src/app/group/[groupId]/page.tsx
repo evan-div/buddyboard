@@ -882,6 +882,7 @@ export default function GroupPage() {
                   currentUid={user.uid}
                   memberUids={members.map((m) => m.uid)}
                   chiefUid={chiefUid}
+                  members={members}
                 />
               )}
             </div>

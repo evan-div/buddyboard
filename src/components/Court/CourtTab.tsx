@@ -1,15 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { timeAgo } from '@/lib/utils'
+import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
+import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { subscribeToCases, castVote, resolveExpiredCase } from '@/lib/appeals'
-import type { CourtCase } from '@/lib/types'
+import type { CourtCase, GroupMember } from '@/lib/types'
 
 type Props = {
   groupId: string
   currentUid: string
   memberUids: string[]
   chiefUid?: string | null
+  members: GroupMember[]
 }
 
 function timeLeft(deadline: Date): string {
@@ -17,43 +19,59 @@ function timeLeft(deadline: Date): string {
   if (ms <= 0) return 'Voting closed'
   const h = Math.floor(ms / 3_600_000)
   const m = Math.floor((ms % 3_600_000) / 60_000)
-  if (h > 0) return `${h}h ${m}m left`
-  return `${m}m left`
+  return h > 0 ? `${h}h ${m}m left` : `${m}m left`
 }
 
-const STATUS_LABEL: Record<string, { text: string; color: string }> = {
-  pending_review: { text: 'Awaiting review',    color: '#fbbf24' },
-  accepted:       { text: 'Appeal accepted',     color: '#4ade80' },
-  denied:         { text: 'Denied — in court',  color: '#f87171' },
-  in_court:       { text: 'Voting open',         color: '#818cf8' },
-  resolved_innocent: { text: '✅ Innocent',      color: '#4ade80' },
-  resolved_guilty:   { text: '⚖️ Guilty',        color: '#f87171' },
+function cardBg(status: string): string {
+  if (status === 'resolved_innocent' || status === 'accepted') return '#16a34a'
+  if (status === 'resolved_guilty') return '#dc2626'
+  if (status === 'in_court') return '#f59e0b'
+  return '#374151'
 }
 
 function CaseCard({
   c,
+  caseNumber,
   currentUid,
   memberUids,
   groupId,
   chiefUid,
+  members,
 }: {
   c: CourtCase
+  caseNumber: number
   currentUid: string
   memberUids: string[]
   groupId: string
   chiefUid?: string | null
+  members: GroupMember[]
 }) {
   const [voting, setVoting] = useState(false)
-  const userVote = c.votes[currentUid]
-  const total = memberUids.length
-  const innocentCount = Object.values(c.votes).filter((v) => v === 'innocent').length
-  const guiltyCount = Object.values(c.votes).filter((v) => v === 'guilty').length
-  const innocentPct = total > 0 ? Math.round((innocentCount / total) * 100) : 0
-  const guiltyPct   = total > 0 ? Math.round((guiltyCount / total) * 100) : 0
-  const status = STATUS_LABEL[c.status] ?? { text: c.status, color: '#9ca3af' }
+
+  const bg = cardBg(c.status)
   const isActive = c.status === 'in_court'
-  const isResolved = c.status === 'resolved_innocent' || c.status === 'resolved_guilty'
-  const canVote = isActive && !userVote && currentUid !== c.defendantUid && currentUid !== c.accuserUid
+  const isPending = c.status === 'pending_review'
+  const isResolved = ['resolved_innocent', 'resolved_guilty', 'accepted', 'dismissed'].includes(c.status)
+
+  const userVote = c.votes[currentUid]
+  const isParty = currentUid === c.defendantUid || currentUid === c.accuserUid
+  const canVote = isActive && !userVote && !isParty
+  const showProgress = (isActive && (!!userVote || isParty)) || isResolved
+
+  const accuserMember  = members.find((m) => m.uid === c.accuserUid)
+  const defendantMember = members.find((m) => m.uid === c.defendantUid)
+
+  const innocentCount = Object.values(c.votes).filter((v) => v === 'innocent').length
+  const guiltyCount   = Object.values(c.votes).filter((v) => v === 'guilty').length
+  const totalVotes    = innocentCount + guiltyCount
+  const eligibleVoters = Math.max(0, memberUids.length - 2)
+  const innocentPct   = totalVotes > 0 ? Math.round((innocentCount / totalVotes) * 100) : 50
+
+  let statusLabel = ''
+  if (c.status === 'accepted')          statusLabel = '✅ Appeal accepted — points restored'
+  if (c.status === 'resolved_innocent') statusLabel = '✅ Ruled innocent — points restored'
+  if (c.status === 'resolved_guilty')   statusLabel = '⚖️ Ruled guilty'
+  if (c.status === 'dismissed')         statusLabel = 'Case dismissed'
 
   async function vote(v: 'innocent' | 'guilty') {
     setVoting(true)
@@ -68,171 +86,158 @@ function CaseCard({
 
   return (
     <div style={{
-      background: '#1a1a22',
-      borderRadius: '16px',
-      padding: '16px',
-      marginBottom: '12px',
-      border: `1px solid ${isActive ? '#3730a3' : '#1f2937'}`,
+      background: bg,
+      borderRadius: 24,
+      padding: '22px 20px 20px',
+      marginBottom: 16,
+      boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
     }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <div>
-          <p style={{ fontSize: '14px', fontWeight: 800, color: '#f9fafb', margin: 0 }}>
-            {c.defendantName}
-            <span style={{ color: '#6b7280', fontWeight: 400 }}> vs </span>
+      {/* Case number */}
+      <div style={{ textAlign: 'center', marginBottom: 4 }}>
+        <p style={{ fontWeight: 900, fontSize: 17, color: 'white', letterSpacing: '0.07em', margin: 0 }}>
+          CASE #{String(caseNumber).padStart(4, '0')}
+        </p>
+        <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', margin: '3px 0 0', fontWeight: 600 }}>
+          {c.points} pts at stake
+          {isActive && c.courtDeadline && ` · ${timeLeft(c.courtDeadline)}`}
+        </p>
+        {statusLabel && (
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)', margin: '4px 0 0', fontWeight: 700 }}>
+            {statusLabel}
+          </p>
+        )}
+      </div>
+
+      {/* VS */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, margin: '18px 0' }}>
+        {/* Accuser */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%', background: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+            boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
+          }}>
+            <AvatarDisplay config={accuserMember?.avatar ?? DEFAULT_AVATAR} size={58} />
+          </div>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 13, textAlign: 'center', lineHeight: 1.3 }}>
             {c.accuserName}
-          </p>
-          <p style={{ fontSize: '11px', color: '#6b7280', margin: '2px 0 0' }}>
-            {timeAgo(c.createdAt)}
-          </p>
+          </span>
         </div>
+
+        <span style={{ color: 'white', fontWeight: 900, fontSize: 26, letterSpacing: '0.04em', flexShrink: 0 }}>
+          VS.
+        </span>
+
+        {/* Defendant */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: '50%', background: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+            boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
+          }}>
+            <AvatarDisplay config={defendantMember?.avatar ?? DEFAULT_AVATAR} size={58} />
+          </div>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 13, textAlign: 'center', lineHeight: 1.3 }}>
+            {c.defendantName}
+          </span>
+        </div>
+      </div>
+
+      {/* Quote */}
+      <div style={{ position: 'relative', padding: '4px 32px 20px', textAlign: 'center' }}>
         <span style={{
-          fontSize: '11px',
-          fontWeight: 700,
-          color: status.color,
-          background: `${status.color}18`,
-          borderRadius: '20px',
-          padding: '3px 10px',
-          flexShrink: 0,
+          position: 'absolute', top: -10, left: 4,
+          fontSize: 52, color: 'rgba(255,255,255,0.3)',
+          lineHeight: 1, fontFamily: 'Georgia, serif', userSelect: 'none',
+        }}>"</span>
+        <p style={{
+          color: 'white', fontSize: 15, fontStyle: 'italic',
+          fontWeight: 600, lineHeight: 1.55, margin: 0,
         }}>
-          {status.text}
-        </span>
-      </div>
-
-      {/* Points at stake */}
-      <div style={{
-        display: 'flex',
-        gap: '8px',
-        marginBottom: '10px',
-        padding: '8px 12px',
-        background: '#111827',
-        borderRadius: '10px',
-      }}>
-        <span style={{ fontSize: '20px', fontWeight: 900, color: '#f87171' }}>
-          -{c.points}
-        </span>
-        <div>
-          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>pts at stake</p>
-          <p style={{ fontSize: '11px', color: '#4b5563', margin: 0 }}>
-            accused by {c.accuserName}
-          </p>
-        </div>
-      </div>
-
-      {/* Appeal comment */}
-      <div style={{
-        background: '#1f1f30',
-        borderRadius: '8px',
-        padding: '8px 12px',
-        marginBottom: '10px',
-      }}>
-        <p style={{ fontSize: '10px', color: '#6366f1', fontWeight: 700, margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Defense
+          {c.appealComment}
         </p>
-        <p style={{ fontSize: '12px', color: '#d1d5db', fontStyle: 'italic', margin: 0, lineHeight: 1.45 }}>
-          &ldquo;{c.appealComment}&rdquo;
-        </p>
+        <span style={{
+          position: 'absolute', bottom: 0, right: 4,
+          fontSize: 52, color: 'rgba(255,255,255,0.3)',
+          lineHeight: 1, fontFamily: 'Georgia, serif', userSelect: 'none',
+        }}>"</span>
       </div>
 
-      {/* Vote tally bar */}
-      {(isActive || isResolved) && (
-        <div style={{ marginBottom: '10px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 700 }}>
-              Innocent {innocentCount}
-            </span>
-            <span style={{ fontSize: '11px', color: '#f87171', fontWeight: 700 }}>
-              {guiltyCount} Guilty
-            </span>
-          </div>
-          <div style={{ height: '6px', borderRadius: '99px', background: '#1f2937', overflow: 'hidden' }}>
-            <div style={{
-              height: '100%',
-              width: `${innocentPct}%`,
-              background: 'linear-gradient(90deg, #4ade80, #22c55e)',
-              borderRadius: '99px',
-              transition: 'width 0.4s ease',
-            }} />
-          </div>
-          <p style={{ fontSize: '10px', color: '#4b5563', margin: '4px 0 0', textAlign: 'center' }}>
-            {Object.keys(c.votes).length}/{total} voted
-            {isActive && c.courtDeadline && ` · ${timeLeft(c.courtDeadline)}`}
-          </p>
-        </div>
+      {/* Pending: waiting on accuser */}
+      {isPending && (
+        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>
+          Waiting for {c.accuserName} to review this appeal
+        </p>
       )}
 
       {/* Vote buttons */}
       {canVote && (
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
           <button
             disabled={voting}
             onClick={() => vote('innocent')}
             style={{
-              flex: 1,
-              background: '#14532d',
-              border: '1px solid #166534',
-              borderRadius: '10px',
-              color: '#4ade80',
-              fontSize: '13px',
-              fontWeight: 700,
-              padding: '10px',
+              flex: 1, padding: '13px', borderRadius: 99,
+              background: '#15803d', border: 'none',
               cursor: voting ? 'default' : 'pointer',
-              opacity: voting ? 0.6 : 1,
+              color: 'white', fontWeight: 900, fontSize: 13,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              opacity: voting ? 0.7 : 1, boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             }}
           >
-            ✅ Innocent
+            INNOCENT
           </button>
           <button
             disabled={voting}
             onClick={() => vote('guilty')}
             style={{
-              flex: 1,
-              background: '#450a0a',
-              border: '1px solid #7f1d1d',
-              borderRadius: '10px',
-              color: '#f87171',
-              fontSize: '13px',
-              fontWeight: 700,
-              padding: '10px',
+              flex: 1, padding: '13px', borderRadius: 99,
+              background: '#b91c1c', border: 'none',
               cursor: voting ? 'default' : 'pointer',
-              opacity: voting ? 0.6 : 1,
+              color: 'white', fontWeight: 900, fontSize: 13,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              opacity: voting ? 0.7 : 1, boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             }}
           >
-            ⚖️ Guilty
+            GUILTY
           </button>
         </div>
       )}
 
-      {/* Already voted */}
-      {isActive && userVote && (
-        <p style={{
-          fontSize: '12px',
-          color: userVote === 'innocent' ? '#4ade80' : '#f87171',
-          textAlign: 'center',
-          fontWeight: 600,
-          margin: 0,
-        }}>
-          You voted {userVote}
-        </p>
-      )}
-
-      {/* Parties can't vote */}
-      {isActive && (currentUid === c.defendantUid || currentUid === c.accuserUid) && (
-        <p style={{ fontSize: '11px', color: '#4b5563', textAlign: 'center', margin: 0, fontStyle: 'italic' }}>
-          You are a party in this case and cannot vote
-        </p>
+      {/* Progress bar — shown after voting or for parties/resolved */}
+      {showProgress && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: 700 }}>
+              ✅ {innocentCount} Innocent
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: 700 }}>
+              ⚖️ {guiltyCount} Guilty
+            </span>
+          </div>
+          <div style={{ height: 8, background: 'rgba(255,255,255,0.25)', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', width: `${innocentPct}%`,
+              background: 'white', borderRadius: 99,
+              transition: 'width 0.5s ease',
+            }} />
+          </div>
+          <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 11, margin: '5px 0 0' }}>
+            {totalVotes}/{eligibleVoters} voted
+            {userVote && <span> · you voted {userVote}</span>}
+          </p>
+        </div>
       )}
     </div>
   )
 }
 
-export default function CourtTab({ groupId, currentUid, memberUids, chiefUid }: Props) {
+export default function CourtTab({ groupId, currentUid, memberUids, chiefUid, members }: Props) {
   const [cases, setCases] = useState<CourtCase[]>([])
 
   useEffect(() => {
     const unsub = subscribeToCases(groupId, (cs) => {
       setCases(cs)
-      // Resolve any expired in_court cases
       cs
         .filter((c) => c.status === 'in_court' && c.courtDeadline && c.courtDeadline < new Date())
         .forEach((c) => resolveExpiredCase(groupId, c.id, memberUids))
@@ -240,19 +245,33 @@ export default function CourtTab({ groupId, currentUid, memberUids, chiefUid }: 
     return unsub
   }, [groupId, memberUids])
 
+  // Sequential case numbers: oldest case = #0001
+  const caseNumberMap = new Map(
+    [...cases].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map((c, i) => [c.id, i + 1])
+  )
+
   const active   = cases.filter((c) => c.status === 'in_court')
-  const pending  = cases.filter((c) => c.status === 'pending_review' || c.status === 'denied')
-  const resolved = cases.filter((c) => ['accepted', 'resolved_innocent', 'resolved_guilty'].includes(c.status))
+  const pending  = cases.filter((c) => c.status === 'pending_review')
+  const resolved = cases.filter((c) => ['accepted', 'resolved_innocent', 'resolved_guilty', 'dismissed'].includes(c.status))
 
   function section(title: string, list: CourtCase[]) {
     if (list.length === 0) return null
     return (
-      <div style={{ marginBottom: '20px' }}>
-        <h3 style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
+      <div style={{ marginBottom: 8 }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
           {title}
-        </h3>
+        </p>
         {list.map((c) => (
-          <CaseCard key={c.id} c={c} currentUid={currentUid} memberUids={memberUids} groupId={groupId} chiefUid={chiefUid} />
+          <CaseCard
+            key={c.id}
+            c={c}
+            caseNumber={caseNumberMap.get(c.id) ?? 0}
+            currentUid={currentUid}
+            memberUids={memberUids}
+            groupId={groupId}
+            chiefUid={chiefUid}
+            members={members}
+          />
         ))}
       </div>
     )
@@ -260,10 +279,10 @@ export default function CourtTab({ groupId, currentUid, memberUids, chiefUid }: 
 
   if (cases.length === 0) {
     return (
-      <div style={{ textAlign: 'center', paddingTop: '64px' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏛️</div>
-        <p style={{ color: '#f9fafb', fontSize: '16px', fontWeight: 700, margin: '0 0 8px' }}>No cases</p>
-        <p style={{ color: '#6b7280', fontSize: '13px', margin: 0 }}>
+      <div style={{ textAlign: 'center', paddingTop: 64 }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🏛️</div>
+        <p style={{ color: '#f9fafb', fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>No cases</p>
+        <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
           Appeals that can&apos;t be settled go to court for a group vote.
         </p>
       </div>
@@ -272,7 +291,7 @@ export default function CourtTab({ groupId, currentUid, memberUids, chiefUid }: 
 
   return (
     <div>
-      {section('🔴 Active Cases', active)}
+      {section('🔴 Active', active)}
       {section('⏳ Pending Review', pending)}
       {section('📜 Resolved', resolved)}
     </div>
