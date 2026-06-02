@@ -7,7 +7,37 @@ import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar } from '@/lib/firestore'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset } from '@/lib/types'
+
+const DEFAULT_PRESETS: PlazaPreset[] = [
+  // GIVE
+  { id: 'g1',  emoji: '🛁',  label: 'Cleaned bathroom',          points:  15 },
+  { id: 'g2',  emoji: '🧹',  label: 'Wiped counters',            points:   5 },
+  { id: 'g3',  emoji: '🕯️', label: 'Bought a candle',           points:  20 },
+  { id: 'g4',  emoji: '🧻',  label: 'Bought paper towels/TP',    points:  30 },
+  { id: 'g5',  emoji: '🧽',  label: 'Cleaned floors',            points:  10 },
+  { id: 'g6',  emoji: '🥗',  label: 'Meal prepped',              points:  10 },
+  { id: 'g7',  emoji: '🏋️', label: 'Went to gym',               points:   5 },
+  { id: 'g8',  emoji: '🚗',  label: 'Drove to a location',       points:   7 },
+  { id: 'g9',  emoji: '🥤',  label: 'Bought a drink',            points:  10 },
+  { id: 'g10', emoji: '🔋',  label: 'Lent a charger',            points:   5 },
+  { id: 'g11', emoji: '🍳',  label: 'Made group dinner',         points:  30 },
+  { id: 'g12', emoji: '⛽',  label: 'Gave gas money',            points:  25 },
+  { id: 'g13', emoji: '🙏',  label: 'Saved someone a trip',      points:  15 },
+  { id: 'g14', emoji: '🧘',  label: 'Stretched before activity', points:   5 },
+  // TAKE
+  { id: 't1',  emoji: '🍽️', label: "Didn't do dishes",          points: -10 },
+  { id: 't2',  emoji: '🗑️', label: 'Left a mess in living area', points: -10 },
+  { id: 't3',  emoji: '💩',  label: 'Blew up bathroom',          points:  -2 },
+  { id: 't4',  emoji: '💡',  label: 'Left the lights on',        points:  -5 },
+  { id: 't5',  emoji: '🍔',  label: 'Ate fast-food',             points:  -5 },
+  { id: 't6',  emoji: '🔊',  label: 'Came in late and was loud', points: -10 },
+  { id: 't7',  emoji: '🤢',  label: 'Let food go bad',           points:  -5 },
+  { id: 't8',  emoji: '🚙',  label: 'Parked like an asshole',    points:  -5 },
+  { id: 't9',  emoji: '😴',  label: 'Napped past 4pm',           points:  -2 },
+  { id: 't10', emoji: '⛪',  label: "Didn't go to church",       points: -10 },
+  { id: 't11', emoji: '🥷',  label: 'Stole food',                points: -20 },
+]
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
@@ -179,30 +209,62 @@ function CameraController({
 
 const EMOJIS = ['🎉','💪','🔥','⭐','👏','😤','💀','🙄','😂','❤️','🫡','💯','🤑','👀','🐐']
 
+const PAGE_SIZE = 9
+
 interface CardProps {
   member: GroupMember
   currentUid: string
   groupId: string
   remainingGive: number
   remainingTake: number
+  isChief?: boolean
+  presets?: PlazaPreset[]
   onClose: () => void
   onSubmitted: (type: 'celebrate' | 'shame') => void
 }
 
-function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, onClose, onSubmitted }: CardProps) {
+function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, presets, onClose, onSubmitted }: CardProps) {
+  const [view, setView]       = useState<'presets' | 'confirm' | 'custom'>('presets')
   const [mode, setMode]       = useState<'give' | 'take'>('give')
+  const [page, setPage]       = useState(0)
+  const [selected, setSelected] = useState<PlazaPreset | null>(null)
   const [points, setPoints]   = useState(0)
   const [emoji, setEmoji]     = useState('')
   const [reason, setReason]   = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
 
-  const limit = mode === 'give' ? remainingGive : remainingTake
-  const isOwn = member.uid === currentUid
+  const allPresets   = presets?.length ? presets : DEFAULT_PRESETS
+  const modePresets  = allPresets.filter(p => mode === 'give' ? p.points > 0 : p.points < 0)
+  const totalPages   = Math.ceil(modePresets.length / PAGE_SIZE)
+  const pagePresets  = modePresets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const limit        = mode === 'give' ? remainingGive : remainingTake
+  const isOwn        = member.uid === currentUid
 
-  function switchMode(m: 'give' | 'take') { setMode(m); setPoints(0); setError('') }
+  function switchMode(m: 'give' | 'take') { setMode(m); setPage(0); setError('') }
 
-  async function handleSubmit() {
+  function selectPreset(p: PlazaPreset) { setSelected(p); setView('confirm') }
+
+  async function confirmPreset() {
+    if (!selected) return
+    setLoading(true)
+    try {
+      await giveOrTakePoints(groupId, currentUid, [{
+        toUid: member.uid,
+        points: selected.points,
+        reason: `${selected.emoji} ${selected.label}`,
+      }])
+      onSubmitted(selected.points > 0 ? 'celebrate' : 'shame')
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+      setView('presets')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCustomSubmit() {
     if (points <= 0)    { setError('Enter at least 1 point'); return }
     if (points > limit) { setError(`Only ${limit} pts left today`); return }
     setLoading(true); setError('')
@@ -222,44 +284,142 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
     }
   }
 
+  const toggleStyle = (m: 'give' | 'take'): React.CSSProperties => ({
+    flex: 1, padding: '7px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
+    fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
+    background: mode === m ? (m === 'give' ? '#22c55e' : '#ef4444') : 'transparent',
+    color: mode === m ? '#fff' : '#888',
+  })
+
   return (
     <div style={{
       background: '#ffffff',
       borderRadius: 20,
       padding: '16px 16px 18px',
-      width: 230,
+      width: 270,
       boxShadow: '0 20px 60px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
+          {view === 'custom' && (
+            <button
+              onClick={() => { setView('presets'); setError('') }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6366f1', fontSize: 12, fontWeight: 700, padding: 0, display: 'block', marginBottom: 2 }}
+            >← Presets</button>
+          )}
           <div style={{ fontWeight: 800, fontSize: 15, color: '#111', letterSpacing: -0.3 }}>{member.displayName}</div>
           <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 2 }}>⭐ {member.totalPoints.toLocaleString()} pts</div>
         </div>
-        <button
-          onClick={onClose}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}
-        >✕</button>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
       </div>
 
       {isOwn ? (
         <div style={{ textAlign: 'center', color: '#999', fontSize: 13, padding: '10px 0' }}>This is you!</div>
-      ) : (
+
+      ) : view === 'presets' ? (
         <>
-          {/* Give / Take toggle */}
-          <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 13 }}>
+          {/* GIVE / TAKE toggle */}
+          <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 12 }}>
             {(['give', 'take'] as const).map(m => (
+              <button key={m} onClick={() => switchMode(m)} style={toggleStyle(m)}>
+                {m === 'give' ? 'GIVE' : 'TAKE'}
+              </button>
+            ))}
+          </div>
+
+          {/* 3×3 preset grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7, marginBottom: 10 }}>
+            {pagePresets.map(p => (
               <button
-                key={m}
-                onClick={() => switchMode(m)}
+                key={p.id}
+                onClick={() => selectPreset(p)}
                 style={{
-                  flex: 1, padding: '7px 0', borderRadius: 9, border: 'none', cursor: 'pointer',
-                  fontWeight: 700, fontSize: 13, transition: 'all 0.15s',
-                  background: mode === m ? (m === 'give' ? '#22c55e' : '#ef4444') : 'transparent',
-                  color: mode === m ? '#fff' : '#888',
+                  background: '#f9fafb', border: '1.5px solid #e5e7eb', borderRadius: 12,
+                  padding: '9px 4px 7px', cursor: 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                  transition: 'all 0.1s',
                 }}
               >
+                <span style={{ fontSize: 22 }}>{p.emoji}</span>
+                <span style={{ fontSize: 9, color: '#555', fontWeight: 600, textAlign: 'center', lineHeight: 1.3, wordBreak: 'break-word' }}>{p.label}</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: p.points > 0 ? '#16a34a' : '#dc2626' }}>
+                  {p.points > 0 ? `+${p.points}` : p.points}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 10 }}>
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                style={{ background: 'none', border: 'none', cursor: page === 0 ? 'default' : 'pointer', color: page === 0 ? '#ccc' : '#6366f1', fontSize: 20, lineHeight: 1, padding: 0 }}
+              >‹</button>
+              <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>{page + 1} of {totalPages}</span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={page === totalPages - 1}
+                style={{ background: 'none', border: 'none', cursor: page === totalPages - 1 ? 'default' : 'pointer', color: page === totalPages - 1 ? '#ccc' : '#6366f1', fontSize: 20, lineHeight: 1, padding: 0 }}
+              >›</button>
+            </div>
+          )}
+
+          {/* Custom button */}
+          <button
+            onClick={() => { setView('custom'); setPoints(0); setEmoji(''); setReason(''); setError('') }}
+            style={{
+              width: '100%', padding: '10px 0', borderRadius: 12,
+              border: '1.5px solid #e5e7eb', background: '#fff',
+              cursor: 'pointer', color: '#6366f1', fontWeight: 700, fontSize: 13,
+            }}
+          >CUSTOM</button>
+        </>
+
+      ) : view === 'confirm' ? (
+        <>
+          {/* Confirm step */}
+          <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+            <div style={{ fontSize: 52, marginBottom: 8 }}>{selected?.emoji}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#111', marginBottom: 6 }}>{selected?.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: (selected?.points ?? 0) > 0 ? '#16a34a' : '#dc2626', marginBottom: 6 }}>
+              {(selected?.points ?? 0) > 0 ? `+${selected?.points}` : selected?.points} pts
+            </div>
+            <div style={{ fontSize: 12, color: '#999' }}>to {member.displayName}</div>
+          </div>
+          {error && <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8, textAlign: 'center' }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => { setView('presets'); setError('') }}
+              style={{
+                flex: 1, padding: '11px 0', borderRadius: 12,
+                border: '1.5px solid #e5e7eb', background: '#fff',
+                cursor: 'pointer', color: '#555', fontWeight: 700, fontSize: 13,
+              }}
+            >Cancel</button>
+            <button
+              onClick={confirmPreset}
+              disabled={loading}
+              style={{
+                flex: 1, padding: '11px 0', borderRadius: 12, border: 'none',
+                cursor: loading ? 'default' : 'pointer', color: '#fff', fontWeight: 800, fontSize: 13,
+                background: (selected?.points ?? 0) > 0 ? '#22c55e' : '#ef4444',
+                opacity: loading ? 0.7 : 1,
+              }}
+            >{loading ? '…' : 'Confirm'}</button>
+          </div>
+        </>
+
+      ) : (
+        /* Custom view */
+        <>
+          {/* GIVE / TAKE toggle */}
+          <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 12, padding: 3, gap: 3, marginBottom: 13 }}>
+            {(['give', 'take'] as const).map(m => (
+              <button key={m} onClick={() => { setMode(m); setPoints(0); setError('') }} style={toggleStyle(m)}>
                 {m === 'give' ? 'GIVE' : 'TAKE'}
               </button>
             ))}
@@ -289,7 +449,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
             >+</button>
           </div>
 
-          {/* Emoji reaction — single-select grid */}
+          {/* Emoji reaction */}
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 10, color: '#aaa', fontWeight: 600, marginBottom: 5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Reaction
@@ -302,19 +462,15 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
                   style={{
                     background: emoji === e ? '#f0f0ff' : 'none',
                     border: emoji === e ? '2px solid #6366f1' : '2px solid transparent',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    fontSize: 18,
-                    padding: '3px 4px',
-                    lineHeight: 1,
-                    transition: 'all 0.1s',
+                    borderRadius: 8, cursor: 'pointer', fontSize: 18,
+                    padding: '3px 4px', lineHeight: 1, transition: 'all 0.1s',
                   }}
                 >{e}</button>
               ))}
             </div>
           </div>
 
-          {/* Reason text input */}
+          {/* Reason */}
           <input
             type="text"
             value={reason}
@@ -331,19 +487,18 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
 
           {error && <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8 }}>{error}</div>}
 
-          {/* Submit */}
           <button
-            onClick={handleSubmit}
+            onClick={handleCustomSubmit}
             disabled={loading || points <= 0}
             style={{
-              width: '100%', padding: '11px 0', borderRadius: 12,
-              border: 'none', cursor: points > 0 ? 'pointer' : 'not-allowed',
+              width: '100%', padding: '11px 0', borderRadius: 12, border: 'none',
+              cursor: points > 0 ? 'pointer' : 'not-allowed',
               fontWeight: 800, fontSize: 13, color: '#fff',
               background: points > 0 ? (mode === 'give' ? '#22c55e' : '#ef4444') : '#d1d5db',
               transition: 'background 0.15s',
             }}
           >
-            {loading ? '...' : mode === 'give' ? `Give ${points} pts` : `Take ${points} pts`}
+            {loading ? '…' : mode === 'give' ? `Give ${points} pts` : `Take ${points} pts`}
           </button>
         </>
       )}
@@ -1080,13 +1235,15 @@ interface Props {
   groupId: string
   remainingGive: number
   remainingTake: number
+  isChief?: boolean
+  presets?: PlazaPreset[]
   onPointsSubmitted: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, remainingGive, remainingTake, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, remainingGive, remainingTake, isChief, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1134,9 +1291,9 @@ export default function MiiPlaza({
       ref={containerRef}
       style={{
         width: '100%',
-        height: 'calc(100dvh - 160px)',
+        height: '100dvh',
         minHeight: 400,
-        borderRadius: 16,
+        borderRadius: 0,
         overflow: 'hidden',
         position: 'relative',
         background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
@@ -1167,7 +1324,8 @@ export default function MiiPlaza({
       {selectedMember && (
         <div style={{
           position: 'absolute',
-          left: 'calc(50% + 150px)',
+          left: '50%',
+          transform: 'translateX(-50%)',
           top: cardTop,
           zIndex: 10,
           pointerEvents: 'auto',
@@ -1186,6 +1344,8 @@ export default function MiiPlaza({
               groupId={groupId}
               remainingGive={remainingGive}
               remainingTake={remainingTake}
+              isChief={isChief}
+              presets={presets}
               onClose={handleClose}
               onSubmitted={(type) => {
                 onPointsSubmitted()

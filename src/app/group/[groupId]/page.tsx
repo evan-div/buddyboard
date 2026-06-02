@@ -863,6 +863,8 @@ export default function GroupPage() {
               groupId={groupId}
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
+              isChief={isCurrentUserChief}
+              presets={group.presets}
               onPointsSubmitted={refreshGroupData}
               onAvatarUpdated={refreshGroupData}
               onReady={handlePlazaReady}
