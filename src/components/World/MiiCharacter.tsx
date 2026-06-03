@@ -177,6 +177,44 @@ function CelebrationParticles() {
 
 export type DragMode = 'held' | 'flying' | 'dazed' | 'waking' | 'mad'
 
+// ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
+
+const RD_K  = 9.0   // limb stiffness
+const RD_D  = 3.6   // arm/head damping  (underdamped → wobbles 1-2× before settling)
+const RD_DL = 5.5   // leg/body damping  (overdamped  → slides to rest without bounce)
+
+// Semi-implicit Euler spring step: returns [new_angle, new_vel]
+function rdSpring(r: number, v: number, rest: number, K: number, D: number, dt: number): [number, number] {
+  const nv = v + (-K * (r - rest) - D * v) * dt
+  return [r + nv * dt, nv]
+}
+
+// Hard angle limit — bounces back with 15% restitution
+function rdClamp(r: number, v: number, lo: number, hi: number): [number, number] {
+  if (r < lo) return [lo,  Math.abs(v) * 0.15]
+  if (r > hi) return [hi, -Math.abs(v) * 0.15]
+  return [r, v]
+}
+
+type BoneRV = { r: number; v: number }
+type RagdollRef = {
+  hX: BoneRV; hZ: BoneRV           // head
+  laX: BoneRV; laZ: BoneRV         // left arm
+  raX: BoneRV; raZ: BoneRV         // right arm
+  llX: BoneRV; llZ: BoneRV         // left leg
+  rlX: BoneRV; rlZ: BoneRV         // right leg
+  byX: BoneRV; byZ: BoneRV         // body group
+  ready: boolean
+}
+function makeRagdoll(): RagdollRef {
+  const z = (): BoneRV => ({ r: 0, v: 0 })
+  return {
+    hX: z(), hZ: z(), laX: z(), laZ: z(), raX: z(), raZ: z(),
+    llX: z(), llZ: z(), rlX: z(), rlZ: z(), byX: z(), byZ: z(),
+    ready: false,
+  }
+}
+
 // ─── Main Character ───────────────────────────────────────────────────────────
 
 type AnimState = 'walking' | 'idle_bob' | 'idle_sway'
@@ -206,6 +244,7 @@ export default function MiiCharacter({
   const leftLegRef   = useRef<THREE.Group>(null)
   const rightLegRef  = useRef<THREE.Group>(null)
 
+  const ragdoll      = useRef<RagdollRef>(makeRagdoll())
   const animState    = useRef<AnimState>('walking')
   const idleTimer    = useRef(0)
   const phase        = useRef(Math.random() * Math.PI * 2)
@@ -252,6 +291,7 @@ export default function MiiCharacter({
   // Reset on dragMode change
   useEffect(() => {
     dragTimer.current = 0
+    ragdoll.current.ready = false
     if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
     if (leftLegRef.current)  { leftLegRef.current.rotation.x  = 0; leftLegRef.current.rotation.z  = 0 }
@@ -340,37 +380,76 @@ export default function MiiCharacter({
       return
     }
 
-    // ── Drag mode: dazed ────────────────────────────────────────────────────
+    // ── Drag mode: dazed (physics-driven ragdoll) ────────────────────────────
     if (dragMode === 'dazed') {
       dragTimer.current += delta
-      // Group tilts to ~40° face-down in MiiPlaza. Body stays neutral so nothing
-      // compounds the tilt. Limbs hang limp alongside the body — no starfish.
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.08)
-        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.08)
+      const dt = Math.min(delta, 1 / 30)   // cap to prevent instability on frame drops
+
+      // Snapshot current bone poses on the first frame of dazed, then kick with a
+      // random impulse that simulates the shock of a hard landing.
+      if (!ragdoll.current.ready) {
+        const s  = 7 + Math.random() * 9   // impact magnitude 7–16 rad/s
+        const rd = ragdoll.current
+        rd.hX  = { r: headRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 1.3 }
+        rd.hZ  = { r: headRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 1.0 }
+        rd.laX = { r: leftArmRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s }
+        rd.laZ = { r: leftArmRef.current?.rotation.z  ?? 0, v: -(0.4 + Math.random() * 0.7) * s }
+        rd.raX = { r: rightArmRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s }
+        rd.raZ = { r: rightArmRef.current?.rotation.z ?? 0, v:  (0.4 + Math.random() * 0.7) * s }
+        rd.llX = { r: leftLegRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
+        rd.llZ = { r: leftLegRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
+        rd.rlX = { r: rightLegRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
+        rd.rlZ = { r: rightLegRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
+        rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.2 }
+        rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.2 }
+        rd.ready = true
       }
-      if (headRef.current) {
-        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0.25, 0.06)
-        headRef.current.rotation.z = THREE.MathUtils.lerp(headRef.current.rotation.z, 0.18, 0.06)
-      }
-      // Arms dangle limp — slight forward droop, z close to zero so they don't spread
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0.25, 0.07)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -0.18, 0.07)
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0.25, 0.07)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.18, 0.07)
-      }
-      // Legs hang straight — the 40° group tilt puts them on the ground naturally
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.08)
-        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  0, 0.08)
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.08)
-        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z, 0, 0.08)
-      }
+
+      const rd = ragdoll.current
+      let r: number, v: number
+
+      // Head — underdamped, wobbles before settling
+      ;[r, v] = rdSpring(rd.hX.r, rd.hX.v, 0.28, RD_K, RD_D, dt)
+      ;[rd.hX.r, rd.hX.v] = rdClamp(r, v, -0.7, 1.1)
+      ;[r, v] = rdSpring(rd.hZ.r, rd.hZ.v, 0.14, RD_K, RD_D, dt)
+      ;[rd.hZ.r, rd.hZ.v] = rdClamp(r, v, -0.9, 0.9)
+      if (headRef.current) { headRef.current.rotation.x = rd.hX.r; headRef.current.rotation.z = rd.hZ.r }
+
+      // Left arm — shoulder can swing freely (wide limits)
+      ;[r, v] = rdSpring(rd.laX.r, rd.laX.v, 0.28, RD_K, RD_D, dt)
+      ;[rd.laX.r, rd.laX.v] = rdClamp(r, v, -2.6, 2.6)
+      ;[r, v] = rdSpring(rd.laZ.r, rd.laZ.v, -0.22, RD_K, RD_D, dt)
+      ;[rd.laZ.r, rd.laZ.v] = rdClamp(r, v, -1.6, 0.55)
+      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rd.laX.r; leftArmRef.current.rotation.z  = rd.laZ.r }
+
+      // Right arm
+      ;[r, v] = rdSpring(rd.raX.r, rd.raX.v, 0.28, RD_K, RD_D, dt)
+      ;[rd.raX.r, rd.raX.v] = rdClamp(r, v, -2.6, 2.6)
+      ;[r, v] = rdSpring(rd.raZ.r, rd.raZ.v,  0.22, RD_K, RD_D, dt)
+      ;[rd.raZ.r, rd.raZ.v] = rdClamp(r, v, -0.55, 1.6)
+      if (rightArmRef.current) { rightArmRef.current.rotation.x = rd.raX.r; rightArmRef.current.rotation.z = rd.raZ.r }
+
+      // Left leg — hip joint, overdamped (slides to rest, no oscillation)
+      ;[r, v] = rdSpring(rd.llX.r, rd.llX.v, 0.04, RD_K, RD_DL, dt)
+      ;[rd.llX.r, rd.llX.v] = rdClamp(r, v, -0.6, 1.0)
+      ;[r, v] = rdSpring(rd.llZ.r, rd.llZ.v, -0.04, RD_K, RD_DL, dt)
+      ;[rd.llZ.r, rd.llZ.v] = rdClamp(r, v, -0.65, 0.25)
+      if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rd.llX.r; leftLegRef.current.rotation.z  = rd.llZ.r }
+
+      // Right leg
+      ;[r, v] = rdSpring(rd.rlX.r, rd.rlX.v, 0.04, RD_K, RD_DL, dt)
+      ;[rd.rlX.r, rd.rlX.v] = rdClamp(r, v, -0.6, 1.0)
+      ;[r, v] = rdSpring(rd.rlZ.r, rd.rlZ.v,  0.04, RD_K, RD_DL, dt)
+      ;[rd.rlZ.r, rd.rlZ.v] = rdClamp(r, v, -0.25, 0.65)
+      if (rightLegRef.current) { rightLegRef.current.rotation.x = rd.rlX.r; rightLegRef.current.rotation.z = rd.rlZ.r }
+
+      // Body group — subtle settle, overdamped
+      ;[r, v] = rdSpring(rd.byX.r, rd.byX.v, 0, RD_K * 0.5, RD_DL, dt)
+      ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.35, 0.35)
+      ;[r, v] = rdSpring(rd.byZ.r, rd.byZ.v, 0, RD_K * 0.5, RD_DL, dt)
+      ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.35, 0.35)
+      if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
+
       return
     }
 
