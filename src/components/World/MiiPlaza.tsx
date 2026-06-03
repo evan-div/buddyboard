@@ -1251,7 +1251,6 @@ export default function MiiPlaza({
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null)
   const [focusPos, setFocusPos]             = useState<[number, number, number] | null>(null)
   const [cameraLocked, setCameraLocked]     = useState(false)
-  const [headScreenX, setHeadScreenX]       = useState<number>(0)
   const [headScreenY, setHeadScreenY]       = useState<number>(0)
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
@@ -1270,7 +1269,6 @@ export default function MiiPlaza({
       tempCam.lookAt(fx, fy + ZOOM_LOOKAT_Y, fz)
       tempCam.updateMatrixWorld()
       const headNDC = new THREE.Vector3(fx, fy + 1.8, fz).project(tempCam)
-      setHeadScreenX(((headNDC.x + 1) / 2) * w)
       setHeadScreenY(((1 - headNDC.y) / 2) * h)
     }
     setSelectedMember(member)
@@ -1284,11 +1282,7 @@ export default function MiiPlaza({
     // cameraLocked stays true until CameraController lerps back and calls onUnlock
   }
 
-  const CARD_W = 278
-  const containerW = containerRef.current?.clientWidth ?? 400
-  // Place card to the right of the Mii with a small gap; clamp so it stays on screen
-  const cardLeft = Math.min(headScreenX + 24, containerW - CARD_W - 8)
-  const cardTop  = Math.max(80, headScreenY - 60)
+  const cardTop = Math.max(16, headScreenY - 40)
 
   return (
     <div
@@ -1328,7 +1322,7 @@ export default function MiiPlaza({
       {selectedMember && (
         <div style={{
           position: 'absolute',
-          left: cardLeft,
+          left: 'calc(50% + 150px)',
           top: cardTop,
           zIndex: 10,
           pointerEvents: 'auto',
