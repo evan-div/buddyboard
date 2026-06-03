@@ -1013,13 +1013,19 @@ function Scene({
   const dragCursorVel = useRef(new THREE.Vector3())
   const [dragModeMap, setDragModeMap] = useState<Map<string, DragMode>>(new Map())
 
-  const positions = useMemo<[number, number, number][]>(() => {
-    return members.map((_, i) => {
-      const angle  = (i / Math.max(members.length, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 1.2
+  // Spawn positions keyed by uid — assigned once per member, never changed.
+  // Indexing by array position (i) would teleport characters when Firestore
+  // re-orders members after a points update, because the same uid would receive
+  // a different initialPosition prop reference and R3F would re-apply it.
+  const spawnPositions = useRef<Map<string, [number, number, number]>>(new Map())
+  members.forEach((member, i) => {
+    if (!spawnPositions.current.has(member.uid)) {
+      const total  = members.length
+      const angle  = (i / Math.max(total, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 1.2
       const radius = 1.2 + Math.random() * 3.5
-      return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
-    })
-  }, [members.length]) // eslint-disable-line react-hooks/exhaustive-deps
+      spawnPositions.current.set(member.uid, [Math.cos(angle) * radius, 0, Math.sin(angle) * radius])
+    }
+  })
 
   const setCharMode = useCallback((uid: string, mode: DragMode | null) => {
     const existing = physicsMap.current.get(uid)
@@ -1171,11 +1177,11 @@ function Scene({
         <Clouds />
       </Suspense>
       <GrassFloor />
-      {members.map((member, i) => (
+      {members.map((member) => (
         <MiiCharacter
           key={member.uid}
           member={member}
-          initialPosition={positions[i]}
+          initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
           bounds={5.5}
           isSelected={selectedUid === member.uid}
           onSelect={onSelect}
