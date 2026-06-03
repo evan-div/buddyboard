@@ -258,8 +258,13 @@ export default function MiiCharacter({
 
   const skinColor = SKIN_TONES[member.avatar.skinTone]
 
-  // Expose groupRef to parent
+  // Expose groupRef to parent and set initial position imperatively.
+  // Do NOT pass position as a JSX prop — R3F re-applies it on every re-render
+  // (e.g. when dragModeMap state changes), teleporting the character back to spawn.
   useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(initialPosition[0], initialPosition[1], initialPosition[2])
+    }
     onGroupMount?.(member.uid, groupRef.current)
     return () => { onGroupMount?.(member.uid, null) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -609,8 +614,8 @@ export default function MiiCharacter({
         if (rightLegRef.current) rightLegRef.current.rotation.x = 0
       } else {
         const spd = 1.4
-        group.position.x = Math.max(-bounds, Math.min(bounds, group.position.x + (dx/dist)*spd*delta))
-        group.position.z = Math.max(-bounds, Math.min(bounds, group.position.z + (dz/dist)*spd*delta))
+        group.position.x += (dx / dist) * spd * delta
+        group.position.z += (dz / dist) * spd * delta
         group.rotation.y = Math.atan2(dx, dz)
         const sw = Math.sin(t*5.5)*0.44
         if (leftArmRef.current)  leftArmRef.current.rotation.x  =  sw
@@ -632,7 +637,6 @@ export default function MiiCharacter({
   return (
     <group
       ref={groupRef}
-      position={initialPosition}
       onPointerDown={e => {
         e.stopPropagation()
         if (!dragMode) onPickupStart?.()
