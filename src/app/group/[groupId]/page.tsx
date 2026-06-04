@@ -16,8 +16,10 @@ import {
   giveOrTakePoints,
   getGroupDailyStats,
   getTransactionsSince,
+  addReaction,
 } from '@/lib/firestore'
 import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
+import { highestBadge } from '@/lib/badges'
 import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
@@ -426,6 +428,15 @@ function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: 
                       {isCurrentUser && <span className="text-indigo-500 text-xs font-normal ml-1">(you)</span>}
                       {member.uid === chiefUid && <span className="text-yellow-400 text-xs ml-1" title="Chief">⭐</span>}
                       {member.uid === creatorUid && <span className="text-violet-400 text-xs ml-1" title="Mayor">👑</span>}
+                      {(member.currentStreak ?? 0) >= 3 && (
+                        <span className="text-orange-400 text-xs ml-1" title={`${member.currentStreak} day streak`}>
+                          🔥{member.currentStreak}
+                        </span>
+                      )}
+                      {(() => {
+                        const b = highestBadge(member.badges ?? [])
+                        return b ? <span className="text-xs ml-1" title={b.label}>{b.emoji}</span> : null
+                      })()}
                     </p>
                     <span className={`text-sm font-bold ${isPositive ? 'text-green-400' : isNegative ? 'text-red-400' : 'text-gray-400'}`}>
                       {period !== 'alltime'
@@ -448,15 +459,20 @@ function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: 
 type FeedTabProps = {
   groupId: string
   members: GroupMember[]
+  currentUid: string
 }
 
 const CARD_ROTATIONS = [-7, 4, -9, 6, -3, 8, -5, 2, 10, -6]
 const CARD_OFFSETS  = [10, -20, 25, -10, 30, -25, 5, -30, 15, -15]
 const CARD_OVERLAP  = '-60px'
 
-function FeedTab({ groupId, members }: FeedTabProps) {
+function FeedTab({ groupId, members, currentUid }: FeedTabProps) {
   const [feed, setFeed] = useState<Transaction[]>([])
   const [feedLoading, setFeedLoading] = useState(true)
+
+  function handleReact(txId: string, emoji: string) {
+    addReaction(groupId, txId, emoji, currentUid).catch(console.error)
+  }
 
   useEffect(() => {
     setFeedLoading(true)
@@ -524,6 +540,8 @@ function FeedTab({ groupId, members }: FeedTabProps) {
             transaction={tx}
             members={members}
             rotation={CARD_ROTATIONS[i % CARD_ROTATIONS.length]}
+            currentUid={currentUid}
+            onReact={handleReact}
           />
         </div>
       ))}
@@ -874,7 +892,7 @@ export default function GroupPage() {
           {/* ── Other tabs: scrollable content below the floating nav ── */}
           {activeTab !== 'plaza' && (
             <div style={{ paddingTop: 122, maxWidth: 512, margin: '0 auto', padding: '122px 16px 32px' }}>
-              {activeTab === 'feed' && <FeedTab groupId={groupId} members={members} />}
+              {activeTab === 'feed' && <FeedTab groupId={groupId} members={members} currentUid={user.uid} />}
               {activeTab === 'leaderboard' && (
                 <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
               )}

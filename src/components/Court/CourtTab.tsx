@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { subscribeToCases, castVote, resolveExpiredCase } from '@/lib/appeals'
@@ -14,12 +14,17 @@ type Props = {
   members: GroupMember[]
 }
 
-function timeLeft(deadline: Date): string {
-  const ms = deadline.getTime() - Date.now()
-  if (ms <= 0) return 'Voting closed'
+function formatCountdown(deadline: Date, now: number): { text: string; isLow: boolean; expired: boolean } {
+  const ms = deadline.getTime() - now
+  if (ms <= 0) return { text: '00:00:00', isLow: true, expired: true }
   const h = Math.floor(ms / 3_600_000)
   const m = Math.floor((ms % 3_600_000) / 60_000)
-  return h > 0 ? `${h}h ${m}m left` : `${m}m left`
+  const s = Math.floor((ms % 60_000) / 1_000)
+  return {
+    text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+    isLow: h < 1,
+    expired: false,
+  }
 }
 
 function cardBg(status: string): string {
@@ -47,9 +52,26 @@ function CaseCard({
   members: GroupMember[]
 }) {
   const [voting, setVoting] = useState(false)
+  const [now, setNow] = useState(Date.now())
+  const autoResolved = useRef(false)
+
+  const isActive = c.status === 'in_court'
+
+  useEffect(() => {
+    if (!isActive || !c.courtDeadline) return
+    const id = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(id)
+  }, [isActive, c.courtDeadline])
+
+  useEffect(() => {
+    if (!isActive || !c.courtDeadline || autoResolved.current) return
+    if (now >= c.courtDeadline.getTime()) {
+      autoResolved.current = true
+      resolveExpiredCase(groupId, c.id, memberUids)
+    }
+  }, [now, isActive, c.courtDeadline, groupId, c.id, memberUids])
 
   const bg = cardBg(c.status)
-  const isActive = c.status === 'in_court'
   const isPending = c.status === 'pending_review'
   const isResolved = ['resolved_innocent', 'resolved_guilty', 'accepted', 'dismissed'].includes(c.status)
 
@@ -99,7 +121,19 @@ function CaseCard({
         </p>
         <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', margin: '3px 0 0', fontWeight: 600 }}>
           {c.points} pts at stake
-          {isActive && c.courtDeadline && ` · ${timeLeft(c.courtDeadline)}`}
+          {isActive && c.courtDeadline && (() => {
+            const { text, isLow } = formatCountdown(c.courtDeadline!, now)
+            return (
+              <span style={{
+                marginLeft: 4,
+                color: isLow ? '#ef4444' : 'rgba(255,255,255,0.9)',
+                fontWeight: 800,
+                animation: isLow ? 'countdownPulse 1s ease-in-out infinite' : undefined,
+              }}>
+                · ⏱ {text}
+              </span>
+            )
+          })()}
         </p>
         {statusLabel && (
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)', margin: '4px 0 0', fontWeight: 700 }}>
@@ -234,6 +268,13 @@ function CaseCard({
 
 export default function CourtTab({ groupId, currentUid, memberUids, chiefUid, members }: Props) {
   const [cases, setCases] = useState<CourtCase[]>([])
+  // Inject CSS for countdown pulse animation
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `@keyframes countdownPulse { 0%,100% { opacity:1 } 50% { opacity:0.45 } }`
+    document.head.appendChild(style)
+    return () => { document.head.removeChild(style) }
+  }, [])
 
   useEffect(() => {
     const unsub = subscribeToCases(groupId, (cs) => {

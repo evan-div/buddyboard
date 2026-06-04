@@ -52,6 +52,10 @@ export type GroupMember = {
   lastResetDate: string
   joinedAt: Date
   isAdmin?: boolean
+  currentStreak?: number
+  longestStreak?: number
+  lastActiveDate?: string
+  badges?: string[]
 }
 
 export type Transaction = {
@@ -62,6 +66,8 @@ export type Transaction = {
   toName: string
   points: number
   reason: string
+  caption?: string
+  reactions?: Record<string, string[]>
   createdAt: Date
 }
 
@@ -69,6 +75,7 @@ export type PointsAllocation = {
   toUid: string
   points: number
   reason: string
+  caption?: string
 }
 
 export type NotificationType =

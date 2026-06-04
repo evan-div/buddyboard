@@ -5,9 +5,10 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
+import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig, PlazaPreset } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase } from '@/lib/types'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -223,14 +224,84 @@ interface CardProps {
   onSubmitted: (type: 'celebrate' | 'shame') => void
 }
 
+function StatsView({ member, groupId, onBack }: { member: GroupMember; groupId: string; onBack: () => void }) {
+  const [txns, setTxns] = useState<Transaction[]>([])
+  const [cases, setCases] = useState<CourtCase[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    getTransactionsSince(groupId, thirtyDaysAgo)
+      .then((all) => { setTxns(all); setLoading(false) })
+      .catch(() => setLoading(false))
+    const unsub = subscribeToCases(groupId, setCases)
+    return unsub
+  }, [groupId])
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const ptsWeek  = txns.filter((t) => t.toUid === member.uid && t.createdAt >= sevenDaysAgo).reduce((s, t) => s + t.points, 0)
+  const ptsMonth = txns.filter((t) => t.toUid === member.uid).reduce((s, t) => s + t.points, 0)
+  const totalGiven    = txns.filter((t) => t.fromUid === member.uid).reduce((s, t) => s + Math.abs(t.points), 0)
+  const totalReceived = txns.filter((t) => t.toUid === member.uid && t.points > 0).reduce((s, t) => s + t.points, 0)
+
+  const memberCases = cases.filter((c) => c.defendantUid === member.uid || c.accuserUid === member.uid)
+  const courtWins  = memberCases.filter((c) => {
+    if (c.status === 'resolved_innocent' && c.defendantUid === member.uid) return true
+    if (c.status === 'resolved_guilty'   && c.accuserUid  === member.uid) return true
+    if (c.status === 'accepted'          && c.defendantUid === member.uid) return true
+    return false
+  }).length
+  const courtTotal = memberCases.filter((c) => ['resolved_innocent','resolved_guilty','accepted'].includes(c.status)).length
+
+  const reasonFreq: Record<string, number> = {}
+  txns.filter((t) => t.fromUid === member.uid && t.reason).forEach((t) => {
+    reasonFreq[t.reason] = (reasonFreq[t.reason] ?? 0) + 1
+  })
+  const topReason = Object.entries(reasonFreq).sort((a, b) => b[1] - a[1])[0]?.[0]
+
+  function statRow(label: string, value: string, color = '#111') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color }}>{value}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '20px 0', color: '#aaa', fontSize: 13 }}>Loading…</div>
+      ) : (
+        <div>
+          {statRow('Pts this week', ptsWeek >= 0 ? `+${ptsWeek}` : String(ptsWeek), ptsWeek > 0 ? '#16a34a' : ptsWeek < 0 ? '#dc2626' : '#6b7280')}
+          {statRow('Pts this month', ptsMonth >= 0 ? `+${ptsMonth}` : String(ptsMonth), ptsMonth > 0 ? '#16a34a' : ptsMonth < 0 ? '#dc2626' : '#6b7280')}
+          {statRow('Total given (30d)', String(totalGiven))}
+          {statRow('Total received (30d)', String(totalReceived))}
+          {statRow('Court record', courtTotal > 0 ? `${courtWins}W / ${courtTotal - courtWins}L` : '—')}
+          {(member.currentStreak ?? 0) > 0 && statRow('🔥 Streak', `${member.currentStreak} day${(member.currentStreak ?? 1) !== 1 ? 's' : ''}`)}
+          {(member.longestStreak ?? 0) > 0 && statRow('Best streak', `${member.longestStreak} days`)}
+          {topReason && (
+            <div style={{ padding: '8px 0' }}>
+              <div style={{ fontSize: 10, color: '#aaa', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Top reason given</div>
+              <div style={{ fontSize: 12, color: '#374151', fontStyle: 'italic' }}>{topReason}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, presets, onClose, onSubmitted }: CardProps) {
-  const [view, setView]       = useState<'presets' | 'confirm' | 'custom'>('presets')
+  const [view, setView]       = useState<'presets' | 'confirm' | 'custom' | 'stats'>('presets')
   const [mode, setMode]       = useState<'give' | 'take'>('give')
   const [page, setPage]       = useState(0)
   const [selected, setSelected] = useState<PlazaPreset | null>(null)
   const [points, setPoints]   = useState(0)
   const [emoji, setEmoji]     = useState('')
   const [reason, setReason]   = useState('')
+  const [caption, setCaption] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
 
@@ -270,11 +341,13 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
     setLoading(true); setError('')
     try {
       const fullReason = [emoji, reason.trim()].filter(Boolean).join(' ')
-      await giveOrTakePoints(groupId, currentUid, [{
+      const alloc: import('@/lib/types').PointsAllocation = {
         toUid: member.uid,
         points: mode === 'give' ? points : -points,
         reason: fullReason,
-      }])
+      }
+      if (caption.trim()) alloc.caption = caption.trim()
+      await giveOrTakePoints(groupId, currentUid, [alloc])
       onSubmitted(mode === 'give' ? 'celebrate' : 'shame')
       onClose()
     } catch (e) {
@@ -303,14 +376,22 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
-          {view === 'custom' && (
+          {(view === 'custom' || view === 'stats') && (
             <button
               onClick={() => { setView('presets'); setError('') }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6366f1', fontSize: 12, fontWeight: 700, padding: 0, display: 'block', marginBottom: 2 }}
-            >← Presets</button>
+            >← Back</button>
           )}
           <div style={{ fontWeight: 800, fontSize: 15, color: '#111', letterSpacing: -0.3 }}>{member.displayName}</div>
-          <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 2 }}>⭐ {member.totalPoints.toLocaleString()} pts</div>
+          <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+            ⭐ {member.totalPoints.toLocaleString()} pts
+            {!isOwn && view !== 'stats' && (
+              <button
+                onClick={() => setView('stats')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6366f1', fontSize: 11, fontWeight: 700, padding: 0 }}
+              >📊 Stats</button>
+            )}
+          </div>
         </div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
       </div>
@@ -370,7 +451,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
 
           {/* Custom button */}
           <button
-            onClick={() => { setView('custom'); setPoints(0); setEmoji(''); setReason(''); setError('') }}
+            onClick={() => { setView('custom'); setPoints(0); setEmoji(''); setReason(''); setCaption(''); setError('') }}
             style={{
               width: '100%', padding: '10px 0', borderRadius: 12,
               border: '1.5px solid #e5e7eb', background: '#fff',
@@ -378,6 +459,9 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
             }}
           >CUSTOM</button>
         </>
+
+      ) : view === 'stats' ? (
+        <StatsView member={member} groupId={groupId} onBack={() => setView('presets')} />
 
       ) : view === 'confirm' ? (
         <>
@@ -481,7 +565,23 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
               width: '100%', boxSizing: 'border-box',
               border: '1.5px solid #e5e7eb', borderRadius: 10,
               padding: '8px 10px', fontSize: 12, color: '#111',
+              outline: 'none', marginBottom: 7, fontFamily: 'inherit',
+            }}
+          />
+
+          {/* Caption (optional clap-back) */}
+          <input
+            type="text"
+            value={caption}
+            onChange={e => setCaption(e.target.value)}
+            placeholder="Add a clap-back… (optional)"
+            maxLength={120}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: '1.5px solid #e5e7eb', borderRadius: 10,
+              padding: '8px 10px', fontSize: 11, color: '#6b7280',
               outline: 'none', marginBottom: 11, fontFamily: 'inherit',
+              fontStyle: 'italic',
             }}
           />
 
@@ -1162,10 +1262,84 @@ function Scene({
     }
   }, [onSelect])
 
-  // Register pointerup on canvas domElement
+  // Register pointerup and touch events on canvas domElement
   useEffect(() => {
-    gl.domElement.addEventListener('pointerup', handlePointerUp)
-    return () => gl.domElement.removeEventListener('pointerup', handlePointerUp)
+    const el = gl.domElement
+
+    // ── Pointer (mouse / stylus) ──────────────────────────────────────────────
+    el.addEventListener('pointerup', handlePointerUp)
+
+    // ── Touch (mobile) ────────────────────────────────────────────────────────
+    // Convert a single touch to NDC coords so the existing EMA cursor logic works
+    function touchToNDC(touch: Touch) {
+      const rect = el.getBoundingClientRect()
+      return {
+        x:  ((touch.clientX - rect.left)  / rect.width)  * 2 - 1,
+        y: -((touch.clientY - rect.top)   / rect.height) * 2 + 1,
+      }
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        // Single touch: treat as pointerdown on the Mii (hold-to-carry)
+        // The Mii's onPointerDown fires via React's synthetic system, so we don't
+        // need to replicate pick-up start here — just prime the drag cursor position.
+        const t = e.touches[0]
+        const ndc = touchToNDC(t)
+        // Dispatch a synthetic pointermove so the raycaster has a fresh cursor
+        el.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true,
+        }))
+        void ndc
+      }
+    }
+
+    let prevPinchDist = 0
+
+    function onTouchMove(e: TouchEvent) {
+      e.preventDefault()   // prevent scroll while dragging a Mii
+      if (e.touches.length === 1) {
+        const t = e.touches[0]
+        // Dispatch pointermove so PhysicsUpdater's raycaster picks up the position
+        el.dispatchEvent(new PointerEvent('pointermove', {
+          clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true,
+        }))
+      } else if (e.touches.length === 2 && orbitRef.current) {
+        // Pinch-to-zoom
+        const dx = e.touches[0].clientX - e.touches[1].clientX
+        const dy = e.touches[0].clientY - e.touches[1].clientY
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (!prevPinchDist) { prevPinchDist = dist; return }
+        const delta = prevPinchDist - dist
+        prevPinchDist = dist
+        const orbit = orbitRef.current
+        const currentDist = orbit.object.position.distanceTo(orbit.target)
+        const newDist = Math.max(orbit.minDistance, Math.min(orbit.maxDistance, currentDist + delta * 0.05))
+        orbit.object.position.setLength(newDist)
+      }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      prevPinchDist = 0
+      // Fire pointerup so the hold/fling logic in handlePointerUp runs
+      const lastTouch = e.changedTouches[0]
+      if (lastTouch) {
+        el.dispatchEvent(new PointerEvent('pointerup', {
+          clientX: lastTouch.clientX, clientY: lastTouch.clientY, bubbles: true,
+        }))
+      }
+    }
+
+    el.addEventListener('touchstart',  onTouchStart,  { passive: true })
+    el.addEventListener('touchmove',   onTouchMove,   { passive: false })
+    el.addEventListener('touchend',    onTouchEnd,    { passive: true })
+
+    return () => {
+      el.removeEventListener('pointerup',  handlePointerUp)
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove',  onTouchMove)
+      el.removeEventListener('touchend',   onTouchEnd)
+    }
   }, [gl.domElement, handlePointerUp])
 
   return (

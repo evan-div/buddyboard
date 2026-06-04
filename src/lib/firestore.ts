@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset } from './types'
+import { BADGE_DEFS } from './badges'
 
 // Helper to get today's date string YYYY-MM-DD
 function todayString(): string {
@@ -235,6 +236,10 @@ export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
         lastResetDate: data.lastResetDate ?? todayString(),
         joinedAt: fromTimestamp(data.joinedAt),
         isAdmin: data.isAdmin ?? false,
+        currentStreak: data.currentStreak,
+        longestStreak: data.longestStreak,
+        lastActiveDate: data.lastActiveDate,
+        badges: data.badges ?? [],
       } as GroupMember
     })
   } catch (error) {
@@ -276,6 +281,25 @@ export async function leaveGroup(groupId: string, uid: string): Promise<void> {
 }
 
 // ============ POINTS OPERATIONS ============
+
+export async function addReaction(
+  groupId: string,
+  txId: string,
+  emoji: string,
+  uid: string
+): Promise<void> {
+  const txRef = doc(db, 'groups', groupId, 'transactions', txId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(txRef)
+    if (!snap.exists()) return
+    const existing: string[] = snap.data()?.[`reactions.${emoji}`] ?? (snap.data()?.reactions?.[emoji] ?? [])
+    if (existing.includes(uid)) {
+      tx.update(txRef, { [`reactions.${emoji}`]: arrayRemove(uid) })
+    } else {
+      tx.update(txRef, { [`reactions.${emoji}`]: arrayUnion(uid) })
+    }
+  })
+}
 
 export async function giveOrTakePoints(
   groupId: string,
@@ -365,7 +389,7 @@ export async function giveOrTakePoints(
 
       // Create transaction record
       const txRef = doc(collection(db, 'groups', groupId, 'transactions'))
-      transaction.set(txRef, {
+      const txData: Record<string, unknown> = {
         id: txRef.id,
         fromUid,
         fromName: giverName,
@@ -374,7 +398,9 @@ export async function giveOrTakePoints(
         points: alloc.points,
         reason: alloc.reason,
         createdAt: serverTimestamp(),
-      })
+      }
+      if (alloc.caption) txData.caption = alloc.caption
+      transaction.set(txRef, txData)
 
       // Create persistent notification for recipient
       const notifRef = doc(collection(db, 'groups', groupId, 'notifications'))
@@ -394,16 +420,61 @@ export async function giveOrTakePoints(
       })
     }
 
-    // Update giver's daily counters and reset date
+    // Update giver's daily counters, reset date, and streak
+    const lastActive: string | undefined = giverData.lastActiveDate
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    let currentStreak: number = giverData.currentStreak ?? 0
+    let longestStreak: number = giverData.longestStreak ?? 0
+    if (lastActive === yesterdayStr) {
+      currentStreak++
+    } else if (lastActive !== today) {
+      currentStreak = 1
+    }
+    if (currentStreak > longestStreak) longestStreak = currentStreak
+
     transaction.update(giverRef, {
       dailyPointsGiven: dailyPointsGiven + totalGiving,
       dailyPointsTaken: dailyPointsTaken + totalTaking,
       lastResetDate: today,
+      currentStreak,
+      longestStreak,
+      lastActiveDate: today,
     })
   })
+
+  // Award badges to giver (fire-and-forget — don't block the transaction)
+  const giverMemberRef = doc(db, 'groups', groupId, 'members', fromUid)
+  getDoc(giverMemberRef).then((snap) => {
+    if (!snap.exists()) return
+    const d = snap.data()
+    checkAndAwardBadges(groupId, fromUid, {
+      totalPoints: d.totalPoints as number,
+      currentStreak: d.currentStreak as number,
+      groupMemberUids: allocations.map((a) => a.toUid).concat([fromUid]),
+      txFromUid: fromUid,
+    }).catch(() => {})
+  }).catch(() => {})
 }
 
 // ============ FEED OPERATIONS ============
+
+function mapTransaction(d: { id: string; data: () => Record<string, unknown> }): Transaction {
+  const data = d.data()
+  return {
+    id: (data.id as string) ?? d.id,
+    fromUid: data.fromUid as string,
+    fromName: data.fromName as string,
+    toUid: data.toUid as string,
+    toName: data.toName as string,
+    points: data.points as number,
+    reason: data.reason as string,
+    caption: data.caption as string | undefined,
+    reactions: data.reactions as Record<string, string[]> | undefined,
+    createdAt: fromTimestamp(data.createdAt as Timestamp | Date | undefined),
+  }
+}
 
 export async function getTransactionsSince(
   groupId: string,
@@ -416,19 +487,7 @@ export async function getTransactionsSince(
     orderBy('createdAt', 'desc')
   )
   const snap = await getDocs(q)
-  return snap.docs.map((d) => {
-    const data = d.data()
-    return {
-      id: data.id ?? d.id,
-      fromUid: data.fromUid,
-      fromName: data.fromName,
-      toUid: data.toUid,
-      toName: data.toName,
-      points: data.points,
-      reason: data.reason,
-      createdAt: fromTimestamp(data.createdAt),
-    } as Transaction
-  })
+  return snap.docs.map(mapTransaction)
 }
 
 export function subscribeToFeed(
@@ -440,20 +499,7 @@ export function subscribeToFeed(
   const q = query(txRef, orderBy('createdAt', 'desc'), limit(limitCount))
 
   const unsubscribe = onSnapshot(q, (snap) => {
-    const transactions: Transaction[] = snap.docs.map((d) => {
-      const data = d.data()
-      return {
-        id: data.id ?? d.id,
-        fromUid: data.fromUid,
-        fromName: data.fromName,
-        toUid: data.toUid,
-        toName: data.toName,
-        points: data.points,
-        reason: data.reason,
-        createdAt: fromTimestamp(data.createdAt),
-      } as Transaction
-    })
-    callback(transactions)
+    callback(snap.docs.map(mapTransaction))
   })
 
   return unsubscribe
@@ -539,6 +585,61 @@ export async function adminSetPoints(
   })
 
   await batch.commit()
+}
+
+export async function checkAndAwardBadges(
+  groupId: string,
+  uid: string,
+  context: {
+    totalPoints?: number
+    currentStreak?: number
+    courtWin?: boolean
+    groupMemberUids?: string[]
+    txFromUid?: string
+  }
+): Promise<void> {
+  const memberRef = doc(db, 'groups', groupId, 'members', uid)
+  const snap = await getDoc(memberRef)
+  if (!snap.exists()) return
+  const data = snap.data()
+  const existing: string[] = data.badges ?? []
+  const toAward: string[] = []
+
+  function maybeAward(id: string) {
+    if (!existing.includes(id) && !toAward.includes(id)) toAward.push(id)
+  }
+
+  const pts = context.totalPoints ?? (data.totalPoints as number ?? 0)
+  if (pts >= 100)  maybeAward('first_100')
+  if (pts >= 500)  maybeAward('first_500')
+
+  const streak = context.currentStreak ?? (data.currentStreak as number ?? 0)
+  if (streak >= 7)  maybeAward('streak_7')
+  if (streak >= 30) maybeAward('streak_30')
+
+  if (context.courtWin) maybeAward('court_win')
+
+  if (context.groupMemberUids && context.txFromUid) {
+    const txRef = collection(db, 'groups', groupId, 'transactions')
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const q = query(txRef, where('fromUid', '==', context.txFromUid), where('createdAt', '>=', Timestamp.fromDate(thirtyDaysAgo)))
+    const txSnap = await getDocs(q)
+    const recipientsSeen = new Set(txSnap.docs.map((d) => d.data().toUid as string))
+    const otherMembers = context.groupMemberUids.filter((u) => u !== context.txFromUid)
+    if (otherMembers.length > 0 && otherMembers.every((u) => recipientsSeen.has(u))) {
+      maybeAward('generous')
+    }
+  }
+
+  if (toAward.length > 0) {
+    await updateDoc(memberRef, { badges: arrayUnion(...toAward) })
+  }
+}
+
+// Badge check specifically for court wins — called from appeals module is too complex,
+// so export a helper to be called from the court resolution UI layer if needed.
+export async function awardCourtWinBadge(groupId: string, uid: string): Promise<void> {
+  await checkAndAwardBadges(groupId, uid, { courtWin: true })
 }
 
 export async function updateGroupSettings(

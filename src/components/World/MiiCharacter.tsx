@@ -6,6 +6,7 @@ import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
+import { highestBadge } from '@/lib/badges'
 
 // ─── Hair ─────────────────────────────────────────────────────────────────────
 
@@ -646,6 +647,20 @@ export default function MiiCharacter({
       <SelectionRing visible={isSelected && !dragMode} />
 
       {celebrationType === 'celebrate' && <CelebrationParticles />}
+
+      {!dragMode && (() => {
+        const badge = highestBadge(member.badges ?? [])
+        const streak = member.currentStreak ?? 0
+        if (!badge && streak < 3) return null
+        return (
+          <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+            <div style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {streak >= 3 && <span>🔥{streak}</span>}
+              {badge && <span title={badge.label}>{badge.emoji}</span>}
+            </div>
+          </Html>
+        )
+      })()}
 
       {celebrationType === 'shame' && (
         <Html position={[0, 2.55, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
