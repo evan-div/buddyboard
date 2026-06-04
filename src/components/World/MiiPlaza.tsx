@@ -808,23 +808,8 @@ function PhysicsUpdater({
         const angDrag = Math.pow(0.984, delta * 60)
         phys.angVel.multiplyScalar(angDrag)
 
-        // Wall collisions (x and z) — also kill upward momentum so they don't rocket skyward
-        if (Math.abs(phys.pos.x) > WALL_BOUND) {
-          phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
-          phys.vel.x *= -0.1
-          phys.vel.y *= 0.25
-          phys.vel.z *= 0.4
-          phys.angVel.z *= -0.5
-        }
-        if (Math.abs(phys.pos.z) > WALL_BOUND) {
-          phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
-          phys.vel.z *= -0.1
-          phys.vel.y *= 0.25
-          phys.vel.x *= 0.4
-          phys.angVel.x *= -0.5
-        }
-
-        // Ground collision
+        // Ground collision checked FIRST so a wall hit in the same frame can't
+        // steal the vertical velocity and cause a false snap-to-ground.
         if (phys.pos.y <= 0) {
           phys.pos.y = 0
           phys.angVel.set(0, 0, 0)
@@ -842,6 +827,23 @@ function PhysicsUpdater({
             group.rotation.x = 0
             group.rotation.z = 0
             setCharMode(uid, null)
+          }
+        } else {
+          // Wall collisions — only when above ground.
+          // Do NOT touch vel.y: the wall doesn't affect the vertical arc.
+          // Killing vel.y here was causing characters to snap to the ground
+          // immediately after a wall bounce.
+          if (Math.abs(phys.pos.x) > WALL_BOUND) {
+            phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
+            phys.vel.x *= -0.45
+            phys.vel.z *= 0.7
+            phys.angVel.z *= -0.5
+          }
+          if (Math.abs(phys.pos.z) > WALL_BOUND) {
+            phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
+            phys.vel.z *= -0.45
+            phys.vel.x *= 0.7
+            phys.angVel.x *= -0.5
           }
         }
 
