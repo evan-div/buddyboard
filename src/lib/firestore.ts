@@ -19,7 +19,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost } from './types'
 import { BADGE_DEFS } from './badges'
 
 // Helper to get today's date string YYYY-MM-DD
@@ -655,4 +655,82 @@ export async function updateGroupSettings(
   }>
 ): Promise<void> {
   await updateDoc(doc(db, 'groups', groupId), settings)
+}
+
+// ============ WALL OPERATIONS ============
+
+function mapWallPost(d: { id: string; data: () => Record<string, unknown> }): WallPost {
+  const data = d.data()
+  return {
+    id: d.id,
+    uid: data.uid as string,
+    displayName: data.displayName as string,
+    avatarConfig: data.avatarConfig as AvatarConfig | undefined,
+    text: data.text as string,
+    reactions: data.reactions as Record<string, string[]> | undefined,
+    createdAt: fromTimestamp(data.createdAt as Timestamp | Date | undefined),
+  }
+}
+
+export async function postToWall(
+  groupId: string,
+  uid: string,
+  displayName: string,
+  avatarConfig: AvatarConfig,
+  text: string
+): Promise<void> {
+  const postRef = doc(collection(db, 'groups', groupId, 'wall'))
+  await setDoc(postRef, {
+    uid,
+    displayName,
+    avatarConfig,
+    text,
+    reactions: {},
+    createdAt: serverTimestamp(),
+  })
+}
+
+export function subscribeToWall(
+  groupId: string,
+  callback: (posts: WallPost[]) => void
+): () => void {
+  const ref = collection(db, 'groups', groupId, 'wall')
+  const q = query(ref, orderBy('createdAt', 'desc'), limit(50))
+  return onSnapshot(q, (snap) => callback(snap.docs.map(mapWallPost)))
+}
+
+export async function sendPushToUser(
+  recipientUid: string,
+  title: string,
+  body: string,
+  url?: string
+): Promise<void> {
+  const userSnap = await getDoc(doc(db, 'users', recipientUid))
+  if (!userSnap.exists()) return
+  const tokens: string[] = userSnap.data()?.fcmTokens ?? []
+  if (tokens.length === 0) return
+  await fetch('/api/notify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tokens, title, body, url }),
+  }).catch(() => {})
+}
+
+export async function reactToPost(
+  groupId: string,
+  postId: string,
+  emoji: string,
+  uid: string
+): Promise<void> {
+  const postRef = doc(db, 'groups', groupId, 'wall', postId)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(postRef)
+    if (!snap.exists()) return
+    const existing: string[] = snap.data()?.reactions?.[emoji] ?? []
+    if (existing.includes(uid)) {
+      tx.update(postRef, { [`reactions.${emoji}`]: arrayRemove(uid) })
+    } else {
+      tx.update(postRef, { [`reactions.${emoji}`]: arrayUnion(uid) })
+    }
+  })
 }

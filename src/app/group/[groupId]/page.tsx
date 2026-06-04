@@ -17,12 +17,18 @@ import {
   getGroupDailyStats,
   getTransactionsSince,
   addReaction,
+  postToWall,
+  subscribeToWall,
+  reactToPost,
+  sendPushToUser,
 } from '@/lib/firestore'
+import type { WallPost } from '@/lib/types'
 import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
 import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
+import { requestPushPermission } from '@/lib/fcm'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
@@ -122,6 +128,14 @@ function PointsModal({
     setSubmitting(true)
     try {
       await giveOrTakePoints(groupId, currentUid, allocs, isChief ?? false)
+      // Fire-and-forget push notifications to each recipient
+      allocs.forEach((a) => {
+        const pts = a.points
+        const sign = pts > 0 ? '+' : ''
+        const title = pts > 0 ? '🎉 Points received!' : '📉 Points taken'
+        const body = `${sign}${pts} pts${a.reason ? ` · ${a.reason}` : ''}`
+        sendPushToUser(a.toUid, title, body, `/group/${groupId}`).catch(() => {})
+      })
       onSubmitted()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to submit points.')
@@ -549,6 +563,150 @@ function FeedTab({ groupId, members, currentUid }: FeedTabProps) {
   )
 }
 
+// ─── Wall Tab ─────────────────────────────────────────────────────────────────
+
+const WALL_REACTION_EMOJIS = ['🔥', '💀', '😂', '👀', '🫡', '🫣']
+
+function WallTab({ groupId, currentUid, currentMember }: { groupId: string; currentUid: string; currentMember: GroupMember | null }) {
+  const [posts, setPosts] = useState<WallPost[]>([])
+  const [loading, setLoading] = useState(true)
+  const [text, setText] = useState('')
+  const [posting, setPosting] = useState(false)
+
+  useEffect(() => {
+    const unsub = subscribeToWall(groupId, (p) => { setPosts(p); setLoading(false) })
+    return unsub
+  }, [groupId])
+
+  async function handlePost() {
+    if (!text.trim() || !currentMember) return
+    setPosting(true)
+    try {
+      await postToWall(groupId, currentUid, currentMember.displayName, currentMember.avatar, text.trim())
+      setText('')
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  function handleReact(postId: string, emoji: string) {
+    reactToPost(groupId, postId, emoji, currentUid).catch(console.error)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {/* Composer */}
+      <div style={{ background: '#1a1a22', borderRadius: 16, padding: '12px 14px', marginBottom: 16, border: '1px solid #1f2937' }}>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Say something to the group…"
+          maxLength={500}
+          rows={3}
+          style={{
+            width: '100%', boxSizing: 'border-box', resize: 'none',
+            background: 'transparent', border: 'none', outline: 'none',
+            color: '#f9fafb', fontSize: 14, lineHeight: 1.5, fontFamily: 'inherit',
+          }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+          <span style={{ fontSize: 11, color: '#6b7280' }}>{text.length}/500</span>
+          <button
+            onClick={handlePost}
+            disabled={posting || !text.trim()}
+            style={{
+              background: posting || !text.trim() ? '#374151' : '#6366f1',
+              color: 'white', border: 'none', borderRadius: 10,
+              padding: '7px 16px', fontSize: 13, fontWeight: 700,
+              cursor: posting || !text.trim() ? 'default' : 'pointer',
+              transition: 'background 0.15s',
+            }}
+          >
+            {posting ? 'Posting…' : 'Post'}
+          </button>
+        </div>
+      </div>
+
+      {/* Posts */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '32px 0', color: '#6b7280' }}>Loading…</div>
+      ) : posts.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>💬</div>
+          <p style={{ color: '#f9fafb', fontWeight: 700, margin: '0 0 6px' }}>Nothing yet</p>
+          <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>Be the first to post on the group wall!</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {posts.map((post) => {
+            const reactions = post.reactions ?? {}
+            const hasReactions = Object.values(reactions).some((u) => u.length > 0)
+            return (
+              <div key={post.id} style={{ background: '#1a1a22', borderRadius: 16, padding: '14px 16px', border: '1px solid #1f2937' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#374151', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {post.avatarConfig ? (
+                      <AvatarDisplay config={post.avatarConfig} size={36} />
+                    ) : (
+                      <span style={{ color: '#9ca3af', fontSize: 16 }}>👤</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: post.uid === currentUid ? '#a5b4fc' : '#f9fafb' }}>{post.displayName}</span>
+                      <span style={{ fontSize: 10, color: '#4b5563', flexShrink: 0 }}>{timeAgoWall(post.createdAt)}</span>
+                    </div>
+                    <p style={{ fontSize: 14, color: '#d1d5db', margin: '4px 0 0', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{post.text}</p>
+                  </div>
+                </div>
+
+                {/* Reactions */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginLeft: 46 }}>
+                  {/* Existing reactions */}
+                  {hasReactions && WALL_REACTION_EMOJIS.filter((e) => (reactions[e]?.length ?? 0) > 0).map((e) => {
+                    const isMine = reactions[e]!.includes(currentUid)
+                    return (
+                      <button key={e} onClick={() => handleReact(post.id, e)} style={{
+                        background: isMine ? '#312e81' : '#1f2937',
+                        border: isMine ? '1.5px solid #6366f1' : '1.5px solid #374151',
+                        borderRadius: 20, padding: '2px 8px', cursor: 'pointer',
+                        fontSize: 14, color: 'white', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 700,
+                      }}>
+                        {e} <span style={{ fontSize: 11 }}>{reactions[e]!.length}</span>
+                      </button>
+                    )
+                  })}
+                  {/* Add reaction button */}
+                  {WALL_REACTION_EMOJIS.map((e) => {
+                    if ((reactions[e]?.length ?? 0) > 0) return null
+                    return (
+                      <button key={e} onClick={() => handleReact(post.id, e)} style={{
+                        background: 'transparent', border: '1.5px solid #374151',
+                        borderRadius: 20, padding: '2px 6px', cursor: 'pointer',
+                        fontSize: 14, color: '#6b7280', opacity: 0.6,
+                      }}>{e}</button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function timeAgoWall(date: Date): string {
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (sec < 60)   return 'just now'
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
+  return `${Math.floor(sec / 86400)}d ago`
+}
+
 // ─── Group Page ───────────────────────────────────────────────────────────────
 
 export default function GroupPage() {
@@ -561,7 +719,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court' | 'wall'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
@@ -719,6 +877,14 @@ export default function GroupPage() {
     }
   }
 
+  // Request push permission once after the group loads (fire-and-forget)
+  useEffect(() => {
+    if (user && !loading) {
+      requestPushPermission(user.uid).catch(() => {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, loading])
+
   // Court cases count for badge
   useEffect(() => {
     if (!groupId) return
@@ -792,8 +958,9 @@ export default function GroupPage() {
                   [
                     { key: 'plaza',       label: 'PLAZA',       badge: 0              },
                     { key: 'feed',        label: 'FEED',        badge: unreadFeedCount },
-                    { key: 'leaderboard', label: 'LEADERBOARD', badge: 0              },
+                    { key: 'leaderboard', label: 'RANKS',       badge: 0              },
                     { key: 'court',       label: 'COURT',       badge: activeCaseCount },
+                    { key: 'wall',        label: 'WALL',        badge: 0              },
                   ] as const
                 ).map(({ key, label, badge }) => (
                   <button
@@ -903,6 +1070,13 @@ export default function GroupPage() {
                   memberUids={members.map((m) => m.uid)}
                   chiefUid={chiefUid}
                   members={members}
+                />
+              )}
+              {activeTab === 'wall' && (
+                <WallTab
+                  groupId={groupId}
+                  currentUid={user.uid}
+                  currentMember={members.find((m) => m.uid === user.uid) ?? null}
                 />
               )}
             </div>

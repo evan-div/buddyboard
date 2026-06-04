@@ -106,6 +106,16 @@ export type GroupNotification = {
   createdAt: Date
 }
 
+export type WallPost = {
+  id: string
+  uid: string
+  displayName: string
+  avatarConfig?: AvatarConfig
+  text: string
+  reactions?: Record<string, string[]>
+  createdAt: Date
+}
+
 export type CaseStatus =
   | 'pending_review'
   | 'accepted'
