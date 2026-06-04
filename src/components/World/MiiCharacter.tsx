@@ -251,10 +251,11 @@ export default function MiiCharacter({
   const celebTimer   = useRef(0)
   const selectedTimer = useRef(0)
   const dragTimer    = useRef(0)
-  const targetPos    = useRef(new THREE.Vector3(
-    initialPosition[0] + (Math.random() - 0.5) * 6, 0,
-    initialPosition[2] + (Math.random() - 0.5) * 6,
-  ))
+  // Initial target: absolute position within walking circle (same formula as
+  // pickNewTarget) — NOT relative to spawn, which could push near the grass edge.
+  const _ia = Math.random() * Math.PI * 2
+  const _ir = 1.0 + Math.random() * (bounds * 0.85)
+  const targetPos = useRef(new THREE.Vector3(Math.cos(_ia) * _ir, 0, Math.sin(_ia) * _ir))
 
   const skinColor = SKIN_TONES[member.avatar.skinTone]
 

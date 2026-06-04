@@ -808,8 +808,25 @@ function PhysicsUpdater({
         const angDrag = Math.pow(0.984, delta * 60)
         phys.angVel.multiplyScalar(angDrag)
 
-        // Ground collision checked FIRST so a wall hit in the same frame can't
-        // steal the vertical velocity and cause a false snap-to-ground.
+        // Wall clamping — ALWAYS applied, independent of ground.
+        // Must run before the ground check so a fast throw that overshoots
+        // both the wall and y=0 in the same frame still lands within bounds.
+        // Do NOT touch vel.y: walls only redirect lateral velocity; killing
+        // it was what caused characters to snap to the ground after bounces.
+        if (Math.abs(phys.pos.x) > WALL_BOUND) {
+          phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
+          phys.vel.x *= -0.45
+          phys.vel.z *= 0.7
+          phys.angVel.z *= -0.5
+        }
+        if (Math.abs(phys.pos.z) > WALL_BOUND) {
+          phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
+          phys.vel.z *= -0.45
+          phys.vel.x *= 0.7
+          phys.angVel.x *= -0.5
+        }
+
+        // Ground collision — after wall clamping so landing position is always in-bounds
         if (phys.pos.y <= 0) {
           phys.pos.y = 0
           phys.angVel.set(0, 0, 0)
@@ -827,23 +844,6 @@ function PhysicsUpdater({
             group.rotation.x = 0
             group.rotation.z = 0
             setCharMode(uid, null)
-          }
-        } else {
-          // Wall collisions — only when above ground.
-          // Do NOT touch vel.y: the wall doesn't affect the vertical arc.
-          // Killing vel.y here was causing characters to snap to the ground
-          // immediately after a wall bounce.
-          if (Math.abs(phys.pos.x) > WALL_BOUND) {
-            phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
-            phys.vel.x *= -0.45
-            phys.vel.z *= 0.7
-            phys.angVel.z *= -0.5
-          }
-          if (Math.abs(phys.pos.z) > WALL_BOUND) {
-            phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
-            phys.vel.z *= -0.45
-            phys.vel.x *= 0.7
-            phys.angVel.x *= -0.5
           }
         }
 
