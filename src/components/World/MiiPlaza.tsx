@@ -372,6 +372,8 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
       padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
       width: mobile ? '100%' : 270,
       boxSizing: 'border-box',
+      maxHeight: mobile ? '52vh' : 'none',
+      overflowY: mobile ? 'auto' : 'visible',
       boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
@@ -705,6 +707,8 @@ function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
       padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
       width: mobile ? '100%' : 270,
       boxSizing: 'border-box',
+      maxHeight: mobile ? '52vh' : 'none',
+      overflowY: mobile ? 'auto' : 'visible',
       boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
@@ -1314,30 +1318,26 @@ function Scene({
     let prevPinchDist = 0
 
     function onTouchMove(e: TouchEvent) {
-      e.preventDefault()   // prevent scroll while dragging a Mii
       if (e.touches.length === 1) {
-        // Only intercept when dragging or hold is pending; otherwise let OrbitControls rotate
         if (draggingUid.current !== null || holdTimer.current !== null) {
+          // Mii drag: intercept and prevent scroll
+          e.preventDefault()
           const t = e.touches[0]
           el.dispatchEvent(new PointerEvent('pointermove', {
             clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true,
           }))
         }
-      } else if (e.touches.length === 2 && orbitRef.current) {
-        // Pinch-to-zoom — scale relative to orbit.target to preserve camera angle
+        // else: no preventDefault → browser generates pointer events → OrbitControls rotates
+      } else if (e.touches.length === 2) {
+        e.preventDefault() // prevent page pinch-zoom
+        // Dispatch a wheel event so OrbitControls handles zoom through its own code path
         const dx = e.touches[0].clientX - e.touches[1].clientX
         const dy = e.touches[0].clientY - e.touches[1].clientY
         const dist = Math.sqrt(dx * dx + dy * dy)
         if (!prevPinchDist) { prevPinchDist = dist; return }
         const delta = prevPinchDist - dist
         prevPinchDist = dist
-        const orbit = orbitRef.current
-        const dir = orbit.object.position.clone().sub(orbit.target)
-        const currentDist = dir.length()
-        const newDist = Math.max(orbit.minDistance ?? 4, Math.min(orbit.maxDistance ?? 40, currentDist + delta * 0.05))
-        dir.setLength(newDist)
-        orbit.object.position.copy(orbit.target).add(dir)
-        orbit.update()
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: delta * 2, bubbles: true, cancelable: true }))
       }
     }
 
@@ -1408,8 +1408,10 @@ function Scene({
         target={[0, 0.6, 0]}
         minDistance={3}
         maxDistance={40}
-        enableRotate={false}
+        enableRotate={true}
         enablePan={false}
+        minPolarAngle={Math.PI / 7}
+        maxPolarAngle={Math.PI / 2.6}
         makeDefault
       />
     </>
@@ -1506,6 +1508,7 @@ export default function MiiPlaza({
         borderRadius: 0,
         overflow: 'hidden',
         position: 'relative',
+        touchAction: 'none',
         background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
       }}
     >
