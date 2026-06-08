@@ -1189,8 +1189,8 @@ function Scene({
   members.forEach((member, i) => {
     if (!spawnPositions.current.has(member.uid)) {
       const total  = members.length
-      const angle  = (i / Math.max(total, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 1.2
-      const radius = 1.2 + Math.random() * 3.5
+      const angle  = (i / Math.max(total, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.8
+      const radius = 0.5 + Math.random() * 2.0
       spawnPositions.current.set(member.uid, [Math.cos(angle) * radius, 0, Math.sin(angle) * radius])
     }
   })
@@ -1425,7 +1425,7 @@ function Scene({
           key={member.uid}
           member={member}
           initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
-          bounds={5.5}
+          bounds={3.0}
           isSelected={selectedUid === member.uid}
           onSelect={onSelect}
           celebrationType={member.uid === animatingUid ? animationType : null}
@@ -1456,7 +1456,7 @@ function Scene({
         enableRotate={true}
         enablePan={false}
         minPolarAngle={Math.PI / 3.3}
-        maxPolarAngle={Math.PI / 2.2}
+        maxPolarAngle={Math.PI / 2.5}
         makeDefault
       />
     </>
