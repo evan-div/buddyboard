@@ -58,130 +58,90 @@ const ACCESSORIES: { value: AvatarConfig['accessory']; label: string }[] = [
   { value: 'headband', label: 'Headband' },
 ]
 
-// ── Reusable sub-components ───────────────────────────────────────────────────
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#888', marginBottom: 10, marginTop: 0 }}>
       {children}
     </p>
   )
 }
 
-interface ColorSwatchProps {
-  color: string
-  selected: boolean
-  onClick: () => void
-  title?: string
-}
-
-function ColorSwatch({ color, selected, onClick, title }: ColorSwatchProps) {
+function ColorSwatch({ color, selected, onClick, title }: { color: string; selected: boolean; onClick: () => void; title?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title ?? color}
-      className={`
-        w-8 h-8 rounded-full transition-transform hover:scale-110 focus:outline-none
-        ${selected ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-110' : ''}
-      `}
-      style={{ backgroundColor: color }}
       aria-pressed={selected}
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: '50%',
+        backgroundColor: color,
+        border: selected ? '3px solid #42b842' : '3px solid transparent',
+        outline: selected ? '2px solid white' : 'none',
+        outlineOffset: -5,
+        cursor: 'pointer',
+        touchAction: 'manipulation',
+        transform: selected ? 'scale(1.15)' : 'scale(1)',
+        transition: 'transform 0.1s',
+        flexShrink: 0,
+      }}
     />
   )
 }
 
-interface OptionButtonProps {
-  label: string
-  selected: boolean
-  onClick: () => void
-}
-
-function OptionButton({ label, selected, onClick }: OptionButtonProps) {
+function OptionButton({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`
-        px-3 py-1.5 rounded-lg text-sm font-medium transition-colors focus:outline-none
-        ${
-          selected
-            ? 'bg-indigo-500 text-white shadow-md'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-        }
-      `}
       aria-pressed={selected}
+      style={{
+        padding: '8px 14px',
+        borderRadius: 9999,
+        fontSize: 13,
+        fontWeight: 600,
+        border: 'none',
+        cursor: 'pointer',
+        touchAction: 'manipulation',
+        background: selected ? '#42b842' : '#d4d4d4',
+        color: selected ? 'white' : '#333',
+        transition: 'background 0.1s, color 0.1s',
+      }}
     >
       {label}
     </button>
   )
 }
 
-// ── Tab panels ────────────────────────────────────────────────────────────────
-
-function LookTab({
-  config,
-  onChange,
-}: {
-  config: AvatarConfig
-  onChange: (c: AvatarConfig) => void
-}) {
-  const skinEntries = Object.entries(SKIN_TONES) as [
-    AvatarConfig['skinTone'],
-    string,
-  ][]
-
+function LookTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
+  const skinEntries = Object.entries(SKIN_TONES) as [AvatarConfig['skinTone'], string][]
   return (
-    <div className="space-y-5">
-      {/* Skin tone */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
         <SectionLabel>Skin Tone</SectionLabel>
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {skinEntries.map(([key, hex]) => (
-            <ColorSwatch
-              key={key}
-              color={hex}
-              selected={config.skinTone === key}
-              onClick={() => onChange({ ...config, skinTone: key })}
-              title={key}
-            />
+            <ColorSwatch key={key} color={hex} selected={config.skinTone === key} onClick={() => onChange({ ...config, skinTone: key })} title={key} />
           ))}
         </div>
       </div>
-
-      {/* Hair style */}
       <div>
         <SectionLabel>Hair Style</SectionLabel>
-        <div className="flex flex-wrap gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {HAIR_STYLES.map(({ value, label }) => (
-            <OptionButton
-              key={value}
-              label={label}
-              selected={config.hairStyle === value}
-              onClick={() => onChange({ ...config, hairStyle: value })}
-            />
+            <OptionButton key={value} label={label} selected={config.hairStyle === value} onClick={() => onChange({ ...config, hairStyle: value })} />
           ))}
         </div>
       </div>
-
-      {/* Hair color */}
       <div>
         <SectionLabel>
-          Hair Color
-          {config.hairStyle === 'bald' && (
-            <span className="ml-2 text-gray-400 normal-case font-normal tracking-normal">
-              (hidden while bald)
-            </span>
-          )}
+          Hair Color{config.hairStyle === 'bald' && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 6, color: '#bbb' }}>(hidden while bald)</span>}
         </SectionLabel>
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {HAIR_COLORS.map((hex) => (
-            <ColorSwatch
-              key={hex}
-              color={hex}
-              selected={config.hairColor === hex}
-              onClick={() => onChange({ ...config, hairColor: hex })}
-            />
+            <ColorSwatch key={hex} color={hex} selected={config.hairColor === hex} onClick={() => onChange({ ...config, hairColor: hex })} />
           ))}
         </div>
       </div>
@@ -189,56 +149,30 @@ function LookTab({
   )
 }
 
-function StyleTab({
-  config,
-  onChange,
-}: {
-  config: AvatarConfig
-  onChange: (c: AvatarConfig) => void
-}) {
+function StyleTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
   return (
-    <div className="space-y-5">
-      {/* Eye style */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
         <SectionLabel>Eyes</SectionLabel>
-        <div className="flex flex-wrap gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {EYE_STYLES.map(({ value, label }) => (
-            <OptionButton
-              key={value}
-              label={label}
-              selected={config.eyeStyle === value}
-              onClick={() => onChange({ ...config, eyeStyle: value })}
-            />
+            <OptionButton key={value} label={label} selected={config.eyeStyle === value} onClick={() => onChange({ ...config, eyeStyle: value })} />
           ))}
         </div>
       </div>
-
-      {/* Mouth style */}
       <div>
         <SectionLabel>Mouth</SectionLabel>
-        <div className="flex flex-wrap gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {MOUTH_STYLES.map(({ value, label }) => (
-            <OptionButton
-              key={value}
-              label={label}
-              selected={config.mouthStyle === value}
-              onClick={() => onChange({ ...config, mouthStyle: value })}
-            />
+            <OptionButton key={value} label={label} selected={config.mouthStyle === value} onClick={() => onChange({ ...config, mouthStyle: value })} />
           ))}
         </div>
       </div>
-
-      {/* Accessory */}
       <div>
         <SectionLabel>Accessory</SectionLabel>
-        <div className="flex flex-wrap gap-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {ACCESSORIES.map(({ value, label }) => (
-            <OptionButton
-              key={value}
-              label={label}
-              selected={config.accessory === value}
-              onClick={() => onChange({ ...config, accessory: value })}
-            />
+            <OptionButton key={value} label={label} selected={config.accessory === value} onClick={() => onChange({ ...config, accessory: value })} />
           ))}
         </div>
       </div>
@@ -246,41 +180,22 @@ function StyleTab({
   )
 }
 
-function ColorsTab({
-  config,
-  onChange,
-}: {
-  config: AvatarConfig
-  onChange: (c: AvatarConfig) => void
-}) {
+function ColorsTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
   return (
-    <div className="space-y-5">
-      {/* Background color */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
         <SectionLabel>Background</SectionLabel>
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {BACKGROUND_COLORS.map((hex) => (
-            <ColorSwatch
-              key={hex}
-              color={hex}
-              selected={config.backgroundColor === hex}
-              onClick={() => onChange({ ...config, backgroundColor: hex })}
-            />
+            <ColorSwatch key={hex} color={hex} selected={config.backgroundColor === hex} onClick={() => onChange({ ...config, backgroundColor: hex })} />
           ))}
         </div>
       </div>
-
-      {/* Shirt color */}
       <div>
         <SectionLabel>Shirt</SectionLabel>
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {SHIRT_COLORS.map((hex) => (
-            <ColorSwatch
-              key={hex}
-              color={hex}
-              selected={config.shirtColor === hex}
-              onClick={() => onChange({ ...config, shirtColor: hex })}
-            />
+            <ColorSwatch key={hex} color={hex} selected={config.shirtColor === hex} onClick={() => onChange({ ...config, shirtColor: hex })} />
           ))}
         </div>
       </div>
@@ -288,39 +203,41 @@ function ColorsTab({
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-
-export default function AvatarBuilder({ value, onChange, className }: Props) {
+export default function AvatarBuilder({ value, onChange }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('look')
 
   return (
-    <div className={`flex flex-col items-center gap-6 ${className ?? ''}`}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
       {/* Preview */}
-      <div className="relative">
-        <div className="rounded-full overflow-hidden shadow-xl ring-4 ring-white">
-          <AvatarDisplay config={value} size={160} />
-        </div>
+      <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.15)', border: '3px solid white' }}>
+        <AvatarDisplay config={value} size={140} />
       </div>
 
       {/* Panel */}
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg overflow-hidden">
+      <div style={{ width: '100%', background: '#e4e4e4', borderRadius: 20, overflow: 'hidden' }}>
         {/* Tab nav */}
-        <div className="flex gap-1 p-2 bg-gray-50 border-b border-gray-100">
+        <div style={{ display: 'flex', gap: 4, padding: 6, background: '#d4d4d4' }}>
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`
-                flex-1 py-1.5 px-3 rounded-xl text-sm font-semibold transition-colors focus:outline-none
-                ${
-                  activeTab === tab.id
-                    ? 'bg-white text-indigo-600 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }
-              `}
               aria-selected={activeTab === tab.id}
               role="tab"
+              style={{
+                flex: 1,
+                padding: '8px 0',
+                borderRadius: 14,
+                fontSize: 14,
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                touchAction: 'manipulation',
+                background: activeTab === tab.id ? '#efefef' : 'transparent',
+                color: activeTab === tab.id ? '#111' : '#777',
+                boxShadow: activeTab === tab.id ? '0 1px 4px rgba(0,0,0,0.10)' : 'none',
+                transition: 'background 0.15s, color 0.15s',
+              }}
             >
               {tab.label}
             </button>
@@ -328,16 +245,10 @@ export default function AvatarBuilder({ value, onChange, className }: Props) {
         </div>
 
         {/* Tab content */}
-        <div className="p-4">
-          {activeTab === 'look' && (
-            <LookTab config={value} onChange={onChange} />
-          )}
-          {activeTab === 'style' && (
-            <StyleTab config={value} onChange={onChange} />
-          )}
-          {activeTab === 'colors' && (
-            <ColorsTab config={value} onChange={onChange} />
-          )}
+        <div style={{ padding: 16 }}>
+          {activeTab === 'look' && <LookTab config={value} onChange={onChange} />}
+          {activeTab === 'style' && <StyleTab config={value} onChange={onChange} />}
+          {activeTab === 'colors' && <ColorsTab config={value} onChange={onChange} />}
         </div>
       </div>
     </div>
