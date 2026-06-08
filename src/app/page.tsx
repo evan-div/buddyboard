@@ -134,7 +134,7 @@ export default function LandingPage() {
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 'calc(100% - 80px)',
+          width: 'calc(100% - 160px)',
           maxWidth: 360,
           zIndex: 10,
           background: 'rgba(239,239,239,0.85)',
