@@ -154,7 +154,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 
 const whiteBtnStyle: React.CSSProperties = {
-  background: 'white',
+  background: 'rgba(255,255,255,0.85)',
   color: '#111',
   borderRadius: 16,
   fontWeight: 900,
