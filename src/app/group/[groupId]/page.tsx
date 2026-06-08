@@ -731,6 +731,7 @@ export default function GroupPage() {
   const [notifications, setNotifications] = useState<GroupNotification[]>([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const [showNav, setShowNav] = useState(false)
   const [pendingAppeal, setPendingAppeal] = useState<{
     transactionId: string
     fromUid: string
@@ -941,101 +942,142 @@ export default function GroupPage() {
         <div className="min-h-screen bg-[#0f0f13]">
 
           {/* ── Floating nav overlay ── */}
-          <div style={{ position: 'fixed', top: 50, left: 0, right: 0, zIndex: 30, pointerEvents: 'none' }}>
-            <div style={{ maxWidth: '512px', margin: '0 auto', padding: '12px', display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'auto' }}>
-              {/* Back */}
-              <button
-                onClick={() => router.push('/dashboard')}
-                style={{ flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 14, background: 'white', fontWeight: 800, fontSize: 16, color: '#374151', boxShadow: '0 1px 4px rgba(0,0,0,0.15)', border: 'none', cursor: 'pointer' }}
-                aria-label="Back"
-              >
-                ←
-              </button>
-
-              {/* Tab buttons */}
-              <div style={{ display: 'flex', gap: 6, flex: 1, overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 8, paddingRight: 8, marginTop: -8 }}>
-                {(
-                  [
-                    { key: 'plaza',       label: 'PLAZA',       badge: 0              },
-                    { key: 'feed',        label: 'FEED',        badge: unreadFeedCount },
-                    { key: 'leaderboard', label: 'RANKS',       badge: 0              },
-                    { key: 'court',       label: 'COURT',       badge: activeCaseCount },
-                    { key: 'wall',        label: 'WALL',        badge: 0              },
-                  ] as const
-                ).map(({ key, label, badge }) => (
-                  <button
-                    key={key}
-                    onClick={() => switchTab(key)}
-                    style={{
-                      position: 'relative',
-                      flexShrink: 0,
-                      padding: '9px 14px',
-                      borderRadius: 14,
-                      background: 'white',
-                      fontWeight: 900,
-                      fontSize: 11,
-                      letterSpacing: '0.07em',
-                      textTransform: 'uppercase',
-                      color: activeTab === key ? '#111827' : '#9ca3af',
-                      boxShadow: activeTab === key ? '0 3px 12px rgba(0,0,0,0.2)' : '0 1px 4px rgba(0,0,0,0.1)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'box-shadow 0.15s, color 0.15s',
-                    }}
-                  >
-                    {label}
-                    {badge > 0 && (
-                      <span style={{
-                        position: 'absolute', top: -6, right: -6,
-                        background: '#f35b5a', color: 'white',
-                        fontSize: 10, fontWeight: 900,
-                        borderRadius: '50%', width: 18, height: 18,
+          <div style={{ position: 'fixed', top: 50, left: 16, zIndex: 30 }}>
+            {/* Row of circular buttons: Bell → Settings (mayor) → Hamburger */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {/* Bell */}
+                {(() => {
+                  const unreadCount = notifications.filter((n) => !n.read).length
+                  return (
+                    <button
+                      onClick={() => setShowNotifPanel(true)}
+                      className={unreadCount > 0 ? 'bell-wiggle' : ''}
+                      style={{
+                        position: 'relative',
+                        width: 44, height: 44,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        border: '2px solid white',
-                      }}>
-                        {badge}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+                        borderRadius: '50%', border: 'none', cursor: 'pointer',
+                        background: unreadCount > 0 ? '#f35b5a' : 'rgba(255,255,255,0.9)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                        backdropFilter: 'blur(6px)',
+                        WebkitBackdropFilter: 'blur(6px)',
+                        transition: 'background 0.2s',
+                        touchAction: 'manipulation',
+                      }}
+                      aria-label="Notifications"
+                    >
+                      <span style={{ fontSize: 20 }}>🔔</span>
+                      {unreadCount > 0 && (
+                        <span style={{
+                          position: 'absolute', top: -2, right: -2,
+                          background: '#111', color: 'white',
+                          fontSize: 10, fontWeight: 900,
+                          borderRadius: '50%', width: 16, height: 16,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: '2px solid white',
+                        }}>
+                          {unreadCount}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })()}
 
-              {/* Bell */}
-              {(() => {
-                const unreadCount = notifications.filter((n) => !n.read).length
-                return (
+                {/* Mayor gear */}
+                {isMayor && (
                   <button
-                    onClick={() => setShowNotifPanel(true)}
-                    className={unreadCount > 0 ? 'bell-wiggle' : ''}
+                    onClick={() => setShowAdminPanel(true)}
                     style={{
-                      flexShrink: 0, width: 40, height: 40,
+                      width: 44, height: 44,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       borderRadius: '50%', border: 'none', cursor: 'pointer',
-                      background: unreadCount > 0 ? '#f35b5a' : 'white',
-                      boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
-                      transition: 'background 0.2s',
+                      background: 'rgba(255,255,255,0.9)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                      backdropFilter: 'blur(6px)',
+                      WebkitBackdropFilter: 'blur(6px)',
+                      touchAction: 'manipulation',
                     }}
-                    aria-label="Notifications"
+                    aria-label="Admin panel"
                   >
-                    <span style={{ fontSize: 18 }}>🔔</span>
+                    <span style={{ fontSize: 20 }}>⚙️</span>
                   </button>
-                )
-              })()}
+                )}
 
-              {/* Mayor gear */}
-              {isMayor && (
+                {/* Hamburger */}
                 <button
-                  onClick={() => setShowAdminPanel(true)}
+                  onClick={() => setShowNav((v) => !v)}
                   style={{
-                    flexShrink: 0, width: 40, height: 40,
+                    width: 44, height: 44,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     borderRadius: '50%', border: 'none', cursor: 'pointer',
-                    background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                    background: showNav ? '#42b842' : 'rgba(255,255,255,0.9)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    transition: 'background 0.2s',
+                    touchAction: 'manipulation',
                   }}
-                  aria-label="Admin panel"
+                  aria-label="Navigation menu"
+                  aria-expanded={showNav}
                 >
-                  <span style={{ fontSize: 18 }}>⚙️</span>
+                  <span style={{ fontSize: 18, color: showNav ? 'white' : '#333', lineHeight: 1, fontWeight: 700 }}>
+                    {showNav ? '✕' : '☰'}
+                  </span>
                 </button>
+              </div>
+
+              {/* Nav dropdown */}
+              {showNav && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+                  {(
+                    [
+                      { key: 'plaza',       label: 'Plaza',  badge: 0               },
+                      { key: 'feed',        label: 'Feed',   badge: unreadFeedCount  },
+                      { key: 'leaderboard', label: 'Ranks',  badge: 0               },
+                      { key: 'court',       label: 'Court',  badge: activeCaseCount  },
+                      { key: 'wall',        label: 'Wall',   badge: 0               },
+                    ] as const
+                  ).map(({ key, label, badge }) => (
+                    <button
+                      key={key}
+                      onClick={() => { switchTab(key); setShowNav(false) }}
+                      style={{
+                        position: 'relative',
+                        alignSelf: 'flex-start',
+                        padding: '10px 18px',
+                        borderRadius: 9999,
+                        background: activeTab === key ? '#42b842' : 'rgba(255,255,255,0.9)',
+                        fontWeight: 800,
+                        fontSize: 14,
+                        letterSpacing: '0.05em',
+                        textTransform: 'uppercase',
+                        color: activeTab === key ? 'white' : '#333',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        backdropFilter: 'blur(6px)',
+                        WebkitBackdropFilter: 'blur(6px)',
+                        touchAction: 'manipulation',
+                        minWidth: 90,
+                      }}
+                    >
+                      {label}
+                      {badge > 0 && (
+                        <span style={{
+                          position: 'absolute', top: -5, right: -5,
+                          background: '#f35b5a', color: 'white',
+                          fontSize: 10, fontWeight: 900,
+                          borderRadius: '50%', width: 18, height: 18,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: '2px solid white',
+                        }}>
+                          {badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </div>
