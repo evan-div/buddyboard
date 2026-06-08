@@ -30,6 +30,29 @@ type Props = {
   onRefresh: () => void
 }
 
+const inputStyle: React.CSSProperties = {
+  background: '#d4d4d4',
+  borderRadius: 9999,
+  border: 'none',
+  outline: 'none',
+  padding: '12px 18px',
+  fontSize: 14,
+  color: '#111',
+  width: '100%',
+  boxSizing: 'border-box',
+}
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: 1,
+  color: '#888',
+  marginBottom: 6,
+  marginTop: 0,
+  display: 'block',
+}
+
 export default function AdminPanel({ group, members, currentUid, chiefUid, onClose, onRefresh }: Props) {
   const [section, setSection] = useState<'settings' | 'members' | 'court'>('settings')
 
@@ -110,170 +133,293 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
     }
   }
 
-  const INPUT = "bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm w-full"
   const activeCases = cases.filter((c) => ['in_court', 'pending_review'].includes(c.status))
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300 }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 300 }} />
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(380px, 100vw)',
-        background: '#0f0f13', borderLeft: '1px solid #1f2937', zIndex: 301,
+        background: '#efefef', zIndex: 301,
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
+        boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
       }}>
+
         {/* Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, background: '#0f0f13', zIndex: 1 }}>
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid #d4d4d4',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'sticky', top: 0, background: '#efefef', zIndex: 1,
+        }}>
           <div>
-            <h2 style={{ fontSize: '16px', fontWeight: 800, color: '#f9fafb', margin: 0 }}>👑 Mayor Panel</h2>
-            <p style={{ fontSize: '11px', color: '#6366f1', margin: '2px 0 0' }}>{emoji} {group.name}</p>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#111', margin: 0 }}>👑 Mayor Panel</h2>
+            <p style={{ fontSize: 11, color: '#888', margin: '2px 0 0' }}>{emoji} {group.name}</p>
           </div>
-          <button onClick={onClose} style={{ background: '#1f2937', border: 'none', borderRadius: '8px', color: '#9ca3af', fontSize: '18px', width: '34px', height: '34px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+          <button
+            onClick={onClose}
+            style={{
+              background: '#d4d4d4', border: 'none', borderRadius: '50%',
+              color: '#555', fontSize: 18, width: 34, height: 34,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, touchAction: 'manipulation',
+            }}
+          >
+            ×
+          </button>
         </div>
 
         {/* Section tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #1f2937', padding: '0 12px' }}>
+        <div style={{ display: 'flex', gap: 4, padding: 8, background: '#d4d4d4' }}>
           {(['settings', 'members', 'court'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setSection(s)}
               style={{
-                flex: 1, padding: '10px 4px', fontSize: '12px', fontWeight: 700,
-                color: section === s ? '#818cf8' : '#6b7280',
-                borderBottom: `2px solid ${section === s ? '#818cf8' : 'transparent'}`,
-                background: 'none', border: 'none', cursor: 'pointer',
-                textTransform: 'capitalize',
+                flex: 1, padding: '8px 0', borderRadius: 14,
+                fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                touchAction: 'manipulation', textTransform: 'capitalize',
+                background: section === s ? '#efefef' : 'transparent',
+                color: section === s ? '#111' : '#777',
+                boxShadow: section === s ? '0 1px 4px rgba(0,0,0,0.10)' : 'none',
+                transition: 'background 0.15s, color 0.15s',
               }}
             >
-              {s === 'court' ? `Court${activeCases.length > 0 ? ` (${activeCases.length})` : ''}` : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === 'court'
+                ? `Court${activeCases.length > 0 ? ` (${activeCases.length})` : ''}`
+                : s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
         </div>
 
-        <div style={{ padding: '16px', flex: 1 }}>
+        <div style={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* ── Settings ── */}
           {section === 'settings' && (
-            <div className="space-y-4">
-              <div className="flex gap-3">
+            <>
+              {/* Emoji + Name row */}
+              <div style={{ display: 'flex', gap: 12 }}>
                 <div>
-                  <label className="block text-gray-400 text-xs mb-1 font-medium">Emoji</label>
-                  <input type="text" value={emoji} onChange={(e) => setEmoji(e.target.value.slice(-2) || '🏠')} maxLength={2} className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-center text-xl w-16 focus:outline-none focus:border-indigo-500" />
+                  <label style={labelStyle}>Emoji</label>
+                  <input
+                    type="text"
+                    value={emoji}
+                    onChange={(e) => setEmoji(e.target.value.slice(-2) || '🏠')}
+                    maxLength={2}
+                    style={{
+                      ...inputStyle,
+                      width: 56,
+                      textAlign: 'center',
+                      fontSize: 22,
+                      padding: '8px 0',
+                      borderRadius: 14,
+                    }}
+                  />
                 </div>
-                <div className="flex-1">
-                  <label className="block text-gray-400 text-xs mb-1 font-medium">Plaza Name</label>
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={50} className={INPUT} />
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Plaza Name</label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={50} style={inputStyle} />
                 </div>
               </div>
 
+              {/* Description */}
               <div>
-                <label className="block text-gray-400 text-xs mb-1 font-medium">Description</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200} rows={2} className={`${INPUT} resize-none`} />
+                <label style={labelStyle}>Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={200}
+                  rows={2}
+                  style={{
+                    ...inputStyle,
+                    borderRadius: 16,
+                    resize: 'none',
+                    fontFamily: 'inherit',
+                    lineHeight: 1.5,
+                  }}
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Give / Take limits */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label className="block text-gray-400 text-xs mb-1 font-medium">Daily Give Limit</label>
-                  <input type="number" value={giveLimit} onChange={(e) => setGiveLimit(Math.max(10, parseInt(e.target.value) || 10))} className={INPUT} />
+                  <label style={labelStyle}>Daily Give Limit</label>
+                  <input
+                    type="number"
+                    value={giveLimit}
+                    onChange={(e) => setGiveLimit(Math.max(10, parseInt(e.target.value) || 10))}
+                    style={{ ...inputStyle, minWidth: 0 }}
+                  />
                 </div>
                 <div>
-                  <label className="block text-gray-400 text-xs mb-1 font-medium">Daily Take Limit</label>
-                  <input type="number" value={takeLimit} onChange={(e) => setTakeLimit(Math.max(5, parseInt(e.target.value) || 5))} className={INPUT} />
+                  <label style={labelStyle}>Daily Take Limit</label>
+                  <input
+                    type="number"
+                    value={takeLimit}
+                    onChange={(e) => setTakeLimit(Math.max(5, parseInt(e.target.value) || 5))}
+                    style={{ ...inputStyle, minWidth: 0 }}
+                  />
                 </div>
               </div>
 
+              {/* Timezone */}
               <div>
-                <label className="block text-gray-400 text-xs mb-1 font-medium">Timezone</label>
-                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={INPUT}>
+                <label style={labelStyle}>Timezone</label>
+                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} style={inputStyle}>
                   {TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
                 </select>
               </div>
 
-              {/* Presets editor */}
+              {/* Quick Actions / Presets */}
               <div>
-                <label className="block text-gray-400 text-xs mb-2 font-medium">Quick Actions</label>
+                <label style={labelStyle}>Quick Actions</label>
                 {presets.length > 0 && (
-                  <div className="space-y-1.5 mb-3">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                     {presets.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-1.5">
-                        <span className="text-white text-sm">{p.emoji} {p.label}</span>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-bold ${p.points > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      <div
+                        key={p.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          background: '#d4d4d4', borderRadius: 12, padding: '8px 14px',
+                        }}
+                      >
+                        <span style={{ fontSize: 13, color: '#111' }}>{p.emoji} {p.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: p.points > 0 ? '#42b842' : '#e53e3e' }}>
                             {p.points > 0 ? `+${p.points}` : p.points}
                           </span>
-                          <button onClick={() => setPresets(prev => prev.filter(x => x.id !== p.id))} className="text-gray-500 hover:text-red-400 text-sm">✕</button>
+                          <button
+                            onClick={() => setPresets(prev => prev.filter(x => x.id !== p.id))}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', fontSize: 14, padding: 0, lineHeight: 1, touchAction: 'manipulation' }}
+                          >
+                            ✕
+                          </button>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="flex gap-1.5">
-                  <input type="text" value={newPresetEmoji} onChange={(e) => setNewPresetEmoji(e.target.value.slice(-2))} maxLength={2} className="w-12 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-white text-center focus:outline-none focus:border-indigo-500" />
-                  <input type="text" value={newPresetLabel} onChange={(e) => setNewPresetLabel(e.target.value)} placeholder="Label" maxLength={50} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-indigo-500" />
-                  <input type="number" value={newPresetPts} onChange={(e) => setNewPresetPts(e.target.value)} placeholder="pts" className="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-white text-xs focus:outline-none focus:border-indigo-500" />
-                  <button onClick={addPreset} className="px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold">+</button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    value={newPresetEmoji}
+                    onChange={(e) => setNewPresetEmoji(e.target.value.slice(-2))}
+                    maxLength={2}
+                    style={{ ...inputStyle, width: 52, textAlign: 'center', fontSize: 18, padding: '10px 0', borderRadius: 12, flexShrink: 0 }}
+                  />
+                  <input
+                    type="text"
+                    value={newPresetLabel}
+                    onChange={(e) => setNewPresetLabel(e.target.value)}
+                    placeholder="Label"
+                    maxLength={50}
+                    style={{ ...inputStyle, fontSize: 13, padding: '10px 14px' }}
+                  />
+                  <input
+                    type="number"
+                    value={newPresetPts}
+                    onChange={(e) => setNewPresetPts(e.target.value)}
+                    placeholder="pts"
+                    style={{ ...inputStyle, width: 60, flexShrink: 0, padding: '10px 8px', textAlign: 'center', minWidth: 0 }}
+                  />
+                  <button
+                    onClick={addPreset}
+                    style={{
+                      flexShrink: 0, width: 40, height: 40,
+                      background: '#42b842', color: 'white', border: 'none',
+                      borderRadius: 12, fontSize: 20, fontWeight: 700,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      touchAction: 'manipulation',
+                    }}
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
+              {/* Save */}
               <button
                 onClick={saveSettings}
                 disabled={savingSettings || !name.trim()}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl text-sm transition-all"
+                style={{
+                  background: '#42b842', color: 'white', borderRadius: 9999,
+                  fontWeight: 900, textTransform: 'uppercase', letterSpacing: 2,
+                  fontSize: 15, padding: 14, width: '100%', border: 'none',
+                  cursor: savingSettings || !name.trim() ? 'not-allowed' : 'pointer',
+                  opacity: savingSettings || !name.trim() ? 0.5 : 1,
+                  touchAction: 'manipulation',
+                }}
               >
                 {savingSettings ? 'Saving…' : 'Save Settings'}
               </button>
-            </div>
+            </>
           )}
 
           {/* ── Members ── */}
           {section === 'members' && (
-            <div className="space-y-3">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {members.map((m) => {
                 const isSelf = m.uid === currentUid
                 const isChief = m.uid === chiefUid
                 return (
-                  <div key={m.uid} style={{ background: '#1a1a22', borderRadius: '12px', padding: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                      <AvatarDisplay config={m.avatar ?? DEFAULT_AVATAR} size={36} />
+                  <div key={m.uid} style={{ background: '#d4d4d4', borderRadius: 16, padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSelf ? 0 : 10 }}>
+                      <AvatarDisplay config={m.avatar ?? DEFAULT_AVATAR} size={38} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                          <p style={{ fontSize: '13px', fontWeight: 700, color: '#f9fafb', margin: 0 }}>{m.displayName}</p>
-                          {m.isAdmin && <span style={{ fontSize: '10px', background: '#312e81', color: '#818cf8', borderRadius: '4px', padding: '1px 5px', fontWeight: 700 }}>MAYOR</span>}
-                          {isChief && <span style={{ fontSize: '10px', background: '#422006', color: '#fbbf24', borderRadius: '4px', padding: '1px 5px', fontWeight: 700 }}>CHIEF</span>}
-                          {isSelf && <span style={{ fontSize: '10px', color: '#6b7280' }}>(you)</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{m.displayName}</span>
+                          {m.isAdmin && (
+                            <span style={{ fontSize: 10, background: '#42b842', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>MAYOR</span>
+                          )}
+                          {isChief && (
+                            <span style={{ fontSize: 10, background: '#f5a32d', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>CHIEF</span>
+                          )}
+                          {isSelf && <span style={{ fontSize: 10, color: '#888' }}>(you)</span>}
                         </div>
-                        <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>{m.totalPoints} pts</p>
+                        <span style={{ fontSize: 11, color: '#666' }}>{m.totalPoints} pts</span>
                       </div>
                     </div>
 
                     {!isSelf && (
-                      <>
-                        {editingPoints === m.uid ? (
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <input
-                              type="number"
-                              value={newPointsVal}
-                              onChange={(e) => setNewPointsVal(e.target.value)}
-                              placeholder={String(m.totalPoints)}
-                              className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-indigo-500"
-                            />
-                            <button onClick={() => handleSetPoints(m)} className="px-3 bg-green-700 hover:bg-green-600 text-white rounded-lg text-xs font-bold">Save</button>
-                            <button onClick={() => { setEditingPoints(null); setNewPointsVal('') }} className="px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs">✕</button>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button onClick={() => { setEditingPoints(m.uid); setNewPointsVal(String(m.totalPoints)) }} style={{ flex: 1, background: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#9ca3af', fontSize: '11px', fontWeight: 600, padding: '6px', cursor: 'pointer' }}>
-                              ✏️ Set Points
-                            </button>
-                            <button
-                              onClick={() => handleBanish(m)}
-                              disabled={banishing === m.uid}
-                              style={{ flex: 1, background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '8px', color: '#f87171', fontSize: '11px', fontWeight: 700, padding: '6px', cursor: banishing === m.uid ? 'default' : 'pointer', opacity: banishing === m.uid ? 0.6 : 1 }}
-                            >
-                              🚫 Banish
-                            </button>
-                          </div>
-                        )}
-                      </>
+                      editingPoints === m.uid ? (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            type="number"
+                            value={newPointsVal}
+                            onChange={(e) => setNewPointsVal(e.target.value)}
+                            placeholder={String(m.totalPoints)}
+                            style={{ ...inputStyle, flex: 1, background: '#efefef', minWidth: 0 }}
+                          />
+                          <button
+                            onClick={() => handleSetPoints(m)}
+                            style={{ flexShrink: 0, background: '#42b842', color: 'white', border: 'none', borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', touchAction: 'manipulation' }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => { setEditingPoints(null); setNewPointsVal('') }}
+                            style={{ flexShrink: 0, background: '#bbb', color: '#333', border: 'none', borderRadius: 10, padding: '8px 12px', fontSize: 12, cursor: 'pointer', touchAction: 'manipulation' }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={() => { setEditingPoints(m.uid); setNewPointsVal(String(m.totalPoints)) }}
+                            style={{ flex: 1, background: '#efefef', border: 'none', borderRadius: 10, color: '#444', fontSize: 12, fontWeight: 600, padding: '8px 0', cursor: 'pointer', touchAction: 'manipulation' }}
+                          >
+                            ✏️ Set Points
+                          </button>
+                          <button
+                            onClick={() => handleBanish(m)}
+                            disabled={banishing === m.uid}
+                            style={{ flex: 1, background: '#fee2e2', border: 'none', borderRadius: 10, color: '#e53e3e', fontSize: 12, fontWeight: 700, padding: '8px 0', cursor: banishing === m.uid ? 'default' : 'pointer', opacity: banishing === m.uid ? 0.6 : 1, touchAction: 'manipulation' }}
+                          >
+                            🚫 Banish
+                          </button>
+                        </div>
+                      )
                     )}
                   </div>
                 )
@@ -283,28 +429,32 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
 
           {/* ── Court ── */}
           {section === 'court' && (
-            <div className="space-y-3">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeCases.length === 0 ? (
-                <div style={{ textAlign: 'center', paddingTop: '40px' }}>
-                  <div style={{ fontSize: '36px', marginBottom: '10px' }}>🏛️</div>
-                  <p style={{ color: '#6b7280', fontSize: '13px' }}>No active court cases</p>
+                <div style={{ textAlign: 'center', paddingTop: 48 }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>🏛️</div>
+                  <p style={{ color: '#888', fontSize: 13, margin: 0 }}>No active court cases</p>
                 </div>
               ) : (
                 activeCases.map((c) => (
-                  <div key={c.id} style={{ background: '#1a1a22', borderRadius: '12px', padding: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <p style={{ fontSize: '13px', fontWeight: 700, color: '#f9fafb', margin: 0 }}>
+                  <div key={c.id} style={{ background: '#d4d4d4', borderRadius: 16, padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>
                         {c.defendantName} vs {c.accuserName}
-                      </p>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#f87171' }}>-{c.points} pts</span>
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#e53e3e' }}>-{c.points} pts</span>
                     </div>
-                    <p style={{ fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', margin: '0 0 8px' }}>
+                    <p style={{ fontSize: 11, color: '#555', fontStyle: 'italic', margin: '0 0 6px' }}>
                       &ldquo;{c.appealComment}&rdquo;
                     </p>
-                    <p style={{ fontSize: '10px', color: '#4b5563', margin: '0 0 8px' }}>{timeAgo(c.createdAt)}</p>
+                    <p style={{ fontSize: 10, color: '#888', margin: '0 0 10px' }}>{timeAgo(c.createdAt)}</p>
                     <button
                       onClick={() => dismissCase(group.id, c.id)}
-                      style={{ width: '100%', background: '#1f2937', border: '1px solid #374151', borderRadius: '8px', color: '#9ca3af', fontSize: '12px', fontWeight: 600, padding: '7px', cursor: 'pointer' }}
+                      style={{
+                        width: '100%', background: '#efefef', border: 'none', borderRadius: 10,
+                        color: '#555', fontSize: 12, fontWeight: 600, padding: 9,
+                        cursor: 'pointer', touchAction: 'manipulation',
+                      }}
                     >
                       🚫 Dismiss Case
                     </button>
@@ -315,6 +465,13 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
           )}
         </div>
       </div>
+
+      <style>{`
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type="number"] { -moz-appearance: textfield; }
+        input::placeholder, textarea::placeholder { color: #999; }
+      `}</style>
     </>
   )
 }
