@@ -103,7 +103,6 @@ export default function DashboardPage() {
   const [view, setView] = useState<'welcome' | 'groups'>('welcome')
   const [groups, setGroups] = useState<Group[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
-  const [groupsFetched, setGroupsFetched] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
   const [wipePhase, setWipePhase] = useState<WipePhase>('idle')
@@ -113,18 +112,15 @@ export default function DashboardPage() {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
 
-  // Fetch groups when the groups view is opened (lazy, once)
+  // Fetch groups each time the groups view is opened
   useEffect(() => {
-    if (view !== 'groups' || !user || groupsFetched) return
+    if (view !== 'groups' || !user) return
     setLoadingGroups(true)
     getUserGroups(user.uid)
-      .then(userGroups => {
-        setGroups(userGroups)
-        setGroupsFetched(true)
-      })
+      .then(userGroups => setGroups(userGroups))
       .catch(err => console.error('Error loading groups:', err))
       .finally(() => setLoadingGroups(false))
-  }, [view, user, groupsFetched])
+  }, [view, user])
 
   function handleMyGroups() {
     setView('groups')
