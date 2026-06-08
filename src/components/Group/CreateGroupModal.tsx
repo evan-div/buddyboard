@@ -314,6 +314,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                     onChange={(e) => setGiveLimit(Math.max(10, Math.min(500, parseInt(e.target.value) || 10)))}
                     style={{
                       flex: 1,
+                      minWidth: 0,
                       background: '#d4d4d4',
                       borderRadius: 12,
                       border: 'none',
@@ -350,6 +351,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                     onChange={(e) => setTakeLimit(Math.max(5, Math.min(100, parseInt(e.target.value) || 5)))}
                     style={{
                       flex: 1,
+                      minWidth: 0,
                       background: '#d4d4d4',
                       borderRadius: 12,
                       border: 'none',
