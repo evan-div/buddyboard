@@ -163,7 +163,7 @@ function GrassFloor() {
 const ZOOM_OFFSET_Y    =  3.5   // camera height above character when zoomed
 const ZOOM_OFFSET_XZ   =  3.5   // equal X and Z diagonal offset when zoomed
 const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
-const DEFAULT_CAM_POS  = new THREE.Vector3(14, 12, 14)
+const DEFAULT_CAM_POS  = new THREE.Vector3(8, 6, 8)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
 function CameraController({
@@ -1529,7 +1529,7 @@ export default function MiiPlaza({
       }}
     >
       <Canvas
-        camera={{ position: [14, 12, 14], fov: 60 }}
+        camera={{ position: [8, 6, 8], fov: 60 }}
         gl={{ antialias: true, alpha: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
