@@ -1033,15 +1033,15 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   const r    = seededRandom(42)
   const defs: SpriteDef[] = []
   const rings = [
-    { count: 20, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0: 22, w1: 35 },  // foreground — near camera, above plaza
-    { count: 18, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0: 28, w1: 45 },  // mid foreground
-    { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  9, w1: 16 },  // wraps the spire
-    { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0: 14, w1: 23 },
-    { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0: 18, w1: 30 },
-    { count: 45, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0: 24, w1: 39 },  // transition — rising
-    { count: 43, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 33, w1: 53 },
-    { count: 40, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 43, w1: 69 }, // horizon level
-    { count: 38, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 55, w1: 88 }, // sky clouds past plaza
+    { count: 20, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0: 14, w1: 22 },  // foreground — near camera, above plaza
+    { count: 18, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0: 17, w1: 28 },  // mid foreground
+    { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  6, w1: 10 },  // wraps the spire
+    { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  9, w1: 14 },
+    { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0: 11, w1: 19 },
+    { count: 45, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0: 15, w1: 24 },  // transition — rising
+    { count: 43, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 20, w1: 33 },
+    { count: 40, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 26, w1: 43 }, // horizon level
+    { count: 38, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 34, w1: 55 }, // sky clouds past plaza
   ]
   rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
     for (let i = 0; i < count; i++) {
