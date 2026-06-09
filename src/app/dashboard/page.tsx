@@ -43,50 +43,107 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center px-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
     >
-      <div className="w-full max-w-sm bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-white">Join a Group</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 transition-colors text-xl leading-none"
-          >
-            ✕
-          </button>
-        </div>
+      <div
+        style={{
+          background: '#efefef',
+          borderRadius: 28,
+          padding: 32,
+          maxWidth: 360,
+          width: '100%',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
+        }}
+      >
+        <h2
+          style={{
+            color: '#111',
+            fontWeight: 900,
+            fontSize: 28,
+            textAlign: 'center',
+            marginBottom: 24,
+          }}
+        >
+          Join a Group
+        </h2>
 
-        {error && (
-          <div className="mb-4 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
+        <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+            placeholder="ABC123"
+            maxLength={6}
+            style={{
+              background: '#d4d4d4',
+              borderRadius: 9999,
+              border: 'none',
+              outline: 'none',
+              padding: '14px 24px',
+              textAlign: 'center',
+              fontSize: 20,
+              color: '#111',
+              width: '100%',
+              boxSizing: 'border-box',
+              fontFamily: 'monospace',
+              letterSpacing: 4,
+              textTransform: 'uppercase',
+            }}
+          />
 
-        <form onSubmit={handleJoin} className="flex flex-col gap-4">
-          <div>
-            <label className="block text-gray-400 text-sm mb-1.5 font-medium">
-              Invite Code
-            </label>
-            <input
-              type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-              placeholder="ABC123"
-              maxLength={6}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors uppercase tracking-widest text-center text-lg font-mono"
-            />
-            <p className="text-gray-600 text-xs mt-1.5 text-center">
-              Ask a friend for their group invite code
+          {error && (
+            <p style={{ color: '#e53e3e', fontSize: 13, textAlign: 'center', margin: 0 }}>
+              {error}
             </p>
-          </div>
+          )}
 
           <button
             type="submit"
             disabled={loading || code.trim().length !== 6}
-            className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+            style={{
+              background: '#42b842',
+              color: 'white',
+              borderRadius: 9999,
+              fontWeight: 900,
+              textTransform: 'uppercase',
+              letterSpacing: 2,
+              fontSize: 15,
+              padding: 14,
+              width: '100%',
+              border: 'none',
+              cursor: loading || code.trim().length !== 6 ? 'not-allowed' : 'pointer',
+              opacity: loading || code.trim().length !== 6 ? 0.6 : 1,
+            }}
           >
-            {loading ? 'Joining...' : 'Join Group'}
+            {loading ? 'Joining...' : 'JOIN GROUP'}
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: '#f5a32d',
+              color: 'white',
+              borderRadius: 9999,
+              fontWeight: 900,
+              textTransform: 'uppercase',
+              letterSpacing: 2,
+              fontSize: 15,
+              padding: 14,
+              width: '100%',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            GO BACK
           </button>
         </form>
       </div>
@@ -95,6 +152,21 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
 }
 
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
+
+const whiteBtnStyle: React.CSSProperties = {
+  background: 'white',
+  color: '#111',
+  borderRadius: 16,
+  fontWeight: 900,
+  textTransform: 'uppercase',
+  letterSpacing: 1,
+  fontSize: 17,
+  padding: 18,
+  width: '100%',
+  border: 'none',
+  cursor: 'pointer',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+}
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -155,106 +227,143 @@ export default function DashboardPage() {
     <div style={{ position: 'fixed', inset: 0 }}>
       <CloudScene />
 
-      {/* Centered card */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-        <div className="w-full max-w-[300px] bg-white rounded-2xl shadow-2xl p-7">
+      {/* Centered floating content */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
 
-          {view === 'welcome' ? (
-            <>
-              <div className="text-center mb-5">
-                <h1 className="text-xl font-extrabold text-gray-900 leading-tight mb-1.5">
-                  Welcome to BuddyBoard!
-                </h1>
-                <p className="text-sm text-gray-500">
-                  Hey, {userProfile.displayName}!
-                </p>
-              </div>
-              <div className="flex flex-col gap-2.5">
+        {view === 'welcome' ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 'calc(100% - 48px)',
+              maxWidth: 320,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              alignItems: 'center',
+            }}
+          >
+            <h1
+              style={{
+                color: '#111',
+                fontWeight: 900,
+                fontSize: 30,
+                textAlign: 'center',
+                marginBottom: 8,
+                width: '100%',
+              }}
+            >
+              Hey, {userProfile.displayName}!
+            </h1>
+
+            <button onClick={handleMyGroups} style={whiteBtnStyle}>
+              MY GROUPS
+            </button>
+            <button onClick={() => setShowCreate(true)} style={whiteBtnStyle}>
+              NEW GROUP
+            </button>
+            <button onClick={() => setShowJoin(true)} style={whiteBtnStyle}>
+              JOIN GROUP
+            </button>
+            <button onClick={() => router.push('/profile')} style={whiteBtnStyle}>
+              SETTINGS
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 'calc(100% - 48px)',
+              maxWidth: 320,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              alignItems: 'center',
+            }}
+          >
+            <h2
+              style={{
+                color: '#111',
+                fontWeight: 900,
+                fontSize: 24,
+                textAlign: 'center',
+                width: '100%',
+                marginBottom: 0,
+              }}
+            >
+              My Groups
+            </h2>
+
+            {loadingGroups ? (
+              <>
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="animate-pulse"
+                    style={{
+                      background: 'rgba(255,255,255,0.6)',
+                      borderRadius: 16,
+                      height: 62,
+                      width: '100%',
+                    }}
+                  />
+                ))}
+              </>
+            ) : groups.length === 0 ? (
+              <>
+                <p style={{ color: '#888', fontSize: 14, textAlign: 'center' }}>No groups yet</p>
                 <button
-                  onClick={handleMyGroups}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm shadow-lg shadow-indigo-500/20 transition-all"
+                  onClick={() => setShowJoin(true)}
+                  style={{ ...whiteBtnStyle, fontSize: 14, padding: 14 }}
                 >
-                  My Groups
+                  Join a Group
                 </button>
                 <button
                   onClick={() => setShowCreate(true)}
-                  className="w-full py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50 transition-all"
+                  style={{ ...whiteBtnStyle, fontSize: 14, padding: 14 }}
                 >
-                  New Group
+                  Create Group
                 </button>
-                <button
-                  onClick={() => setShowJoin(true)}
-                  className="w-full py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50 transition-all"
-                >
-                  Join Group
-                </button>
-                <button
-                  onClick={() => router.push('/profile')}
-                  className="w-full py-3 rounded-xl border border-gray-200 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50 transition-all"
-                >
-                  Settings
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 mb-4">
-                <button
-                  onClick={() => setView('welcome')}
-                  className="text-gray-400 hover:text-gray-600 transition-colors text-lg leading-none p-0.5"
-                >
-                  ←
-                </button>
-                <h2 className="text-lg font-bold text-gray-900">My Groups</h2>
-              </div>
+              </>
+            ) : (
+              <>
+                {groups.map((group) => (
+                  <button
+                    key={group.id}
+                    onClick={() => startWipe(group.id)}
+                    style={whiteBtnStyle}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </>
+            )}
 
-              {loadingGroups ? (
-                <div className="space-y-0.5">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="animate-pulse flex items-center justify-between py-3 border-b border-gray-100">
-                      <div className="h-4 bg-gray-200 rounded w-32" />
-                      <div className="h-3 bg-gray-100 rounded w-16" />
-                    </div>
-                  ))}
-                </div>
-              ) : groups.length === 0 ? (
-                <div className="text-center py-6">
-                  <p className="text-gray-400 text-sm mb-4">No groups yet</p>
-                  <div className="flex gap-2 justify-center">
-                    <button
-                      onClick={() => setShowJoin(true)}
-                      className="px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 transition-all"
-                    >
-                      Join
-                    </button>
-                    <button
-                      onClick={() => setShowCreate(true)}
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-semibold transition-all"
-                    >
-                      Create
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  {groups.map((group, i) => (
-                    <button
-                      key={group.id}
-                      onClick={() => startWipe(group.id)}
-                      className={`w-full text-left flex items-center justify-between py-3 px-2 -mx-2 rounded-lg hover:bg-gray-50 transition-colors ${i < groups.length - 1 ? 'border-b border-gray-100' : ''}`}
-                    >
-                      <span className="font-semibold text-gray-900 text-sm">{group.name}</span>
-                      <span className="text-xs text-gray-400">
-                        {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-        </div>
+            <button
+              onClick={() => setView('welcome')}
+              style={{
+                background: '#f5a32d',
+                color: 'white',
+                borderRadius: 9999,
+                fontWeight: 900,
+                textTransform: 'uppercase',
+                letterSpacing: 2,
+                fontSize: 15,
+                padding: 14,
+                width: '100%',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+        )}
       </div>
 
       <CloudWipe
