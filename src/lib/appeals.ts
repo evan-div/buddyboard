@@ -292,11 +292,14 @@ export async function castVote(
   chiefUid?: string  // Chief (not a party) gets 2 votes
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
+  const groupRef = doc(db, 'groups', groupId)
 
   await runTransaction(db, async (tx) => {
-    const caseSnap = await tx.get(caseRef)
+    // All reads must come before writes in a Firestore transaction
+    const [caseSnap, groupSnap] = await Promise.all([tx.get(caseRef), tx.get(groupRef)])
     if (!caseSnap.exists()) throw new Error('Case not found')
     const c = caseSnap.data()
+    const memberCount: number = groupSnap.data()?.memberCount ?? 0
 
     if (c.status !== 'in_court') throw new Error('Voting is closed')
     if (c.votes?.[voterUid]) throw new Error('You have already voted')
@@ -324,11 +327,14 @@ export async function castVote(
     if (innocentWeight >= majority) { newStatus = 'resolved_innocent'; resolved = true }
     else if (guiltyWeight >= majority) { newStatus = 'resolved_guilty'; resolved = true }
 
-    // Auto-resolve when every eligible voter has cast a vote (ties go to defendant)
+    // Auto-resolve when every eligible voter has cast a vote (ties go to defendant / innocent)
+    // Uses server-side memberCount so a stale client list can't trigger premature resolution
     if (!resolved) {
-      const eligibleVoterUids = memberUids.filter(uid => uid !== c.accuserUid && uid !== c.defendantUid)
-      const allVoted = eligibleVoterUids.length > 0 && eligibleVoterUids.every(uid => newVotes[uid] !== undefined)
-      if (allVoted) {
+      const eligibleCount = Math.max(0, memberCount - 2) // all members minus the two parties
+      const nonPartyVotes = Object.keys(newVotes).filter(
+        uid => uid !== c.accuserUid && uid !== c.defendantUid
+      ).length
+      if (eligibleCount > 0 && nonPartyVotes >= eligibleCount) {
         newStatus = innocentWeight >= guiltyWeight ? 'resolved_innocent' : 'resolved_guilty'
         resolved = true
       }
