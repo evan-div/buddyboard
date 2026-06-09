@@ -281,8 +281,10 @@ function CaseCard({
             }} />
           </div>
           <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 11, margin: '5px 0 0' }}>
-            {totalVotes}/{eligibleVoters} voted
-            {userVote && <span> · you voted {userVote}</span>}
+            {isActive
+              ? <>{totalVotes}/{eligibleVoters} voted{userVote && <span> · you voted {userVote}</span>}</>
+              : <>{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast{userVote && <span> · you voted {userVote}</span>}</>
+            }
           </p>
         </div>
       )}
