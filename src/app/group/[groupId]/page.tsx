@@ -1046,6 +1046,7 @@ export default function GroupPage() {
               members={members}
               currentUid={user.uid}
               groupId={groupId}
+              inviteCode={group.inviteCode}
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
               isChief={isCurrentUserChief}

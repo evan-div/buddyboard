@@ -1484,6 +1484,7 @@ interface Props {
   members: GroupMember[]
   currentUid: string
   groupId: string
+  inviteCode?: string
   remainingGive: number
   remainingTake: number
   isChief?: boolean
@@ -1494,7 +1495,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, remainingGive, remainingTake, isChief, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, isChief, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1643,8 +1644,17 @@ export default function MiiPlaza({
           borderRadius: 20,
           pointerEvents: 'none',
           whiteSpace: 'nowrap',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
         }}>
           {isMobile ? 'Hold to carry · Pinch to zoom · Swipe to rotate' : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
+          {inviteCode && (
+            <>
+              <span style={{ opacity: 0.4 }}>·</span>
+              <span>Code: <strong style={{ color: '#fff', letterSpacing: 1 }}>{inviteCode}</strong></span>
+            </>
+          )}
         </div>
       )}
     </div>
