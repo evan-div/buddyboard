@@ -604,6 +604,7 @@ export default function MiiCharacter({
     const body = bodyGroupRef.current
 
     if (animState.current === 'walking') {
+      group.position.y = 0
       const dx   = targetPos.current.x - group.position.x
       const dz   = targetPos.current.z - group.position.z
       const dist = Math.sqrt(dx*dx + dz*dz)
@@ -626,10 +627,12 @@ export default function MiiCharacter({
         if (rightLegRef.current) rightLegRef.current.rotation.x  =  sw
       }
     } else if (animState.current === 'idle_bob') {
+      group.position.y = 0
       idleTimer.current -= delta
       if (body) body.position.y = Math.sin(t*2.6)*0.03
       if (idleTimer.current <= 0) { if (body) body.position.y = 0; pickNewTarget() }
     } else if (animState.current === 'idle_sway') {
+      group.position.y = 0
       idleTimer.current -= delta
       if (body) body.rotation.z = Math.sin(t*1.8)*0.07
       if (idleTimer.current <= 0) { if (body) body.rotation.z = 0; pickNewTarget() }
