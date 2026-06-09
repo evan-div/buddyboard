@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarBuilder from '@/components/Avatar/AvatarBuilder'
-import { updateUserAvatar, updateUserDisplayName } from '@/lib/firestore'
+import { updateUserAvatar, updateMemberAvatar, updateUserDisplayName } from '@/lib/firestore'
 import type { AvatarConfig } from '@/lib/types'
 
 const CloudScene = dynamic(() => import('@/components/World/CloudScene'), { ssr: false })
@@ -63,10 +63,13 @@ export default function ProfilePage() {
   }
 
   function handleAvatarChange(newAvatar: AvatarConfig) {
-    if (!user) return
+    if (!user || !userProfile) return
     setAvatarDraft(newAvatar)
     setAvatarSaving(true)
-    updateUserAvatar(user.uid, newAvatar)
+    const groupUpdates = (userProfile.groups ?? []).map(gId =>
+      updateMemberAvatar(gId, user.uid, newAvatar)
+    )
+    Promise.all([updateUserAvatar(user.uid, newAvatar), ...groupUpdates])
       .catch((err) => console.error('Error saving avatar:', err))
       .finally(() => setAvatarSaving(false))
   }
