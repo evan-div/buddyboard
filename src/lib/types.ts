@@ -113,6 +113,16 @@ export type WallPost = {
   avatarConfig?: AvatarConfig
   text: string
   reactions?: Record<string, string[]>
+  commentCount?: number
+  createdAt: Date
+}
+
+export type WallComment = {
+  id: string
+  uid: string
+  displayName: string
+  avatarConfig?: AvatarConfig
+  text: string
   createdAt: Date
 }
 
