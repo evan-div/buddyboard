@@ -1,8 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { doc, getDoc } from 'firebase/firestore'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
+import { db } from '@/lib/firebase'
 import { subscribeToCases, castVote, resolveExpiredCase } from '@/lib/appeals'
 import type { CourtCase, GroupMember } from '@/lib/types'
 
@@ -54,6 +56,15 @@ function CaseCard({
   const [voting, setVoting] = useState(false)
   const [now, setNow] = useState(Date.now())
   const autoResolved = useRef(false)
+  const [txReason, setTxReason] = useState<string | null>(null)
+
+  // Fetch reason from the original transaction for cases filed before the reason field was added
+  useEffect(() => {
+    if (c.reason || !c.transactionId) return
+    getDoc(doc(db, 'groups', groupId, 'transactions', c.transactionId)).then((snap) => {
+      if (snap.exists()) setTxReason(snap.data().reason ?? null)
+    })
+  }, [c.reason, c.transactionId, groupId])
 
   const isActive = c.status === 'in_court'
 
@@ -190,7 +201,7 @@ function CaseCard({
             {c.accuserName}&apos;s accusation
           </p>
           <p style={{ color: 'white', fontSize: 13, fontStyle: 'italic', fontWeight: 500, lineHeight: 1.5, margin: 0 }}>
-            &ldquo;{c.reason ?? `Took ${c.points} points`}&rdquo;
+            &ldquo;{c.reason ?? txReason ?? `Took ${c.points} points`}&rdquo;
           </p>
         </div>
 
