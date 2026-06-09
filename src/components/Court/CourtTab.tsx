@@ -97,7 +97,7 @@ function CaseCard({
   const innocentCount = Object.values(c.votes).filter((v) => v === 'innocent').length
   const guiltyCount   = Object.values(c.votes).filter((v) => v === 'guilty').length
   const totalVotes    = innocentCount + guiltyCount
-  const eligibleVoters = Math.max(0, memberUids.length - 2)
+  const eligibleVoters = members.filter(m => m.uid !== c.accuserUid && m.uid !== c.defendantUid).length
   const innocentPct   = totalVotes > 0 ? Math.round((innocentCount / totalVotes) * 100) : 50
 
   let statusLabel = ''
