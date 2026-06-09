@@ -6,11 +6,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import CloudScene from '@/components/World/CloudScene'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
-import { getUserGroups, joinGroup } from '@/lib/firestore'
+import { getUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
+import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import CreateGroupModal from '@/components/Group/CreateGroupModal'
-import type { Group } from '@/lib/types'
+import type { Group, GroupMember } from '@/lib/types'
 
 // ─── Join Group Modal ─────────────────────────────────────────────────────────
+
+type WelcomeData = { group: Group; members: GroupMember[]; groupId: string }
 
 type JoinGroupModalProps = {
   onClose: () => void
@@ -22,6 +25,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [welcome, setWelcome] = useState<WelcomeData | null>(null)
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault()
@@ -33,12 +37,107 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
     setLoading(true)
     try {
       const groupId = await joinGroup(code.trim(), user)
-      onJoined(groupId)
+      const [group, members] = await Promise.all([
+        getGroup(groupId),
+        getGroupMembers(groupId),
+      ])
+      if (group) {
+        setWelcome({ group, members, groupId })
+      } else {
+        onJoined(groupId)
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to join group.')
     } finally {
       setLoading(false)
     }
+  }
+
+  if (welcome) {
+    const { group, members } = welcome
+    const giveLimit = group.dailyGiveLimit ?? 100
+    const takeLimit = group.dailyTakeLimit ?? 20
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+          {/* Header */}
+          <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)', padding: '28px 24px 20px' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 8 }}>
+                {group.emoji || '🏠'}
+              </div>
+              <div style={{ color: '#fff', fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>
+                {group.name}
+              </div>
+              {group.description && (
+                <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 6 }}>
+                  {group.description}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ padding: '20px 24px 24px', overflowY: 'auto', maxHeight: 380 }}>
+            {/* Daily limits */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <div style={{ flex: 1, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>+{giveLimit}</div>
+                <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600, marginTop: 2 }}>pts/day to give</div>
+              </div>
+              <div style={{ flex: 1, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#ea580c' }}>−{takeLimit}</div>
+                <div style={{ fontSize: 11, color: '#c2410c', fontWeight: 600, marginTop: 2 }}>pts/day to take</div>
+              </div>
+            </div>
+
+            {/* Members */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                {members.length} {members.length === 1 ? 'Member' : 'Members'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {members.map((m) => (
+                  <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <AvatarDisplay config={m.avatar} size={36} />
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
+                        {m.displayName}
+                        {m.uid === user.uid && (
+                          <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 700, marginLeft: 6 }}>You</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                        {m.totalPoints} pts
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Great button */}
+            <button
+              onClick={() => onJoined(welcome.groupId)}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: '#22c55e',
+                color: '#fff',
+                fontWeight: 800,
+                fontSize: 16,
+                borderRadius: 14,
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(34,197,94,0.35)',
+              }}
+            >
+              Great! 🎉
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
