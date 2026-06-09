@@ -606,7 +606,7 @@ function WallPostThread({
     if (!commentText.trim() || !currentMember) return
     setCommenting(true)
     try {
-      await addWallComment(groupId, post.id, currentUid, currentMember.displayName, currentMember.avatar, commentText.trim())
+      await addWallComment(groupId, post.id, currentUid, currentMember.displayName, currentMember.avatar, commentText.trim(), post.uid, post.displayName)
       setCommentText('')
     } catch (e) {
       console.error(e)

@@ -26,6 +26,7 @@ const TYPE_ICON: Record<string, string> = {
   appeal_denied: '🏛️',
   court_opened: '🗳️',
   court_resolved: '📜',
+  wall_comment: '💬',
 }
 
 function NotifItem({
@@ -60,6 +61,7 @@ function NotifItem({
       case 'court_resolved':  return notif.outcome === 'innocent'
         ? `Court ruled: ${notif.toName} is innocent`
         : `Court ruled: ${notif.toName} is guilty`
+      case 'wall_comment':    return `${notif.fromName} commented on your post`
       default: return 'Notification'
     }
   }
