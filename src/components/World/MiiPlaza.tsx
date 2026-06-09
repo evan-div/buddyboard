@@ -854,7 +854,7 @@ function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
 
 const HOLD_HEIGHT = 1.8
 const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
-const GRAVITY     = 26
+const GRAVITY     = 38
 const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
@@ -880,11 +880,12 @@ interface PhysicsUpdaterProps {
   orbitRef:       React.RefObject<any>
   cameraLocked:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
+  wallFlashRef:   React.RefObject<number[]>
 }
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode,
+  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode, wallFlashRef,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -948,17 +949,31 @@ function PhysicsUpdater({
         // both the wall and y=0 in the same frame still lands within bounds.
         // Do NOT touch vel.y: walls only redirect lateral velocity; killing
         // it was what caused characters to snap to the ground after bounces.
-        if (Math.abs(phys.pos.x) > WALL_BOUND) {
-          phys.pos.x = Math.sign(phys.pos.x) * WALL_BOUND
+        if (phys.pos.x > WALL_BOUND) {
+          phys.pos.x = WALL_BOUND
           phys.vel.x *= -0.45
           phys.vel.z *= 0.7
           phys.angVel.z *= -0.5
+          wallFlashRef.current[0] = 1  // +x wall
+        } else if (phys.pos.x < -WALL_BOUND) {
+          phys.pos.x = -WALL_BOUND
+          phys.vel.x *= -0.45
+          phys.vel.z *= 0.7
+          phys.angVel.z *= -0.5
+          wallFlashRef.current[1] = 1  // -x wall
         }
-        if (Math.abs(phys.pos.z) > WALL_BOUND) {
-          phys.pos.z = Math.sign(phys.pos.z) * WALL_BOUND
+        if (phys.pos.z > WALL_BOUND) {
+          phys.pos.z = WALL_BOUND
           phys.vel.z *= -0.45
           phys.vel.x *= 0.7
           phys.angVel.x *= -0.5
+          wallFlashRef.current[2] = 1  // +z wall
+        } else if (phys.pos.z < -WALL_BOUND) {
+          phys.pos.z = -WALL_BOUND
+          phys.vel.z *= -0.45
+          phys.vel.x *= 0.7
+          phys.angVel.x *= -0.5
+          wallFlashRef.current[3] = 1  // -z wall
         }
 
         // Ground collision — after wall clamping so landing position is always in-bounds
@@ -1146,6 +1161,59 @@ function Clouds() {
   )
 }
 
+// ─── Wall Flash Planes ────────────────────────────────────────────────────────
+
+function WallFlashPlanes({ wallFlashRef }: { wallFlashRef: React.RefObject<number[]> }) {
+  const matsRef = useRef<THREE.MeshBasicMaterial[]>([])
+
+  // 4 planes: +x, -x, +z, -z
+  // Each sits flush with the wall boundary, faces inward, covers the full height range
+  const WALL_H = 6
+  const WALL_Y = WALL_H / 2
+
+  useFrame((_, delta) => {
+    for (let i = 0; i < 4; i++) {
+      const mat = matsRef.current[i]
+      if (!mat) continue
+      if (wallFlashRef.current[i] > 0) {
+        mat.opacity = 0.25
+        wallFlashRef.current[i] = 0
+      } else {
+        mat.opacity = Math.max(0, mat.opacity - delta * 3.5)
+      }
+    }
+  })
+
+  function setMat(i: number) {
+    return (mat: THREE.MeshBasicMaterial | null) => { if (mat) matsRef.current[i] = mat }
+  }
+
+  return (
+    <>
+      {/* +x wall */}
+      <mesh position={[WALL_BOUND, WALL_Y, 0]}>
+        <planeGeometry args={[FSIZE, WALL_H]} />
+        <meshBasicMaterial ref={setMat(0)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
+      </mesh>
+      {/* -x wall */}
+      <mesh position={[-WALL_BOUND, WALL_Y, 0]}>
+        <planeGeometry args={[FSIZE, WALL_H]} />
+        <meshBasicMaterial ref={setMat(1)} color="#ef4444" transparent opacity={0} side={THREE.FrontSide} depthWrite={false} />
+      </mesh>
+      {/* +z wall */}
+      <mesh position={[0, WALL_Y, WALL_BOUND]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[FSIZE, WALL_H]} />
+        <meshBasicMaterial ref={setMat(2)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
+      </mesh>
+      {/* -z wall */}
+      <mesh position={[0, WALL_Y, -WALL_BOUND]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[FSIZE, WALL_H]} />
+        <meshBasicMaterial ref={setMat(3)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
+      </mesh>
+    </>
+  )
+}
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -1169,8 +1237,9 @@ function Scene({
   animationType: 'celebrate' | 'shame' | null
   mobile: boolean
 }) {
-  const orbitRef = useRef<any>(null)
-  const { gl }   = useThree()
+  const orbitRef     = useRef<any>(null)
+  const { gl }       = useThree()
+  const wallFlashRef = useRef<number[]>([0, 0, 0, 0])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -1293,7 +1362,7 @@ function Scene({
         if (phys) {
           phys.vel.set(
             dragCursorVel.current.x,
-            Math.max(2, speed * 0.22),
+            Math.max(1, speed * 0.13),
             dragCursorVel.current.z,
           )
           phys.angVel.set(
@@ -1446,7 +1515,9 @@ function Scene({
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
+        wallFlashRef={wallFlashRef}
       />
+      <WallFlashPlanes wallFlashRef={wallFlashRef} />
       <OrbitControls
         ref={orbitRef}
         enabled={!cameraLocked}

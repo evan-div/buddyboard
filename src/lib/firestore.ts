@@ -19,7 +19,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost, WallComment } from './types'
 import { BADGE_DEFS } from './badges'
 
 // Helper to get today's date string YYYY-MM-DD
@@ -733,4 +733,42 @@ export async function reactToPost(
       tx.update(postRef, { [`reactions.${emoji}`]: arrayUnion(uid) })
     }
   })
+}
+
+function mapWallComment(d: { id: string; data: () => Record<string, unknown> }): WallComment {
+  const data = d.data()
+  return {
+    id: d.id,
+    uid: data.uid as string,
+    displayName: data.displayName as string,
+    avatarConfig: data.avatarConfig as AvatarConfig | undefined,
+    text: data.text as string,
+    createdAt: fromTimestamp(data.createdAt as Timestamp | Date | undefined),
+  }
+}
+
+export async function addWallComment(
+  groupId: string,
+  postId: string,
+  uid: string,
+  displayName: string,
+  avatarConfig: AvatarConfig | undefined,
+  text: string
+): Promise<void> {
+  const postRef    = doc(db, 'groups', groupId, 'wall', postId)
+  const commentRef = doc(collection(db, 'groups', groupId, 'wall', postId, 'comments'))
+  const batch = writeBatch(db)
+  batch.set(commentRef, { uid, displayName, avatarConfig: avatarConfig ?? null, text, createdAt: serverTimestamp() })
+  batch.update(postRef, { commentCount: increment(1) })
+  await batch.commit()
+}
+
+export function subscribeToWallComments(
+  groupId: string,
+  postId: string,
+  callback: (comments: WallComment[]) => void
+): () => void {
+  const ref = collection(db, 'groups', groupId, 'wall', postId, 'comments')
+  const q = query(ref, orderBy('createdAt', 'asc'))
+  return onSnapshot(q, (snap) => callback(snap.docs.map(mapWallComment)))
 }
