@@ -20,6 +20,7 @@ export default function ProfilePage() {
   const [nameError, setNameError] = useState('')
 
   const [avatarSaving, setAvatarSaving] = useState(false)
+  const [avatarDraft, setAvatarDraft] = useState<AvatarConfig | null>(null)
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -28,12 +29,13 @@ export default function ProfilePage() {
     }
   }, [user, authLoading, router])
 
-  // Populate display name from profile
+  // Populate fields from profile on first load
   useEffect(() => {
     if (userProfile) {
       setDisplayName(userProfile.displayName ?? '')
+      if (!avatarDraft) setAvatarDraft(userProfile.avatar)
     }
-  }, [userProfile])
+  }, [userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSaveName(e: React.FormEvent) {
     e.preventDefault()
@@ -62,6 +64,7 @@ export default function ProfilePage() {
 
   function handleAvatarChange(newAvatar: AvatarConfig) {
     if (!user) return
+    setAvatarDraft(newAvatar)
     setAvatarSaving(true)
     updateUserAvatar(user.uid, newAvatar)
       .catch((err) => console.error('Error saving avatar:', err))
@@ -222,7 +225,7 @@ export default function ProfilePage() {
         >
           <h2 style={{ color: '#111', fontWeight: 700, fontSize: 14, marginBottom: 12, marginTop: 0 }}>Customize Avatar</h2>
           <AvatarBuilder
-            value={userProfile.avatar}
+            value={avatarDraft ?? userProfile.avatar}
             onChange={handleAvatarChange}
           />
         </div>
