@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls, useTexture } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
@@ -1033,15 +1033,15 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   const r    = seededRandom(42)
   const defs: SpriteDef[] = []
   const rings = [
-    { count: 20, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0: 14, w1: 22 },  // foreground — near camera, above plaza
-    { count: 18, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0: 18, w1: 28 },  // mid foreground
-    { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  6, w1: 11 },  // wraps the spire
-    { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  9, w1: 15 },
-    { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0: 12, w1: 20 },
-    { count: 45, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0: 16, w1: 26 },  // transition — rising
-    { count: 43, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 22, w1: 35 },
-    { count: 40, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 28, w1: 46 }, // horizon level
-    { count: 38, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 36, w1: 58 }, // sky clouds past plaza
+    { count: 20, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0: 45, w1: 70 },  // foreground — near camera, above plaza
+    { count: 18, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0: 55, w1: 90 },  // mid foreground
+    { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0: 18, w1: 32 },  // wraps the spire
+    { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0: 28, w1: 46 },
+    { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0: 36, w1: 60 },
+    { count: 45, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0: 48, w1: 78 },  // transition — rising
+    { count: 43, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 65, w1: 105 },
+    { count: 40, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 85, w1: 138 }, // horizon level
+    { count: 38, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 110, w1: 175 }, // sky clouds past plaza
   ]
   rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
     for (let i = 0; i < count; i++) {
@@ -1059,6 +1059,33 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   return defs
 })()
 
+function makeCloudTex(seed: number): THREE.CanvasTexture {
+  const W = 512, H = 256
+  const cv = document.createElement('canvas')
+  cv.width = W; cv.height = H
+  const ctx = cv.getContext('2d')!
+  let s = seed | 0
+  const rng = () => { s = (Math.imul(1664525, s) + 1013904223) | 0; return (s >>> 0) / 0x100000000 }
+  const numPuffs = 7 + Math.floor(rng() * 5)
+  for (let i = 0; i < numPuffs; i++) {
+    const cx = W * (0.10 + rng() * 0.80)
+    const cy = H * (0.30 + rng() * 0.42)
+    const r  = H * (0.20 + rng() * 0.32)
+    const bri = 232 + Math.floor(rng() * 23)
+    const a   = 0.78 + rng() * 0.18
+    const g = ctx.createRadialGradient(cx, cy, r * 0.04, cx, cy, r)
+    g.addColorStop(0.00, `rgba(${bri},${bri},${Math.min(255,bri+4)},${a})`)
+    g.addColorStop(0.55, `rgba(${bri},${Math.min(255,bri+3)},${Math.min(255,bri+6)},${(a * 0.65).toFixed(2)})`)
+    g.addColorStop(0.85, `rgba(255,255,255,${(a * 0.15).toFixed(2)})`)
+    g.addColorStop(1.00, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  return new THREE.CanvasTexture(cv)
+}
+
 // Full-sphere billboard via THREE.Sprite — always faces the camera on every axis, no visible edges
 function CloudSprite({ pos, texture, width }: {
   pos: [number, number, number]
@@ -1067,7 +1094,7 @@ function CloudSprite({ pos, texture, width }: {
 }) {
   const ref    = useRef<THREE.Sprite>(null)
   const driftT = useRef(Math.random() * Math.PI * 2)
-  const height = width * (1080 / 1920)  // preserve 16:9 SVG aspect ratio
+  const height = width * 0.5  // 2:1 aspect matches canvas texture
 
   useFrame(({ clock }) => {
     if (!ref.current) return
@@ -1084,7 +1111,9 @@ function CloudSprite({ pos, texture, width }: {
 }
 
 function Clouds() {
-  const [tex1, tex2, tex3] = useTexture(['/Cloud1.svg', '/Cloud2.svg', '/Cloud3.svg'])
+  const [tex1, tex2, tex3] = useMemo(() => [
+    makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
+  ], [])
 
   const fadeTex = useMemo(() => {
     const size = 1024, c = size / 2
