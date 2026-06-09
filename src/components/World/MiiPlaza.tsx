@@ -187,11 +187,13 @@ function CameraController({
       wasLocked.current  = true
       unlockSent.current = false
       const [fx, fy, fz] = focusPos
-      // On mobile the bottom sheet covers ~52% of screen, so look below the Mii's
-      // feet to push the character into the upper 45% of the visible area.
-      const lookatY = mobile ? -0.8 : ZOOM_LOOKAT_Y
-      const goal     = new THREE.Vector3(fx + ZOOM_OFFSET_XZ, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_XZ)
-      const lookGoal = new THREE.Vector3(fx, fy + lookatY, fz)
+      // On mobile the bottom sheet covers ~44% of screen. Pull the camera back
+      // further so the Mii fits in the upper portion without aiming downward
+      // (which would hide the sky/clouds).
+      const offsetXZ = mobile ? 6.0 : ZOOM_OFFSET_XZ
+      const offsetY  = mobile ? 5.0 : ZOOM_OFFSET_Y
+      const goal     = new THREE.Vector3(fx + offsetXZ, fy + offsetY, fz + offsetXZ)
+      const lookGoal = new THREE.Vector3(fx, fy + ZOOM_LOOKAT_Y, fz)
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
@@ -377,7 +379,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
       padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
       width: mobile ? '100%' : 270,
       boxSizing: 'border-box',
-      maxHeight: mobile ? '52vh' : 'none',
+      maxHeight: mobile ? '44vh' : 'none',
       overflowY: mobile ? 'auto' : 'visible',
       boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -712,7 +714,7 @@ function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
       padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
       width: mobile ? '100%' : 270,
       boxSizing: 'border-box',
-      maxHeight: mobile ? '52vh' : 'none',
+      maxHeight: mobile ? '44vh' : 'none',
       overflowY: mobile ? 'auto' : 'visible',
       boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
