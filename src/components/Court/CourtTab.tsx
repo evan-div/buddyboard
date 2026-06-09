@@ -67,6 +67,7 @@ function CaseCard({
   }, [c.reason, c.transactionId, groupId])
 
   const isActive = c.status === 'in_court'
+  const eligibleVoters = members.filter(m => m.uid !== c.accuserUid && m.uid !== c.defendantUid).length
 
   useEffect(() => {
     if (!isActive || !c.courtDeadline) return
@@ -81,6 +82,19 @@ function CaseCard({
       resolveExpiredCase(groupId, c.id, memberUids)
     }
   }, [now, isActive, c.courtDeadline, groupId, c.id, memberUids])
+
+  // Resolve immediately if all eligible voters have already voted (handles votes
+  // recorded before the server-side auto-resolve logic was deployed)
+  useEffect(() => {
+    if (!isActive || autoResolved.current || eligibleVoters === 0) return
+    const nonPartyVotes = Object.keys(c.votes).filter(
+      uid => uid !== c.accuserUid && uid !== c.defendantUid
+    ).length
+    if (nonPartyVotes >= eligibleVoters) {
+      autoResolved.current = true
+      resolveExpiredCase(groupId, c.id, memberUids)
+    }
+  }, [isActive, eligibleVoters, c.votes, c.accuserUid, c.defendantUid, groupId, c.id, memberUids])
 
   const bg = cardBg(c.status)
   const isPending = c.status === 'pending_review'
@@ -97,7 +111,6 @@ function CaseCard({
   const innocentCount = Object.values(c.votes).filter((v) => v === 'innocent').length
   const guiltyCount   = Object.values(c.votes).filter((v) => v === 'guilty').length
   const totalVotes    = innocentCount + guiltyCount
-  const eligibleVoters = members.filter(m => m.uid !== c.accuserUid && m.uid !== c.defendantUid).length
   const innocentPct   = totalVotes > 0 ? Math.round((innocentCount / totalVotes) * 100) : 50
 
   let statusLabel = ''
