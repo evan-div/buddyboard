@@ -754,13 +754,32 @@ export async function addWallComment(
   uid: string,
   displayName: string,
   avatarConfig: AvatarConfig | undefined,
-  text: string
+  text: string,
+  postAuthorUid: string,
+  postAuthorName: string
 ): Promise<void> {
   const postRef    = doc(db, 'groups', groupId, 'wall', postId)
   const commentRef = doc(collection(db, 'groups', groupId, 'wall', postId, 'comments'))
   const batch = writeBatch(db)
   batch.set(commentRef, { uid, displayName, avatarConfig: avatarConfig ?? null, text, createdAt: serverTimestamp() })
   batch.update(postRef, { commentCount: increment(1) })
+  if (uid !== postAuthorUid) {
+    const notifRef = doc(collection(db, 'groups', groupId, 'notifications'))
+    batch.set(notifRef, {
+      id: notifRef.id,
+      forUid: postAuthorUid,
+      type: 'wall_comment',
+      transactionId: postId,
+      fromUid: uid,
+      fromName: displayName,
+      toName: postAuthorName,
+      points: 0,
+      reason: text.length > 80 ? text.slice(0, 80) + '…' : text,
+      read: false,
+      cleared: false,
+      createdAt: serverTimestamp(),
+    })
+  }
   await batch.commit()
 }
 

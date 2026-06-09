@@ -86,6 +86,7 @@ export type NotificationType =
   | 'appeal_denied'
   | 'court_opened'
   | 'court_resolved'
+  | 'wall_comment'
 
 export type GroupNotification = {
   id: string
