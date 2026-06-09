@@ -220,6 +220,7 @@ interface CardProps {
   remainingTake: number
   isChief?: boolean
   presets?: PlazaPreset[]
+  mobile?: boolean
   onClose: () => void
   onSubmitted: (type: 'celebrate' | 'shame') => void
 }
@@ -293,7 +294,7 @@ function StatsView({ member, groupId, onBack }: { member: GroupMember; groupId: 
   )
 }
 
-function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, presets, onClose, onSubmitted }: CardProps) {
+function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, presets, mobile, onClose, onSubmitted }: CardProps) {
   const [view, setView]       = useState<'presets' | 'confirm' | 'custom' | 'stats'>('presets')
   const [mode, setMode]       = useState<'give' | 'take'>('give')
   const [page, setPage]       = useState(0)
@@ -367,12 +368,18 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
   return (
     <div style={{
       background: '#ffffff',
-      borderRadius: 20,
-      padding: '16px 16px 18px',
-      width: 270,
-      boxShadow: '0 20px 60px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.12)',
+      borderRadius: mobile ? '20px 20px 0 0' : 20,
+      padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
+      width: mobile ? '100%' : 270,
+      boxSizing: 'border-box',
+      boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
+      {mobile && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: '#d1d5db' }} />
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
@@ -654,9 +661,10 @@ function PillBtn({ label, selected, onClick }: { label: string; selected: boolea
   )
 }
 
-function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
+function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
   member: GroupMember
   groupId: string
+  mobile?: boolean
   onClose: () => void
   onAvatarUpdated?: () => void
 }) {
@@ -692,10 +700,19 @@ function SelfCard({ member, groupId, onClose, onAvatarUpdated }: {
 
   return (
     <div style={{
-      background: '#fff', borderRadius: 20, padding: '16px 16px 18px', width: 270,
-      boxShadow: '0 20px 60px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.12)',
+      background: '#fff',
+      borderRadius: mobile ? '20px 20px 0 0' : 20,
+      padding: mobile ? '8px 16px 28px' : '16px 16px 18px',
+      width: mobile ? '100%' : 270,
+      boxSizing: 'border-box',
+      boxShadow: '0 -4px 32px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.12)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
+      {mobile && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: '#d1d5db' }} />
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
@@ -1299,13 +1316,15 @@ function Scene({
     function onTouchMove(e: TouchEvent) {
       e.preventDefault()   // prevent scroll while dragging a Mii
       if (e.touches.length === 1) {
-        const t = e.touches[0]
-        // Dispatch pointermove so PhysicsUpdater's raycaster picks up the position
-        el.dispatchEvent(new PointerEvent('pointermove', {
-          clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true,
-        }))
+        // Only intercept when dragging or hold is pending; otherwise let OrbitControls rotate
+        if (draggingUid.current !== null || holdTimer.current !== null) {
+          const t = e.touches[0]
+          el.dispatchEvent(new PointerEvent('pointermove', {
+            clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true,
+          }))
+        }
       } else if (e.touches.length === 2 && orbitRef.current) {
-        // Pinch-to-zoom
+        // Pinch-to-zoom — scale relative to orbit.target to preserve camera angle
         const dx = e.touches[0].clientX - e.touches[1].clientX
         const dy = e.touches[0].clientY - e.touches[1].clientY
         const dist = Math.sqrt(dx * dx + dy * dy)
@@ -1313,9 +1332,12 @@ function Scene({
         const delta = prevPinchDist - dist
         prevPinchDist = dist
         const orbit = orbitRef.current
-        const currentDist = orbit.object.position.distanceTo(orbit.target)
-        const newDist = Math.max(orbit.minDistance, Math.min(orbit.maxDistance, currentDist + delta * 0.05))
-        orbit.object.position.setLength(newDist)
+        const dir = orbit.object.position.clone().sub(orbit.target)
+        const currentDist = dir.length()
+        const newDist = Math.max(orbit.minDistance ?? 4, Math.min(orbit.maxDistance ?? 40, currentDist + delta * 0.05))
+        dir.setLength(newDist)
+        orbit.object.position.copy(orbit.target).add(dir)
+        orbit.update()
       }
     }
 
@@ -1436,6 +1458,14 @@ export default function MiiPlaza({
   const [headScreenY, setHeadScreenY]       = useState<number>(0)
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
+  const [isMobile, setIsMobile]             = useState(false)
+
+  useEffect(() => {
+    function check() { setIsMobile(window.innerWidth < 768) }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   useEffect(() => () => { if (animTimerRef.current) clearTimeout(animTimerRef.current) }, [])
 
@@ -1502,7 +1532,12 @@ export default function MiiPlaza({
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
-        <div style={{
+        <div style={isMobile ? {
+          position: 'absolute',
+          bottom: 0, left: 0, right: 0,
+          zIndex: 10,
+          pointerEvents: 'auto',
+        } : {
           position: 'absolute',
           left: 'calc(50% + 150px)',
           top: cardTop,
@@ -1513,6 +1548,7 @@ export default function MiiPlaza({
             <SelfCard
               member={selectedMember}
               groupId={groupId}
+              mobile={isMobile}
               onClose={handleClose}
               onAvatarUpdated={onAvatarUpdated}
             />
@@ -1525,6 +1561,7 @@ export default function MiiPlaza({
               remainingTake={remainingTake}
               isChief={isChief}
               presets={presets}
+              mobile={isMobile}
               onClose={handleClose}
               onSubmitted={(type) => {
                 onPointsSubmitted()
@@ -1558,7 +1595,7 @@ export default function MiiPlaza({
           pointerEvents: 'none',
           whiteSpace: 'nowrap',
         }}>
-          Hold to carry · Scroll to zoom · Tap a Mii to interact
+          {isMobile ? 'Hold to carry · Pinch to zoom · Swipe to rotate' : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
         </div>
       )}
     </div>
