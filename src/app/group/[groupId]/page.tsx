@@ -942,9 +942,9 @@ export default function GroupPage() {
         <div className="min-h-screen bg-[#0f0f13]">
 
           {/* ── Floating nav overlay ── */}
-          <div style={{ position: 'fixed', top: 50, left: 16, zIndex: 30 }}>
+          <div style={{ position: 'fixed', top: 50, right: 16, zIndex: 30 }}>
             {/* Row of circular buttons: Bell → Settings (mayor) → Hamburger */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 {/* Bell */}
                 {(() => {
@@ -1029,7 +1029,7 @@ export default function GroupPage() {
 
               {/* Nav dropdown */}
               {showNav && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
                   {(
                     [
                       { key: 'plaza',       label: 'Plaza',  badge: 0               },
