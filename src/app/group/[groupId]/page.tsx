@@ -861,6 +861,7 @@ export default function GroupPage() {
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [showNav, setShowNav] = useState(false)
+  const [showGroupInfo, setShowGroupInfo] = useState(false)
   const [pendingAppeal, setPendingAppeal] = useState<{
     transactionId: string
     fromUid: string
@@ -1206,6 +1207,31 @@ export default function GroupPage() {
                       )}
                     </button>
                   ))}
+
+                  {/* INFO button */}
+                  <button
+                    onClick={() => { setShowGroupInfo(true); setShowNav(false) }}
+                    style={{
+                      alignSelf: 'flex-start',
+                      padding: '10px 18px',
+                      borderRadius: 9999,
+                      background: 'rgba(255,255,255,0.9)',
+                      fontWeight: 800,
+                      fontSize: 14,
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      color: '#333',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(6px)',
+                      WebkitBackdropFilter: 'blur(6px)',
+                      touchAction: 'manipulation',
+                      minWidth: 90,
+                    }}
+                  >
+                    Info
+                  </button>
                 </div>
               )}
             </div>
@@ -1283,6 +1309,74 @@ export default function GroupPage() {
           setAppealComment('')
         }}
       />
+
+      {showGroupInfo && group && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowGroupInfo(false) }}
+        >
+          <div style={{ width: '100%', maxWidth: 360, background: '#fff', borderRadius: 24, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' }}>
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)', padding: '28px 24px 20px', textAlign: 'center', position: 'relative' }}>
+              <button
+                onClick={() => setShowGroupInfo(false)}
+                style={{ position: 'absolute', top: 14, right: 14, background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', width: 32, height: 32, color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+              <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 8 }}>{group.emoji || '🏠'}</div>
+              <div style={{ color: '#fff', fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>{group.name}</div>
+              {group.description && (
+                <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 6 }}>{group.description}</div>
+              )}
+            </div>
+
+            <div style={{ padding: '20px 24px 24px', overflowY: 'auto', maxHeight: 400 }}>
+              {/* Daily limits */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+                <div style={{ flex: 1, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>+{group.dailyGiveLimit ?? 100}</div>
+                  <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600, marginTop: 2 }}>pts/day to give</div>
+                </div>
+                <div style={{ flex: 1, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#ea580c' }}>−{group.dailyTakeLimit ?? 20}</div>
+                  <div style={{ fontSize: 11, color: '#c2410c', fontWeight: 600, marginTop: 2 }}>pts/day to take</div>
+                </div>
+              </div>
+
+              {/* Members */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                  {members.length} {members.length === 1 ? 'Member' : 'Members'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {members.map((m) => (
+                    <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <AvatarDisplay config={m.avatar} size={36} />
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
+                          {m.displayName}
+                          {m.uid === user?.uid && (
+                            <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 700, marginLeft: 6 }}>You</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#9ca3af' }}>{m.totalPoints} pts</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowGroupInfo(false)}
+                style={{ width: '100%', padding: 14, background: '#6366f1', color: '#fff', fontWeight: 800, fontSize: 16, borderRadius: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }}
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNotifPanel && user && (
         <NotificationPanel
