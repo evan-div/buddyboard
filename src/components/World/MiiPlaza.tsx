@@ -880,12 +880,11 @@ interface PhysicsUpdaterProps {
   orbitRef:       React.RefObject<any>
   cameraLocked:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
-  wallFlashRef:   React.RefObject<number[]>
 }
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode, wallFlashRef,
+  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -954,26 +953,22 @@ function PhysicsUpdater({
           phys.vel.x *= -0.45
           phys.vel.z *= 0.7
           phys.angVel.z *= -0.5
-          wallFlashRef.current[0] = 1  // +x wall
         } else if (phys.pos.x < -WALL_BOUND) {
           phys.pos.x = -WALL_BOUND
           phys.vel.x *= -0.45
           phys.vel.z *= 0.7
           phys.angVel.z *= -0.5
-          wallFlashRef.current[1] = 1  // -x wall
         }
         if (phys.pos.z > WALL_BOUND) {
           phys.pos.z = WALL_BOUND
           phys.vel.z *= -0.45
           phys.vel.x *= 0.7
           phys.angVel.x *= -0.5
-          wallFlashRef.current[2] = 1  // +z wall
         } else if (phys.pos.z < -WALL_BOUND) {
           phys.pos.z = -WALL_BOUND
           phys.vel.z *= -0.45
           phys.vel.x *= 0.7
           phys.angVel.x *= -0.5
-          wallFlashRef.current[3] = 1  // -z wall
         }
 
         // Ground collision — after wall clamping so landing position is always in-bounds
@@ -1161,59 +1156,6 @@ function Clouds() {
   )
 }
 
-// ─── Wall Flash Planes ────────────────────────────────────────────────────────
-
-function WallFlashPlanes({ wallFlashRef }: { wallFlashRef: React.RefObject<number[]> }) {
-  const matsRef = useRef<THREE.MeshBasicMaterial[]>([])
-
-  // 4 planes: +x, -x, +z, -z
-  // Each sits flush with the wall boundary, faces inward, covers the full height range
-  const WALL_H = 6
-  const WALL_Y = WALL_H / 2
-
-  useFrame((_, delta) => {
-    for (let i = 0; i < 4; i++) {
-      const mat = matsRef.current[i]
-      if (!mat) continue
-      if (wallFlashRef.current[i] > 0) {
-        mat.opacity = 0.25
-        wallFlashRef.current[i] = 0
-      } else {
-        mat.opacity = Math.max(0, mat.opacity - delta * 3.5)
-      }
-    }
-  })
-
-  function setMat(i: number) {
-    return (mat: THREE.MeshBasicMaterial | null) => { if (mat) matsRef.current[i] = mat }
-  }
-
-  return (
-    <>
-      {/* +x wall */}
-      <mesh position={[WALL_BOUND, WALL_Y, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(0)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-      {/* -x wall */}
-      <mesh position={[-WALL_BOUND, WALL_Y, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(1)} color="#ef4444" transparent opacity={0} side={THREE.FrontSide} depthWrite={false} />
-      </mesh>
-      {/* +z wall */}
-      <mesh position={[0, WALL_Y, WALL_BOUND]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(2)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-      {/* -z wall */}
-      <mesh position={[0, WALL_Y, -WALL_BOUND]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(3)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-    </>
-  )
-}
-
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -1239,7 +1181,6 @@ function Scene({
 }) {
   const orbitRef     = useRef<any>(null)
   const { gl }       = useThree()
-  const wallFlashRef = useRef<number[]>([0, 0, 0, 0])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -1515,9 +1456,7 @@ function Scene({
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
-        wallFlashRef={wallFlashRef}
       />
-      <WallFlashPlanes wallFlashRef={wallFlashRef} />
       <OrbitControls
         ref={orbitRef}
         enabled={!cameraLocked}
