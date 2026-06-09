@@ -170,10 +170,12 @@ function CameraController({
   focusPos,
   orbitRef,
   onUnlock,
+  mobile,
 }: {
   focusPos: [number, number, number] | null
   orbitRef: React.RefObject<any>
   onUnlock: () => void
+  mobile: boolean
 }) {
   const { camera } = useThree()
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
@@ -185,8 +187,11 @@ function CameraController({
       wasLocked.current  = true
       unlockSent.current = false
       const [fx, fy, fz] = focusPos
+      // On mobile the bottom sheet covers ~52% of screen, so look below the Mii's
+      // feet to push the character into the upper 45% of the visible area.
+      const lookatY = mobile ? -0.8 : ZOOM_LOOKAT_Y
       const goal     = new THREE.Vector3(fx + ZOOM_OFFSET_XZ, fy + ZOOM_OFFSET_Y, fz + ZOOM_OFFSET_XZ)
-      const lookGoal = new THREE.Vector3(fx, fy + ZOOM_LOOKAT_Y, fz)
+      const lookGoal = new THREE.Vector3(fx, fy + lookatY, fz)
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
@@ -1114,6 +1119,7 @@ function Scene({
   onSelect,
   animatingUid,
   animationType,
+  mobile,
 }: {
   members: GroupMember[]
   selectedUid: string | null
@@ -1123,6 +1129,7 @@ function Scene({
   onSelect: (member: GroupMember, pos: [number, number, number]) => void
   animatingUid: string | null
   animationType: 'celebrate' | 'shame' | null
+  mobile: boolean
 }) {
   const orbitRef = useRef<any>(null)
   const { gl }   = useThree()
@@ -1367,7 +1374,7 @@ function Scene({
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
-      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} />
+      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
@@ -1410,8 +1417,8 @@ function Scene({
         maxDistance={40}
         enableRotate={true}
         enablePan={false}
-        minPolarAngle={Math.PI / 7}
-        maxPolarAngle={Math.PI / 2.6}
+        minPolarAngle={Math.PI / 4}
+        maxPolarAngle={Math.PI / 2.3}
         makeDefault
       />
     </>
@@ -1528,6 +1535,7 @@ export default function MiiPlaza({
             onSelect={handleSelect}
             animatingUid={animatingUid}
             animationType={animationType}
+            mobile={isMobile}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
