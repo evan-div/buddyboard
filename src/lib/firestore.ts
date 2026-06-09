@@ -166,6 +166,10 @@ export async function joinGroup(inviteCode: string, user: User): Promise<string>
     throw new Error('You are already a member of this group')
   }
 
+  // Fetch existing members to notify them
+  const existingMembersSnap = await getDocs(collection(db, 'groups', groupId, 'members'))
+  const existingMemberUids = existingMembersSnap.docs.map((d) => d.id).filter((uid) => uid !== user.uid)
+
   const today = todayString()
   const batch = writeBatch(db)
 
@@ -188,6 +192,24 @@ export async function joinGroup(inviteCode: string, user: User): Promise<string>
   // Add groupId to user's groups array
   const userRef = doc(db, 'users', user.uid)
   batch.update(userRef, { groups: arrayUnion(groupId) })
+
+  // Notify all existing members that a new member joined
+  for (const existingUid of existingMemberUids) {
+    const notifRef = doc(collection(db, 'groups', groupId, 'notifications'))
+    batch.set(notifRef, {
+      id: notifRef.id,
+      forUid: existingUid,
+      type: 'member_joined',
+      transactionId: user.uid,  // store new joiner's uid here for the welcome button
+      fromUid: user.uid,
+      fromName: user.displayName,
+      toName: user.displayName,
+      points: 0,
+      read: false,
+      cleared: false,
+      createdAt: serverTimestamp(),
+    })
+  }
 
   await batch.commit()
   return groupId
@@ -286,17 +308,38 @@ export async function addReaction(
   groupId: string,
   txId: string,
   emoji: string,
-  uid: string
+  uid: string,
+  reactorName: string
 ): Promise<void> {
   const txRef = doc(db, 'groups', groupId, 'transactions', txId)
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(txRef)
     if (!snap.exists()) return
-    const existing: string[] = snap.data()?.[`reactions.${emoji}`] ?? (snap.data()?.reactions?.[emoji] ?? [])
+    const data = snap.data()
+    const existing: string[] = data?.[`reactions.${emoji}`] ?? (data?.reactions?.[emoji] ?? [])
     if (existing.includes(uid)) {
       tx.update(txRef, { [`reactions.${emoji}`]: arrayRemove(uid) })
     } else {
       tx.update(txRef, { [`reactions.${emoji}`]: arrayUnion(uid) })
+      // Notify the transaction author (skip self-reactions)
+      const targetUid: string = data.fromUid
+      if (uid !== targetUid) {
+        const notifRef = doc(collection(db, 'groups', groupId, 'notifications'))
+        tx.set(notifRef, {
+          id: notifRef.id,
+          forUid: targetUid,
+          type: 'feed_reaction',
+          transactionId: txId,
+          fromUid: uid,
+          fromName: reactorName,
+          toName: data.fromName ?? '',
+          points: 0,
+          reason: emoji,  // store the emoji here
+          read: false,
+          cleared: false,
+          createdAt: serverTimestamp(),
+        })
+      }
     }
   })
 }

@@ -87,6 +87,8 @@ export type NotificationType =
   | 'court_opened'
   | 'court_resolved'
   | 'wall_comment'
+  | 'member_joined'
+  | 'feed_reaction'
 
 export type GroupNotification = {
   id: string

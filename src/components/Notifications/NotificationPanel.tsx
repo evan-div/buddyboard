@@ -8,12 +8,14 @@ import {
   saveComment,
   reviewAppeal,
 } from '@/lib/appeals'
+import { giveOrTakePoints } from '@/lib/firestore'
 import type { GroupNotification } from '@/lib/types'
 
 type Props = {
   groupId: string
   notifications: GroupNotification[]
   memberUids: string[]
+  currentUid: string
   onClose: () => void
   onAppeal: (notif: GroupNotification) => void
 }
@@ -27,18 +29,22 @@ const TYPE_ICON: Record<string, string> = {
   court_opened: '🗳️',
   court_resolved: '📜',
   wall_comment: '💬',
+  member_joined: '👋',
+  feed_reaction: '😂',
 }
 
 function NotifItem({
   notif,
   groupId,
   memberUids,
+  currentUid,
   onAppeal,
   onCleared,
 }: {
   notif: GroupNotification
   groupId: string
   memberUids: string[]
+  currentUid: string
   onAppeal: (n: GroupNotification) => void
   onCleared: () => void
 }) {
@@ -46,6 +52,8 @@ function NotifItem({
   const [commentText, setCommentText] = useState(notif.userComment ?? '')
   const [saving, setSaving] = useState(false)
   const [reviewing, setReviewing] = useState(false)
+  const [welcoming, setWelcoming] = useState(false)
+  const [welcomed, setWelcomed] = useState(false)
 
   const pts = Math.abs(notif.points)
   const isNeg = notif.points < 0
@@ -62,7 +70,25 @@ function NotifItem({
         ? `Court ruled: ${notif.toName} is innocent`
         : `Court ruled: ${notif.toName} is guilty`
       case 'wall_comment':    return `${notif.fromName} commented on your post`
+      case 'member_joined':   return `${notif.fromName} joined the plaza! 👋`
+      case 'feed_reaction':   return `${notif.fromName} reacted ${notif.reason} to your transaction`
       default: return 'Notification'
+    }
+  }
+
+  async function handleWelcome() {
+    if (welcomed || welcoming) return
+    setWelcoming(true)
+    try {
+      await giveOrTakePoints(groupId, currentUid, [{
+        toUid: notif.fromUid,
+        points: 10,
+        reason: `Welcome to the plaza, ${notif.fromName}! 🎉`,
+      }])
+      setWelcomed(true)
+      await clearNotification(groupId, notif.id)
+    } finally {
+      setWelcoming(false)
     }
   }
 
@@ -239,8 +265,48 @@ function NotifItem({
         </div>
       )}
 
+      {/* Welcome button for member_joined */}
+      {notif.type === 'member_joined' && (
+        <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+          <button
+            disabled={welcoming || welcomed}
+            onClick={handleWelcome}
+            style={{
+              flex: 1,
+              background: welcomed ? '#14532d' : '#1a3a1a',
+              border: `1px solid ${welcomed ? '#166534' : '#2d5a2d'}`,
+              borderRadius: '8px',
+              color: welcomed ? '#4ade80' : '#86efac',
+              fontSize: '12px',
+              fontWeight: 700,
+              padding: '7px',
+              cursor: welcoming || welcomed ? 'default' : 'pointer',
+              opacity: welcoming ? 0.6 : 1,
+            }}
+          >
+            {welcomed ? '✓ Welcomed!' : welcoming ? '…' : '🎉 Give +10 welcome pts'}
+          </button>
+          <button
+            onClick={handleClear}
+            style={{
+              flex: 0,
+              background: '#1f2937',
+              border: '1px solid #374151',
+              borderRadius: '8px',
+              color: '#9ca3af',
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '6px 10px',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Clear button for other notification types */}
-      {notif.type !== 'points_taken' && notif.type !== 'points_received' && notif.type !== 'appeal_filed' && (
+      {notif.type !== 'points_taken' && notif.type !== 'points_received' && notif.type !== 'appeal_filed' && notif.type !== 'member_joined' && (
         <button
           onClick={handleClear}
           style={{
@@ -323,7 +389,7 @@ function NotifItem({
   )
 }
 
-export default function NotificationPanel({ groupId, notifications, memberUids, onClose, onAppeal }: Props) {
+export default function NotificationPanel({ groupId, notifications, memberUids, currentUid, onClose, onAppeal }: Props) {
   const unread = notifications.filter((n) => !n.read).length
 
   return (
@@ -409,6 +475,7 @@ export default function NotificationPanel({ groupId, notifications, memberUids, 
                 notif={n}
                 groupId={groupId}
                 memberUids={memberUids}
+                currentUid={currentUid}
                 onAppeal={onAppeal}
                 onCleared={() => {}}
               />
