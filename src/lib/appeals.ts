@@ -268,7 +268,7 @@ export async function reviewAppeal(
           caseId,
           fromUid: c.defendantUid,
           fromName: c.defendantName,
-          toName: c.defendantName,
+          toName: c.accuserName,
           points: c.points,
           read: false,
           cleared: false,
