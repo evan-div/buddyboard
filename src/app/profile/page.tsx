@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarBuilder from '@/components/Avatar/AvatarBuilder'
 import { updateUserAvatar, updateUserDisplayName } from '@/lib/firestore'
 import type { AvatarConfig } from '@/lib/types'
+
+const CloudScene = dynamic(() => import('@/components/World/CloudScene'), { ssr: false })
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -65,14 +68,30 @@ export default function ProfilePage() {
       .finally(() => setAvatarSaving(false))
   }
 
+  async function handleSignOut() {
+    await signOut()
+    router.push('/')
+  }
+
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f13]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center animate-pulse">
-            <span className="text-white font-bold text-sm">BB</span>
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#3476c8' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: '#efefef',
+              animation: 'pulse 1.5s infinite',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <span style={{ color: '#111', fontWeight: 700, fontSize: 12 }}>BB</span>
           </div>
-          <p className="text-gray-400 text-sm">Loading...</p>
+          <p style={{ color: 'white', fontSize: 14 }}>Loading...</p>
         </div>
       </div>
     )
@@ -81,31 +100,63 @@ export default function ProfilePage() {
   if (!user || !userProfile) return null
 
   return (
-    <div className="min-h-screen bg-[#0f0f13]">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-[#0f0f13]/90 backdrop-blur-md border-b border-gray-800">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
+    <div style={{ position: 'fixed', inset: 0, overflowY: 'auto' }}>
+      {/* Background */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
+        <CloudScene />
+      </div>
+
+      {/* Content */}
+      <div style={{ position: 'relative', zIndex: 10, minHeight: '100vh', padding: '20px 20px 40px' }}>
+
+        {/* Header */}
+        <div
+          style={{
+            background: 'rgba(239,239,239,0.85)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            borderRadius: 16,
+            padding: '12px 16px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
           <button
             onClick={() => router.push('/dashboard')}
-            className="text-gray-400 hover:text-white transition-colors text-xl leading-none w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800"
             aria-label="Back"
+            style={{
+              color: '#111',
+              background: 'none',
+              border: 'none',
+              fontSize: 20,
+              fontWeight: 700,
+              cursor: 'pointer',
+              lineHeight: 1,
+              padding: 0,
+            }}
           >
             ←
           </button>
-          <h1 className="text-white font-bold text-base">Edit Profile</h1>
+          <h1 style={{ color: '#111', fontWeight: 800, fontSize: 18, margin: 0, flex: 1 }}>Edit Profile</h1>
           {avatarSaving && (
-            <span className="ml-auto text-gray-500 text-xs">Saving avatar...</span>
+            <span style={{ color: '#999', fontSize: 12 }}>Saving avatar...</span>
           )}
         </div>
-      </header>
 
-      {/* Content */}
-      <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
         {/* Display Name Section */}
-        <section className="bg-gray-900 rounded-2xl border border-gray-800 p-5">
-          <h2 className="text-white font-semibold text-sm mb-3">Display Name</h2>
+        <div
+          style={{
+            background: '#efefef',
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 16,
+          }}
+        >
+          <h2 style={{ color: '#111', fontWeight: 700, fontSize: 14, marginBottom: 12, marginTop: 0 }}>Display Name</h2>
 
-          <form onSubmit={handleSaveName} className="flex flex-col gap-3">
+          <form onSubmit={handleSaveName} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <input
               type="text"
               value={displayName}
@@ -116,49 +167,86 @@ export default function ProfilePage() {
               }}
               placeholder="Your display name"
               maxLength={30}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              style={{
+                background: '#d4d4d4',
+                borderRadius: 9999,
+                border: 'none',
+                outline: 'none',
+                padding: '14px 24px',
+                fontSize: 16,
+                color: '#111',
+                width: '100%',
+                boxSizing: 'border-box',
+              }}
             />
 
             {nameError && (
-              <p className="text-red-400 text-xs">{nameError}</p>
+              <p style={{ color: '#e53e3e', fontSize: 13, margin: 0 }}>{nameError}</p>
+            )}
+
+            {nameSaved && (
+              <p style={{ color: '#42b842', fontSize: 13, margin: 0 }}>Saved!</p>
             )}
 
             <button
               type="submit"
               disabled={savingName || displayName.trim() === userProfile.displayName}
-              className={`w-full py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                nameSaved
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/20'
-              }`}
+              style={{
+                background: '#42b842',
+                color: 'white',
+                borderRadius: 9999,
+                fontWeight: 900,
+                textTransform: 'uppercase',
+                letterSpacing: 2,
+                fontSize: 15,
+                padding: 14,
+                width: '100%',
+                border: 'none',
+                cursor: savingName || displayName.trim() === userProfile.displayName ? 'not-allowed' : 'pointer',
+                opacity: savingName || displayName.trim() === userProfile.displayName ? 0.5 : 1,
+              }}
             >
-              {savingName ? 'Saving...' : nameSaved ? '✓ Saved!' : 'Save Name'}
+              {savingName ? 'Saving...' : 'Save Name'}
             </button>
           </form>
-        </section>
+        </div>
 
         {/* Avatar Builder Section */}
-        <section className="bg-gray-900 rounded-2xl border border-gray-800 p-5">
-          <h2 className="text-white font-semibold text-sm mb-4">Customize Avatar</h2>
+        <div
+          style={{
+            background: '#efefef',
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 16,
+          }}
+        >
+          <h2 style={{ color: '#111', fontWeight: 700, fontSize: 14, marginBottom: 12, marginTop: 0 }}>Customize Avatar</h2>
           <AvatarBuilder
             value={userProfile.avatar}
             onChange={handleAvatarChange}
           />
-        </section>
+        </div>
 
         {/* Account info */}
-        <section className="bg-gray-900 rounded-2xl border border-gray-800 p-5">
-          <h2 className="text-white font-semibold text-sm mb-3">Account</h2>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-sm">Email</span>
-              <span className="text-gray-300 text-sm truncate max-w-[200px]">
+        <div
+          style={{
+            background: '#efefef',
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 16,
+          }}
+        >
+          <h2 style={{ color: '#111', fontWeight: 700, fontSize: 14, marginBottom: 12, marginTop: 0 }}>Account</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#555', fontSize: 14 }}>Email</span>
+              <span style={{ color: '#111', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }}>
                 {userProfile.email}
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-sm">Member since</span>
-              <span className="text-gray-300 text-sm">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#555', fontSize: 14 }}>Member since</span>
+              <span style={{ color: '#111', fontSize: 14 }}>
                 {userProfile.createdAt
                   ? new Date(userProfile.createdAt).toLocaleDateString('en-US', {
                       month: 'short',
@@ -168,16 +256,42 @@ export default function ProfilePage() {
               </span>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-gray-800">
-            <button
-              onClick={async () => { await signOut(); router.push('/') }}
-              className="w-full py-2.5 rounded-xl border border-red-900/50 text-red-400 hover:bg-red-950/40 text-sm font-medium transition-all"
-            >
-              Sign Out
-            </button>
-          </div>
-        </section>
-      </main>
+        </div>
+
+        {/* Sign Out */}
+        <div
+          style={{
+            background: '#efefef',
+            borderRadius: 20,
+            padding: 20,
+            marginBottom: 16,
+          }}
+        >
+          <button
+            onClick={handleSignOut}
+            style={{
+              background: '#f5a32d',
+              color: 'white',
+              borderRadius: 9999,
+              fontWeight: 900,
+              textTransform: 'uppercase',
+              letterSpacing: 2,
+              fontSize: 15,
+              padding: 14,
+              width: '100%',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+
+      </div>
+
+      <style>{`
+        input::placeholder { color: #999; }
+      `}</style>
     </div>
   )
 }

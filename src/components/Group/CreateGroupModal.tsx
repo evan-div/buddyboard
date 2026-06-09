@@ -83,62 +83,162 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
     }
   }
 
-  const INPUT = "w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+  const inputStyle: React.CSSProperties = {
+    background: '#d4d4d4',
+    borderRadius: 9999,
+    border: 'none',
+    outline: 'none',
+    padding: '14px 24px',
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#111',
+    width: '100%',
+    boxSizing: 'border-box',
+  }
+
+  const textareaStyle: React.CSSProperties = {
+    background: '#d4d4d4',
+    borderRadius: 16,
+    border: 'none',
+    outline: 'none',
+    padding: '14px 24px',
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#111',
+    width: '100%',
+    boxSizing: 'border-box',
+    resize: 'none',
+  }
+
+  const greenBtnStyle: React.CSSProperties = {
+    background: '#42b842',
+    color: 'white',
+    borderRadius: 9999,
+    fontWeight: 900,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    fontSize: 15,
+    padding: 14,
+    width: '100%',
+    border: 'none',
+    cursor: 'pointer',
+  }
+
+  const spinnerMinusBtnStyle: React.CSSProperties = {
+    background: '#d4d4d4',
+    borderRadius: 12,
+    fontWeight: 700,
+    color: '#111',
+    width: 44,
+    height: 44,
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  }
+
+  const labelStyle: React.CSSProperties = {
+    color: '#555',
+    fontSize: 13,
+    fontWeight: 600,
+    display: 'block',
+    marginBottom: 6,
+  }
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center px-4"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="w-full max-w-sm bg-gray-900 rounded-2xl border border-gray-800 shadow-2xl overflow-hidden">
+      <div
+        style={{
+          background: '#efefef',
+          borderRadius: 28,
+          width: '100%',
+          maxWidth: 380,
+          overflow: 'hidden',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
+        }}
+      >
         {/* Progress bar */}
-        <div className="h-1 bg-gray-800">
+        <div style={{ height: 4, background: '#d4d4d4' }}>
           <div
-            className="h-full bg-indigo-500 transition-all duration-300"
-            style={{ width: `${(step / 3) * 100}%` }}
+            style={{
+              height: '100%',
+              background: '#42b842',
+              width: `${(step / 3) * 100}%`,
+              transition: 'width 0.3s',
+            }}
           />
         </div>
 
-        <div className="p-6">
+        <div style={{ padding: 28 }}>
           {/* Header */}
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {step > 1 && (
                 <button
                   onClick={() => setStep(step - 1)}
-                  className="text-gray-500 hover:text-white text-lg leading-none mr-1"
+                  style={{ color: '#999', background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1 }}
                 >
                   ←
                 </button>
               )}
-              <h2 className="text-lg font-bold text-white">
+              <h2 style={{ color: '#111', fontWeight: 800, fontSize: 20, margin: 0 }}>
                 {step === 1 ? 'Create your Plaza' : step === 2 ? 'Set the Rules' : '⚡ Quick Actions'}
               </h2>
             </div>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl leading-none">✕</button>
+            <button
+              onClick={onClose}
+              style={{ color: '#999', background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}
+            >
+              ✕
+            </button>
           </div>
-          <p className="text-xs text-gray-500 mb-5">Step {step} of 3</p>
+          <p style={{ color: '#999', fontSize: 12, marginBottom: 20, marginTop: 2 }}>Step {step} of 3</p>
 
           {error && (
-            <div className="mb-4 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            <p style={{ color: '#e53e3e', fontSize: 13, textAlign: 'center', marginBottom: 12 }}>
               {error}
-            </div>
+            </p>
           )}
 
           {/* ── Step 1: Identity ── */}
           {step === 1 && (
-            <div className="flex flex-col gap-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Emoji picker */}
               <div>
-                <label className="block text-gray-400 text-sm mb-2 font-medium">Plaza Emoji</label>
-                <div className="flex flex-wrap gap-2 mb-2">
+                <label style={labelStyle}>Plaza Emoji</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
                   {EMOJI_PICKS.map((e) => (
                     <button
                       key={e}
                       onClick={() => setEmoji(e)}
-                      className={`text-2xl w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-                        emoji === e ? 'bg-indigo-600 ring-2 ring-indigo-400' : 'bg-gray-800 hover:bg-gray-700'
-                      }`}
+                      style={{
+                        fontSize: 22,
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: emoji === e ? '#42b842' : '#d4d4d4',
+                        color: emoji === e ? 'white' : undefined,
+                        transition: 'all 0.15s',
+                      }}
                     >
                       {e}
                     </button>
@@ -150,13 +250,13 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                   onChange={(e) => setEmoji(e.target.value.slice(-2) || '🏠')}
                   placeholder="Or type any emoji"
                   maxLength={2}
-                  className={`${INPUT} text-center text-2xl py-2`}
+                  style={{ ...inputStyle, fontSize: 22, padding: '8px 24px' }}
                 />
               </div>
 
               <div>
-                <label className="block text-gray-400 text-sm mb-1.5 font-medium">
-                  Plaza Name <span className="text-red-400">*</span>
+                <label style={labelStyle}>
+                  Plaza Name <span style={{ color: '#e53e3e' }}>*</span>
                 </label>
                 <input
                   type="text"
@@ -164,13 +264,13 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. The Household"
                   maxLength={50}
-                  className={INPUT}
+                  style={inputStyle}
                 />
               </div>
 
               <div>
-                <label className="block text-gray-400 text-sm mb-1.5 font-medium">
-                  Description <span className="text-gray-600 font-normal">(optional)</span>
+                <label style={labelStyle}>
+                  Description <span style={{ color: '#999', fontWeight: 400 }}>(optional)</span>
                 </label>
                 <textarea
                   value={description}
@@ -178,13 +278,17 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                   placeholder="What's this plaza about?"
                   maxLength={200}
                   rows={2}
-                  className={`${INPUT} resize-none`}
+                  style={textareaStyle}
                 />
               </div>
 
               <button
-                onClick={() => { if (!name.trim()) { setError('Plaza name is required.'); return } setError(''); setStep(2) }}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-xl transition-all"
+                onClick={() => {
+                  if (!name.trim()) { setError('Plaza name is required.'); return }
+                  setError('')
+                  setStep(2)
+                }}
+                style={greenBtnStyle}
               >
                 Next →
               </button>
@@ -193,47 +297,94 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
 
           {/* ── Step 2: Rules ── */}
           {step === 2 && (
-            <div className="flex flex-col gap-5">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
-                <label className="block text-gray-400 text-sm mb-1 font-medium">
-                  Daily Give Limit
-                </label>
-                <p className="text-xs text-gray-600 mb-2">Max points a member can give per day</p>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setGiveLimit(Math.max(10, giveLimit - 10))} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-lg">−</button>
+                <label style={labelStyle}>Daily Give Limit</label>
+                <p style={{ color: '#999', fontSize: 12, marginBottom: 8, marginTop: 0 }}>Max points a member can give per day</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button
+                    onClick={() => setGiveLimit(Math.max(10, giveLimit - 10))}
+                    style={spinnerMinusBtnStyle}
+                  >
+                    −
+                  </button>
                   <input
                     type="number"
                     value={giveLimit}
                     onChange={(e) => setGiveLimit(Math.max(10, Math.min(500, parseInt(e.target.value) || 10)))}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-center font-bold text-lg focus:outline-none focus:border-indigo-500"
+                    style={{
+                      flex: 1,
+                      background: '#d4d4d4',
+                      borderRadius: 12,
+                      border: 'none',
+                      outline: 'none',
+                      padding: '10px 16px',
+                      textAlign: 'center',
+                      fontWeight: 700,
+                      color: '#111',
+                      fontSize: 18,
+                    }}
                   />
-                  <button onClick={() => setGiveLimit(Math.min(500, giveLimit + 10))} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-lg">+</button>
+                  <button
+                    onClick={() => setGiveLimit(Math.min(500, giveLimit + 10))}
+                    style={spinnerMinusBtnStyle}
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-400 text-sm mb-1 font-medium">
-                  Daily Take Limit
-                </label>
-                <p className="text-xs text-gray-600 mb-2">Max points a member can take per day</p>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setTakeLimit(Math.max(5, takeLimit - 5))} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-lg">−</button>
+                <label style={labelStyle}>Daily Take Limit</label>
+                <p style={{ color: '#999', fontSize: 12, marginBottom: 8, marginTop: 0 }}>Max points a member can take per day</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button
+                    onClick={() => setTakeLimit(Math.max(5, takeLimit - 5))}
+                    style={spinnerMinusBtnStyle}
+                  >
+                    −
+                  </button>
                   <input
                     type="number"
                     value={takeLimit}
                     onChange={(e) => setTakeLimit(Math.max(5, Math.min(100, parseInt(e.target.value) || 5)))}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-center font-bold text-lg focus:outline-none focus:border-indigo-500"
+                    style={{
+                      flex: 1,
+                      background: '#d4d4d4',
+                      borderRadius: 12,
+                      border: 'none',
+                      outline: 'none',
+                      padding: '10px 16px',
+                      textAlign: 'center',
+                      fontWeight: 700,
+                      color: '#111',
+                      fontSize: 18,
+                    }}
                   />
-                  <button onClick={() => setTakeLimit(Math.min(100, takeLimit + 5))} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold text-lg">+</button>
+                  <button
+                    onClick={() => setTakeLimit(Math.min(100, takeLimit + 5))}
+                    style={spinnerMinusBtnStyle}
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-400 text-sm mb-1.5 font-medium">Timezone</label>
+                <label style={labelStyle}>Timezone</label>
                 <select
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  style={{
+                    background: '#d4d4d4',
+                    borderRadius: 12,
+                    border: 'none',
+                    outline: 'none',
+                    color: '#111',
+                    padding: '12px 16px',
+                    width: '100%',
+                    fontSize: 15,
+                  }}
                 >
                   {TIMEZONES.map((tz) => (
                     <option key={tz.value} value={tz.value}>{tz.label}</option>
@@ -241,10 +392,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                 </select>
               </div>
 
-              <button
-                onClick={() => setStep(3)}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-xl transition-all"
-              >
+              <button onClick={() => setStep(3)} style={greenBtnStyle}>
                 Next →
               </button>
             </div>
@@ -252,24 +400,39 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
 
           {/* ── Step 3: Quick Actions ── */}
           {step === 3 && (
-            <div className="flex flex-col gap-4">
-              <p className="text-xs text-gray-500 -mt-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ color: '#999', fontSize: 12, marginTop: -8, marginBottom: 0 }}>
                 Pre-set common give/takes so members can apply them in one tap. Optional — you can add more later.
               </p>
 
               {/* Existing presets */}
               {presets.length > 0 && (
-                <div className="space-y-2 max-h-40 overflow-y-auto">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 160, overflowY: 'auto' }}>
                   {presets.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2">
-                      <span className="text-white text-sm">
+                    <div
+                      key={p.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: '#d4d4d4',
+                        borderRadius: 12,
+                        padding: '10px 14px',
+                      }}
+                    >
+                      <span style={{ color: '#111', fontSize: 14 }}>
                         {p.emoji} {p.label}
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-bold ${p.points > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: p.points > 0 ? '#42b842' : '#e53e3e' }}>
                           {p.points > 0 ? `+${p.points}` : p.points}
                         </span>
-                        <button onClick={() => removePreset(p.id)} className="text-gray-500 hover:text-red-400 text-sm">✕</button>
+                        <button
+                          onClick={() => removePreset(p.id)}
+                          style={{ color: '#999', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -277,16 +440,36 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
               )}
 
               {/* Add new preset */}
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-3 space-y-2">
-                <p className="text-xs text-gray-400 font-medium mb-2">Add a quick action</p>
-                <div className="flex gap-2">
+              <div
+                style={{
+                  background: '#e4e4e4',
+                  borderRadius: 16,
+                  padding: 14,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <p style={{ color: '#555', fontSize: 12, fontWeight: 600, margin: 0, marginBottom: 4 }}>Add a quick action</p>
+                <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type="text"
                     value={newEmoji}
                     onChange={(e) => setNewEmoji(e.target.value.slice(-2))}
                     placeholder="😊"
                     maxLength={2}
-                    className="w-14 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-white text-center text-lg focus:outline-none focus:border-indigo-500"
+                    style={{
+                      width: 56,
+                      background: '#d4d4d4',
+                      borderRadius: 8,
+                      border: 'none',
+                      outline: 'none',
+                      padding: '8px',
+                      textAlign: 'center',
+                      fontSize: 18,
+                      color: '#111',
+                      boxSizing: 'border-box',
+                    }}
                   />
                   <input
                     type="text"
@@ -294,40 +477,80 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
                     onChange={(e) => setNewLabel(e.target.value)}
                     placeholder="e.g. Did the dishes"
                     maxLength={50}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                    style={{
+                      flex: 1,
+                      background: '#d4d4d4',
+                      borderRadius: 8,
+                      border: 'none',
+                      outline: 'none',
+                      padding: '8px 12px',
+                      fontSize: 14,
+                      color: '#111',
+                      boxSizing: 'border-box',
+                    }}
                   />
                 </div>
-                <div className="flex gap-2">
+                <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type="number"
                     value={newPoints}
                     onChange={(e) => setNewPoints(e.target.value)}
                     placeholder="pts (e.g. 10 or -15)"
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                    style={{
+                      flex: 1,
+                      background: '#d4d4d4',
+                      borderRadius: 8,
+                      border: 'none',
+                      outline: 'none',
+                      padding: '8px 12px',
+                      fontSize: 14,
+                      color: '#111',
+                      boxSizing: 'border-box',
+                    }}
                   />
                   <button
                     onClick={addPreset}
                     disabled={!newLabel.trim() || !newPoints.trim()}
-                    className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-lg text-sm transition-all"
+                    style={{
+                      background: '#42b842',
+                      color: 'white',
+                      borderRadius: 8,
+                      padding: '8px 16px',
+                      fontWeight: 700,
+                      border: 'none',
+                      cursor: !newLabel.trim() || !newPoints.trim() ? 'not-allowed' : 'pointer',
+                      opacity: !newLabel.trim() || !newPoints.trim() ? 0.4 : 1,
+                      fontSize: 14,
+                    }}
                   >
                     Add
                   </button>
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-1">
-                <button
-                  onClick={handleCreate}
-                  disabled={loading}
-                  className="flex-1 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  {loading ? 'Creating...' : `Create ${emoji} ${name}`}
-                </button>
-              </div>
               <button
                 onClick={handleCreate}
                 disabled={loading}
-                className="text-gray-500 hover:text-gray-400 text-sm text-center -mt-2"
+                style={{
+                  ...greenBtnStyle,
+                  opacity: loading ? 0.5 : 1,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {loading ? 'Creating...' : `Create ${emoji} ${name}`}
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={loading}
+                style={{
+                  color: '#999',
+                  fontSize: 13,
+                  textAlign: 'center',
+                  background: 'none',
+                  border: 'none',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  marginTop: -8,
+                }}
               >
                 Skip and create without quick actions
               </button>
