@@ -9,7 +9,7 @@ import type { AvatarConfig } from '@/lib/types'
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { user, userProfile, loading: authLoading } = useAuth()
+  const { user, userProfile, loading: authLoading, signOut } = useAuth()
 
   const [displayName, setDisplayName] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -167,6 +167,14 @@ export default function ProfilePage() {
                   : '—'}
               </span>
             </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-gray-800">
+            <button
+              onClick={async () => { await signOut(); router.push('/') }}
+              className="w-full py-2.5 rounded-xl border border-red-900/50 text-red-400 hover:bg-red-950/40 text-sm font-medium transition-all"
+            >
+              Sign Out
+            </button>
           </div>
         </section>
       </main>
