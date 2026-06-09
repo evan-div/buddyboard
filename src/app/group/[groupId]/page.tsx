@@ -500,7 +500,8 @@ function FeedTab({ groupId, members, currentUid }: FeedTabProps) {
   const [feedLoading, setFeedLoading] = useState(true)
 
   function handleReact(txId: string, emoji: string) {
-    addReaction(groupId, txId, emoji, currentUid).catch(console.error)
+    const reactorName = members.find((m) => m.uid === currentUid)?.displayName ?? ''
+    addReaction(groupId, txId, emoji, currentUid, reactorName).catch(console.error)
   }
 
   useEffect(() => {
@@ -1288,6 +1289,7 @@ export default function GroupPage() {
           groupId={groupId}
           notifications={notifications}
           memberUids={members.map((m) => m.uid)}
+          currentUid={user.uid}
           onClose={() => setShowNotifPanel(false)}
           onAppeal={(notif) => {
             setShowNotifPanel(false)
