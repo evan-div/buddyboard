@@ -668,6 +668,7 @@ function mapWallPost(d: { id: string; data: () => Record<string, unknown> }): Wa
     avatarConfig: data.avatarConfig as AvatarConfig | undefined,
     text: data.text as string,
     reactions: data.reactions as Record<string, string[]> | undefined,
+    commentCount: (data.commentCount as number | undefined) ?? 0,
     createdAt: fromTimestamp(data.createdAt as Timestamp | Date | undefined),
   }
 }

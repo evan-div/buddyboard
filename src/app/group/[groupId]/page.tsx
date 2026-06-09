@@ -678,7 +678,7 @@ function WallPostThread({
           {expanded
             ? 'Hide replies'
             : commentCount > 0
-              ? `💬 ${commentCount} repl${commentCount === 1 ? 'y' : 'ies'}`
+              ? `💬 Reply · ${commentCount} comment${commentCount === 1 ? '' : 's'}`
               : '💬 Reply'}
         </button>
       </div>
