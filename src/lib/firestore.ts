@@ -271,17 +271,11 @@ export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
 }
 
 export async function getUserGroups(uid: string): Promise<Group[]> {
-  try {
-    const user = await getUser(uid)
-    if (!user || !user.groups || user.groups.length === 0) return []
+  const user = await getUser(uid)
+  if (!user || !user.groups || user.groups.length === 0) return []
 
-    const groupPromises = user.groups.map((groupId) => getGroup(groupId))
-    const groups = await Promise.all(groupPromises)
-    return groups.filter((g): g is Group => g !== null)
-  } catch (error) {
-    console.error('Error getting user groups:', error)
-    return []
-  }
+  const groups = await Promise.all(user.groups.map((groupId) => getGroup(groupId)))
+  return groups.filter((g): g is Group => g !== null)
 }
 
 export async function leaveGroup(groupId: string, uid: string): Promise<void> {

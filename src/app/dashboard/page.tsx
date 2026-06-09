@@ -175,6 +175,7 @@ export default function DashboardPage() {
   const [view, setView] = useState<'welcome' | 'groups'>('welcome')
   const [groups, setGroups] = useState<Group[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
+  const [groupsError, setGroupsError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
   const [wipePhase, setWipePhase] = useState<WipePhase>('idle')
@@ -188,10 +189,29 @@ export default function DashboardPage() {
   useEffect(() => {
     if (view !== 'groups' || !user) return
     setLoadingGroups(true)
+    setGroupsError(null)
+
+    const timeoutId = setTimeout(() => {
+      setLoadingGroups(false)
+      setGroupsError('Taking too long — check your connection and try again.')
+    }, 8000)
+
     getUserGroups(user.uid)
-      .then(userGroups => setGroups(userGroups))
-      .catch(err => console.error('Error loading groups:', err))
-      .finally(() => setLoadingGroups(false))
+      .then(userGroups => {
+        clearTimeout(timeoutId)
+        setGroups(userGroups)
+      })
+      .catch(err => {
+        clearTimeout(timeoutId)
+        console.error('Error loading groups:', err)
+        setGroupsError('Failed to load groups. Please try again.')
+      })
+      .finally(() => {
+        clearTimeout(timeoutId)
+        setLoadingGroups(false)
+      })
+
+    return () => clearTimeout(timeoutId)
   }, [view, user])
 
   function handleMyGroups() {
@@ -304,7 +324,6 @@ export default function DashboardPage() {
                 {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="animate-pulse"
                     style={{
                       background: 'rgba(255,255,255,0.6)',
                       borderRadius: 16,
@@ -313,6 +332,18 @@ export default function DashboardPage() {
                     }}
                   />
                 ))}
+              </>
+            ) : groupsError ? (
+              <>
+                <p style={{ color: '#c0392b', fontSize: 13, textAlign: 'center', fontWeight: 600 }}>
+                  {groupsError}
+                </p>
+                <button
+                  onClick={() => { setView('welcome'); setTimeout(() => setView('groups'), 50) }}
+                  style={{ ...whiteBtnStyle, fontSize: 14, padding: 14 }}
+                >
+                  ↻ Retry
+                </button>
               </>
             ) : groups.length === 0 ? (
               <>
