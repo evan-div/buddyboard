@@ -177,24 +177,37 @@ function CaseCard({
         </div>
       </div>
 
-      {/* Quote */}
-      <div style={{ position: 'relative', padding: '4px 32px 20px', textAlign: 'center' }}>
-        <span style={{
-          position: 'absolute', top: -10, left: 4,
-          fontSize: 52, color: 'rgba(255,255,255,0.3)',
-          lineHeight: 1, fontFamily: 'Georgia, serif', userSelect: 'none',
-        }}>"</span>
-        <p style={{
-          color: 'white', fontSize: 15, fontStyle: 'italic',
-          fontWeight: 600, lineHeight: 1.55, margin: 0,
+      {/* Accusation + Defense */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 4px 16px' }}>
+        {/* Accusation */}
+        <div style={{
+          background: 'rgba(0,0,0,0.2)',
+          borderRadius: 12,
+          padding: '10px 14px',
+          borderLeft: '3px solid rgba(255,255,255,0.4)',
         }}>
-          {c.appealComment}
-        </p>
-        <span style={{
-          position: 'absolute', bottom: 0, right: 4,
-          fontSize: 52, color: 'rgba(255,255,255,0.3)',
-          lineHeight: 1, fontFamily: 'Georgia, serif', userSelect: 'none',
-        }}>"</span>
+          <p style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+            {c.accuserName}&apos;s accusation
+          </p>
+          <p style={{ color: 'white', fontSize: 13, fontStyle: 'italic', fontWeight: 500, lineHeight: 1.5, margin: 0 }}>
+            &ldquo;{c.reason ?? `Took ${c.points} points`}&rdquo;
+          </p>
+        </div>
+
+        {/* Defense */}
+        <div style={{
+          background: 'rgba(0,0,0,0.2)',
+          borderRadius: 12,
+          padding: '10px 14px',
+          borderLeft: '3px solid rgba(255,255,255,0.4)',
+        }}>
+          <p style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+            {c.defendantName}&apos;s defense
+          </p>
+          <p style={{ color: 'white', fontSize: 13, fontStyle: 'italic', fontWeight: 500, lineHeight: 1.5, margin: 0 }}>
+            &ldquo;{c.appealComment}&rdquo;
+          </p>
+        </div>
       </div>
 
       {/* Pending: waiting on accuser */}

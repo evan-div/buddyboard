@@ -54,6 +54,7 @@ function fromCaseDoc(id: string, data: DocumentData): CourtCase {
     accuserUid: data.accuserUid,
     accuserName: data.accuserName,
     points: data.points,
+    reason: data.reason,
     appealComment: data.appealComment,
     status: data.status as CaseStatus,
     createdAt: fromTs(data.createdAt),
@@ -132,6 +133,7 @@ export async function fileAppeal(
     accuserUid,
     accuserName,
     points,
+    reason: originalReason ?? null,
     appealComment,
     status: 'pending_review',
     votes: {},
@@ -321,6 +323,16 @@ export async function castVote(
     let resolved = false
     if (innocentWeight >= majority) { newStatus = 'resolved_innocent'; resolved = true }
     else if (guiltyWeight >= majority) { newStatus = 'resolved_guilty'; resolved = true }
+
+    // Auto-resolve when every eligible voter has cast a vote (ties go to defendant)
+    if (!resolved) {
+      const eligibleVoterUids = memberUids.filter(uid => uid !== c.accuserUid && uid !== c.defendantUid)
+      const allVoted = eligibleVoterUids.length > 0 && eligibleVoterUids.every(uid => newVotes[uid] !== undefined)
+      if (allVoted) {
+        newStatus = innocentWeight >= guiltyWeight ? 'resolved_innocent' : 'resolved_guilty'
+        resolved = true
+      }
+    }
 
     const voteUpdate: Record<string, unknown> = { [`votes.${voterUid}`]: vote }
     if (voterUid === effectiveChief) voteUpdate.chiefVoterUid = voterUid

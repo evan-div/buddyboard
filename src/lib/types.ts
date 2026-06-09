@@ -146,6 +146,7 @@ export type CourtCase = {
   accuserUid: string
   accuserName: string
   points: number
+  reason?: string
   appealComment: string
   status: CaseStatus
   createdAt: Date
