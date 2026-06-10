@@ -245,8 +245,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         mouthZ={mouthZ}
       />
 
-      {/* Left arm — attached to front-left surface */}
-      <group position={[-dims.radius * 0.87, dims.armAttachY, dims.radius * 0.5]} rotation={[0, 0, Math.PI * 0.18]}>
+      {/* Left arm — always outside body: (r+0.07) outward at 55° from front */}
+      <group position={[-(dims.radius + 0.07) * 0.82, dims.armAttachY, (dims.radius + 0.07) * 0.57]} rotation={[0, 0, Math.PI * 0.18]}>
         <mesh>
           <sphereGeometry args={[0.065, 8, 8]} />
           <meshToonMaterial color={bodyColor} gradientMap={gradient} />
@@ -265,8 +265,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         </mesh>
       </group>
 
-      {/* Right arm — attached to front-right surface */}
-      <group position={[dims.radius * 0.87, dims.armAttachY, dims.radius * 0.5]} rotation={[0, 0, -Math.PI * 0.18]}>
+      {/* Right arm — always outside body */}
+      <group position={[(dims.radius + 0.07) * 0.82, dims.armAttachY, (dims.radius + 0.07) * 0.57]} rotation={[0, 0, -Math.PI * 0.18]}>
         <mesh>
           <sphereGeometry args={[0.065, 8, 8]} />
           <meshToonMaterial color={bodyColor} gradientMap={gradient} />
