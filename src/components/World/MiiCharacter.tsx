@@ -919,8 +919,8 @@ export default function MiiCharacter({
           mouthZ={mouthZ}
         />
 
-        {/* Left arm — pure x offset; no z means no body overlap possible */}
-        <group ref={leftArmRef} position={[-(dims.radius + 0.04), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.22]}>
+        {/* Left arm — negative z-rot tilts toward -x (outward) */}
+        <group ref={leftArmRef} position={[-(dims.radius + 0.04), dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.18]}>
           <mesh>
             <sphereGeometry args={[0.065, 8, 8]} />
             <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
@@ -939,8 +939,8 @@ export default function MiiCharacter({
           </mesh>
         </group>
 
-        {/* Right arm — pure x offset */}
-        <group ref={rightArmRef} position={[dims.radius + 0.04, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.22]}>
+        {/* Right arm — positive z-rot tilts toward +x (outward) */}
+        <group ref={rightArmRef} position={[dims.radius + 0.04, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.18]}>
           <mesh>
             <sphereGeometry args={[0.065, 8, 8]} />
             <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
