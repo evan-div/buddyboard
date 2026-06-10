@@ -649,6 +649,7 @@ export async function checkAndAwardBadges(
   const pts = context.totalPoints ?? (data.totalPoints as number ?? 0)
   if (pts >= 100)  maybeAward('first_100')
   if (pts >= 500)  maybeAward('first_500')
+  if (pts >= 1000) maybeAward('first_1000')
 
   const streak = context.currentStreak ?? (data.currentStreak as number ?? 0)
   if (streak >= 7)  maybeAward('streak_7')
@@ -670,6 +671,11 @@ export async function checkAndAwardBadges(
 
   if (toAward.length > 0) {
     await updateDoc(memberRef, { badges: arrayUnion(...toAward) })
+    const { BADGE_MAP } = await import('./badges')
+    const coinTotal = toAward.reduce((sum, id) => sum + (BADGE_MAP[id]?.coinReward ?? 0), 0)
+    if (coinTotal > 0) {
+      await updateDoc(doc(db, 'users', uid), { coins: increment(coinTotal) })
+    }
   }
 }
 
@@ -828,4 +834,19 @@ export function subscribeToWallComments(
   const ref = collection(db, 'groups', groupId, 'wall', postId, 'comments')
   const q = query(ref, orderBy('createdAt', 'asc'))
   return onSnapshot(q, (snap) => callback(snap.docs.map(mapWallComment)))
+}
+
+// ============ SHOP ============
+
+export async function purchaseItem(uid: string, itemId: string, cost: number): Promise<void> {
+  const userRef = doc(db, 'users', uid)
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(userRef)
+    if (!snap.exists()) throw new Error('User not found')
+    const coins: number = snap.data().coins ?? 0
+    if (coins < cost) throw new Error('Not enough coins')
+    const unlocked: string[] = snap.data().unlockedItems ?? []
+    if (unlocked.includes(itemId)) throw new Error('Already owned')
+    tx.update(userRef, { coins: increment(-cost), unlockedItems: arrayUnion(itemId) })
+  })
 }
