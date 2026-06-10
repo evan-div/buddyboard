@@ -12,6 +12,7 @@ import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import {
   getGroup,
   getGroupMembers,
+  getUser,
   subscribeToFeed,
   giveOrTakePoints,
   getGroupDailyStats,
@@ -23,6 +24,8 @@ import {
   addWallComment,
   subscribeToWallComments,
   sendPushToUser,
+  updateUserAvatar,
+  updateMemberAvatar,
 } from '@/lib/firestore'
 import type { WallPost, WallComment } from '@/lib/types'
 import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
@@ -37,6 +40,7 @@ const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: fal
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
 const AdminPanel = dynamic(() => import('@/components/Group/AdminPanel'), { ssr: false })
+const AvatarBuilder = dynamic(() => import('@/components/Avatar/AvatarBuilder'), { ssr: false })
 
 // ─── Points Modal ─────────────────────────────────────────────────────────────
 
@@ -862,6 +866,10 @@ export default function GroupPage() {
   const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [showNav, setShowNav] = useState(false)
   const [showGroupInfo, setShowGroupInfo] = useState(false)
+  const [showAppearance, setShowAppearance] = useState(false)
+  const [appearanceDraft, setAppearanceDraft] = useState(DEFAULT_AVATAR)
+  const [appearanceSaving, setAppearanceSaving] = useState(false)
+  const [appearanceUnlocked, setAppearanceUnlocked] = useState<string[]>([])
   const [pendingAppeal, setPendingAppeal] = useState<{
     transactionId: string
     fromUid: string
@@ -1232,6 +1240,38 @@ export default function GroupPage() {
                   >
                     Info
                   </button>
+
+                  {/* APPEARANCE button */}
+                  <button
+                    onClick={async () => {
+                      const me = members.find(m => m.uid === user.uid)
+                      setAppearanceDraft(me ? { ...me.avatar } : DEFAULT_AVATAR)
+                      setShowAppearance(true)
+                      setShowNav(false)
+                      const userData = await getUser(user.uid)
+                      setAppearanceUnlocked(userData?.unlockedItems ?? [])
+                    }}
+                    style={{
+                      alignSelf: 'flex-start',
+                      padding: '10px 18px',
+                      borderRadius: 9999,
+                      background: 'rgba(255,255,255,0.9)',
+                      fontWeight: 800,
+                      fontSize: 14,
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      color: '#333',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(6px)',
+                      WebkitBackdropFilter: 'blur(6px)',
+                      touchAction: 'manipulation',
+                      minWidth: 90,
+                    }}
+                  >
+                    Appearance
+                  </button>
                 </div>
               )}
             </div>
@@ -1377,6 +1417,48 @@ export default function GroupPage() {
           </div>
         </div>
       )}
+
+      {/* ── Appearance modal ── */}
+      {showAppearance && user && (() => {
+        const uid = user.uid
+        async function saveAppearance() {
+          setAppearanceSaving(true)
+          try {
+            await Promise.all([
+              updateUserAvatar(uid, appearanceDraft),
+              updateMemberAvatar(groupId, uid, appearanceDraft),
+            ])
+            refreshGroupData()
+            setShowAppearance(false)
+          } finally {
+            setAppearanceSaving(false)
+          }
+        }
+        return (
+          <div
+            onClick={() => setShowAppearance(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ width: '100%', maxWidth: 480, maxHeight: '92dvh', overflowY: 'auto', background: '#f5f5f5', borderRadius: '24px 24px 0 0', padding: '20px 16px 32px' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <span style={{ fontSize: 17, fontWeight: 800, color: '#111' }}>Customize Avatar</span>
+                <button onClick={() => setShowAppearance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#888', lineHeight: 1 }}>✕</button>
+              </div>
+              <AvatarBuilder value={appearanceDraft} onChange={setAppearanceDraft} unlockedItems={appearanceUnlocked} />
+              <button
+                onClick={saveAppearance}
+                disabled={appearanceSaving}
+                style={{ width: '100%', marginTop: 20, padding: 15, background: '#42b842', color: 'white', fontWeight: 800, fontSize: 16, borderRadius: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(66,184,66,0.35)', opacity: appearanceSaving ? 0.7 : 1 }}
+              >
+                {appearanceSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {showNotifPanel && user && (
         <NotificationPanel

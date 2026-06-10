@@ -319,7 +319,7 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
       {/* Preview: show rotating 3D bean when Body tab is active, otherwise 2D SVG */}
       {activeTab === 'body'
-        ? <div style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff' }}>
+        ? <div style={{ borderRadius: 20, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff', width: 200, height: 200 }}>
             <BeanPreview config={value} />
           </div>
         : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useMemo } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
@@ -155,6 +155,21 @@ function BeanHair({ style, color, bodyTop, radius }: {
   return null
 }
 
+function CameraController({ dims }: { dims: ReturnType<typeof useBeanDims> }) {
+  const { camera } = useThree()
+  useFrame(() => {
+    const legBottom = dims.legAttachY - dims.legLen
+    const top       = dims.bodyTop + 0.22
+    const centerY   = (top + legBottom) / 2
+    const height    = top - legBottom
+    const targetZ   = Math.max(2.2, (height * 0.5) / Math.tan(20 * Math.PI / 180) * 1.15)
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, centerY, 0.1)
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, 0.1)
+    camera.lookAt(0, centerY, 0)
+  })
+  return null
+}
+
 function BeanScene({ config }: { config: AvatarConfig }) {
   const groupRef  = useRef<THREE.Group>(null)
   const dims      = useBeanDims(config)
@@ -174,6 +189,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
 
   return (
     <group ref={groupRef}>
+      <CameraController dims={dims} />
       {/* Left leg */}
       <group position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
@@ -287,8 +303,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
 
 export default function BeanPreview({ config }: { config: AvatarConfig }) {
   return (
-    <div style={{ width: 140, height: 140 }}>
-      <Canvas camera={{ position: [0, 0.85, 3.4], fov: 40 }} gl={{ antialias: true }}>
+    <div style={{ width: 200, height: 200 }}>
+      <Canvas camera={{ position: [0, 0.7, 3.4], fov: 40 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.7} />
         <directionalLight position={[2, 3, 2]} intensity={0.8} />
         <BeanScene config={config} />
