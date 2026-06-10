@@ -484,9 +484,9 @@ export default function MiiCharacter({
   }, [])
 
   const eyeY     = dims.groundY + dims.capLen * 0.22
-  const eyeZ     = dims.radius * 0.95
+  const eyeZ     = dims.radius
   const mouthY   = dims.groundY - dims.capLen * 0.05
-  const mouthZ   = dims.radius * 0.92
+  const mouthZ   = dims.radius
   const overlayY = dims.bodyTop + 0.3
 
   useEffect(() => {
