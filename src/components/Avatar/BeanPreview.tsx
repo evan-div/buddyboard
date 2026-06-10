@@ -245,8 +245,12 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         mouthZ={mouthZ}
       />
 
-      {/* Left arm */}
-      <group position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
+      {/* Left arm — attached to front-left surface */}
+      <group position={[-dims.radius * 0.87, dims.armAttachY, dims.radius * 0.5]} rotation={[0, 0, Math.PI * 0.18]}>
+        <mesh>
+          <sphereGeometry args={[0.065, 8, 8]} />
+          <meshToonMaterial color={bodyColor} gradientMap={gradient} />
+        </mesh>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -261,8 +265,12 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         </mesh>
       </group>
 
-      {/* Right arm */}
-      <group position={[dims.radius + 0.02, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
+      {/* Right arm — attached to front-right surface */}
+      <group position={[dims.radius * 0.87, dims.armAttachY, dims.radius * 0.5]} rotation={[0, 0, -Math.PI * 0.18]}>
+        <mesh>
+          <sphereGeometry args={[0.065, 8, 8]} />
+          <meshToonMaterial color={bodyColor} gradientMap={gradient} />
+        </mesh>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
