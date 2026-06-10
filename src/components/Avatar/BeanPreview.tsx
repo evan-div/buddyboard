@@ -6,6 +6,7 @@ import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
 import type { AvatarConfig } from '@/lib/types'
+import { BeanFace } from './BeanFace'
 
 function useGradient() {
   return useMemo(() => {
@@ -181,17 +182,16 @@ function BeanScene({ config }: { config: AvatarConfig }) {
     if (groupRef.current) groupRef.current.rotation.y += dt * 0.6
   })
 
-  const eyeY      = dims.groundY + dims.capLen * 0.22
-  const eyeZ      = dims.radius * 0.95
-  const eyeSpread = Math.min(0.12, dims.radius * 0.42)
-  const mouthY    = dims.groundY - dims.capLen * 0.05
-  const mouthZ    = dims.radius * 0.92
+  const eyeY   = dims.groundY + dims.capLen * 0.22
+  const eyeZ   = dims.radius * 0.95
+  const mouthY = dims.groundY - dims.capLen * 0.05
+  const mouthZ = dims.radius * 0.92
 
   return (
     <group ref={groupRef}>
       <CameraController dims={dims} />
       {/* Left leg */}
-      <group position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
+      <group position={[-dims.radius * 0.4 * dims.legSpread, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -207,7 +207,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       </group>
 
       {/* Right leg */}
-      <group position={[dims.radius * 0.4, dims.legAttachY, 0]}>
+      <group position={[dims.radius * 0.4 * dims.legSpread, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -234,29 +234,16 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         <meshToonMaterial color={bodyColor} gradientMap={gradient} />
       </mesh>
 
-      {/* Eyes */}
-      <mesh position={[-eyeSpread, eyeY, eyeZ]}>
-        <sphereGeometry args={[0.055, 8, 8]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[-eyeSpread, eyeY, eyeZ + 0.02]}>
-        <sphereGeometry args={[0.032, 6, 6]} />
-        <meshBasicMaterial color="#1a1a1a" />
-      </mesh>
-      <mesh position={[eyeSpread, eyeY, eyeZ]}>
-        <sphereGeometry args={[0.055, 8, 8]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[eyeSpread, eyeY, eyeZ + 0.02]}>
-        <sphereGeometry args={[0.032, 6, 6]} />
-        <meshBasicMaterial color="#1a1a1a" />
-      </mesh>
-
-      {/* Mouth (smile arc) */}
-      <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
-        <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
-        <meshBasicMaterial color="#2a1010" />
-      </mesh>
+      <BeanFace
+        eyeStyle={config.eyeStyle ?? 'normal'}
+        mouthStyle={config.mouthStyle ?? 'smile'}
+        eyeSize={config.eyeSize}
+        eyeSpacing={config.eyeSpacing}
+        eyeY={eyeY}
+        eyeZ={eyeZ}
+        mouthY={mouthY}
+        mouthZ={mouthZ}
+      />
 
       {/* Left arm */}
       <group position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>

@@ -8,6 +8,7 @@ import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
+import { BeanFace } from '@/components/Avatar/BeanFace'
 
 // ─── Hair ─────────────────────────────────────────────────────────────────────
 
@@ -482,12 +483,11 @@ export default function MiiCharacter({
     return tex
   }, [])
 
-  const eyeY      = dims.groundY + dims.capLen * 0.22
-  const eyeZ      = dims.radius * 0.95
-  const eyeSpread = Math.min(0.12, dims.radius * 0.42)
-  const mouthY    = dims.groundY - dims.capLen * 0.05
-  const mouthZ    = dims.radius * 0.92
-  const overlayY  = dims.bodyTop + 0.3
+  const eyeY     = dims.groundY + dims.capLen * 0.22
+  const eyeZ     = dims.radius * 0.95
+  const mouthY   = dims.groundY - dims.capLen * 0.05
+  const mouthZ   = dims.radius * 0.92
+  const overlayY = dims.bodyTop + 0.3
 
   useEffect(() => {
     if (groupRef.current) {
@@ -865,7 +865,7 @@ export default function MiiCharacter({
         </mesh>
 
         {/* Left leg */}
-        <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
+        <group ref={leftLegRef} position={[-dims.radius * 0.4 * dims.legSpread, dims.legAttachY, 0]}>
           <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
             <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -881,7 +881,7 @@ export default function MiiCharacter({
         </group>
 
         {/* Right leg */}
-        <group ref={rightLegRef} position={[dims.radius * 0.4, dims.legAttachY, 0]}>
+        <group ref={rightLegRef} position={[dims.radius * 0.4 * dims.legSpread, dims.legAttachY, 0]}>
           <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
             <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -908,29 +908,16 @@ export default function MiiCharacter({
           <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
         </mesh>
 
-        {/* Eyes */}
-        <mesh position={[-eyeSpread, eyeY, eyeZ]}>
-          <sphereGeometry args={[0.055, 8, 8]} />
-          <meshBasicMaterial color="white" />
-        </mesh>
-        <mesh position={[-eyeSpread, eyeY, eyeZ + 0.02]}>
-          <sphereGeometry args={[0.032, 6, 6]} />
-          <meshBasicMaterial color="#1a1a1a" />
-        </mesh>
-        <mesh position={[eyeSpread, eyeY, eyeZ]}>
-          <sphereGeometry args={[0.055, 8, 8]} />
-          <meshBasicMaterial color="white" />
-        </mesh>
-        <mesh position={[eyeSpread, eyeY, eyeZ + 0.02]}>
-          <sphereGeometry args={[0.032, 6, 6]} />
-          <meshBasicMaterial color="#1a1a1a" />
-        </mesh>
-
-        {/* Mouth (smile arc) */}
-        <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
-          <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
-          <meshBasicMaterial color="#2a1010" />
-        </mesh>
+        <BeanFace
+          eyeStyle={member.avatar.eyeStyle ?? 'normal'}
+          mouthStyle={member.avatar.mouthStyle ?? 'smile'}
+          eyeSize={member.avatar.eyeSize}
+          eyeSpacing={member.avatar.eyeSpacing}
+          eyeY={eyeY}
+          eyeZ={eyeZ}
+          mouthY={mouthY}
+          mouthZ={mouthZ}
+        />
 
         {/* Left arm */}
         <group ref={leftArmRef} position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>

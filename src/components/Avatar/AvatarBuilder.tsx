@@ -7,6 +7,8 @@ import {
   HAIR_COLORS,
   BACKGROUND_COLORS,
   SHIRT_COLORS,
+  PANTS_COLORS,
+  SHOES_COLORS,
   BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
@@ -216,6 +218,8 @@ function StyleTab({ config, onChange, unlockedItems }: { config: AvatarConfig; o
           })}
         </div>
       </div>
+      <SliderInput label="Eye Size"    value={config.eyeSize    ?? 0.5} onChange={v => onChange({ ...config, eyeSize:    v })} />
+      <SliderInput label="Eye Spacing" value={config.eyeSpacing ?? 0.5} onChange={v => onChange({ ...config, eyeSpacing: v })} />
       <div>
         <SectionLabel>Mouth</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -264,6 +268,22 @@ function ColorsTab({ config, onChange }: { config: AvatarConfig; onChange: (c: A
           ))}
         </div>
       </div>
+      <div>
+        <SectionLabel>Pants</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {PANTS_COLORS.map((hex) => (
+            <ColorSwatch key={hex} color={hex} selected={config.pantsColor === hex} onClick={() => onChange({ ...config, pantsColor: hex })} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Shoes</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {SHOES_COLORS.map((hex) => (
+            <ColorSwatch key={hex} color={hex} selected={config.shoesColor === hex} onClick={() => onChange({ ...config, shoesColor: hex })} />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -288,9 +308,25 @@ function SliderInput({ label, value, onChange }: { label: string; value: number;
   )
 }
 
+const BODY_SHAPES: { value: AvatarConfig['bodyShape']; label: string }[] = [
+  { value: 'classic', label: 'Classic' },
+  { value: 'round',   label: 'Round'   },
+  { value: 'pear',    label: 'Pear'    },
+  { value: 'egg',     label: 'Egg'     },
+]
+
 function BodyTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
+  const shape = config.bodyShape ?? 'classic'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <SectionLabel>Shape</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {BODY_SHAPES.map(({ value, label }) => (
+            <OptionButton key={value} label={label} selected={shape === value} onClick={() => onChange({ ...config, bodyShape: value })} />
+          ))}
+        </div>
+      </div>
       <div>
         <SectionLabel>Bean Color</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
@@ -304,10 +340,14 @@ function BodyTab({ config, onChange }: { config: AvatarConfig; onChange: (c: Ava
           ))}
         </div>
       </div>
-      <SliderInput label="Height"   value={config.bodyHeight ?? 0.5} onChange={v => onChange({ ...config, bodyHeight: v })} />
-      <SliderInput label="Size"     value={config.bodyWidth  ?? 0.5} onChange={v => onChange({ ...config, bodyWidth:  v })} />
-      <SliderInput label="Arms"     value={config.armLength  ?? 0.5} onChange={v => onChange({ ...config, armLength:  v })} />
-      <SliderInput label="Legs"     value={config.legLength  ?? 0.5} onChange={v => onChange({ ...config, legLength:  v })} />
+      {shape === 'classic' && (
+        <>
+          <SliderInput label="Height" value={config.bodyHeight ?? 0.5} onChange={v => onChange({ ...config, bodyHeight: v })} />
+          <SliderInput label="Size"   value={config.bodyWidth  ?? 0.5} onChange={v => onChange({ ...config, bodyWidth:  v })} />
+        </>
+      )}
+      <SliderInput label="Arms" value={config.armLength ?? 0.5} onChange={v => onChange({ ...config, armLength: v })} />
+      <SliderInput label="Legs" value={config.legLength ?? 0.5} onChange={v => onChange({ ...config, legLength: v })} />
     </div>
   )
 }
@@ -317,8 +357,8 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
-      {/* Preview: show rotating 3D bean when Body tab is active, otherwise 2D SVG */}
-      {activeTab === 'body'
+      {/* Preview: show rotating 3D bean on Body/Style tabs, 2D SVG on others */}
+      {(activeTab === 'body' || activeTab === 'style')
         ? <div style={{ borderRadius: 20, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff', width: 200, height: 200 }}>
             <BeanPreview config={value} />
           </div>
