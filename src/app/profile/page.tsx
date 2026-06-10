@@ -190,7 +190,7 @@ export default function ProfilePage() {
 
           {/* Category tabs */}
           <div style={{ display: 'flex', gap: 4, background: '#d4d4d4', borderRadius: 12, padding: 4, marginBottom: 14 }}>
-            {(['hair', 'accessory', 'background'] as ShopCategory[]).map((cat) => (
+            {(['hair', 'accessory', 'eyes', 'background'] as ShopCategory[]).map((cat) => (
               <button
                 key={cat}
                 onClick={() => setShopTab(cat)}
@@ -201,14 +201,14 @@ export default function ProfilePage() {
                   border: 'none',
                   cursor: 'pointer',
                   fontWeight: 700,
-                  fontSize: 12,
+                  fontSize: 11,
                   background: shopTab === cat ? 'white' : 'transparent',
                   color: shopTab === cat ? '#42b842' : '#888',
                   boxShadow: shopTab === cat ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
                   transition: 'all 0.1s',
                 }}
               >
-                {cat === 'hair' ? '💇 Hair' : cat === 'accessory' ? '🎩 Acc.' : '🎨 BG'}
+                {cat === 'hair' ? '💇 Hair' : cat === 'accessory' ? '🎩 Acc.' : cat === 'eyes' ? '👁️ Eyes' : '🎨 BG'}
               </button>
             ))}
           </div>
@@ -223,6 +223,7 @@ export default function ProfilePage() {
                 const current = avatarDraft ?? userProfile.avatar
                 if (item.category === 'hair')       return current.hairStyle       === previewAvatar.hairStyle
                 if (item.category === 'accessory')  return current.accessory       === previewAvatar.accessory
+                if (item.category === 'eyes')       return current.eyeStyle        === previewAvatar.eyeStyle
                 if (item.category === 'background') return current.backgroundColor === previewAvatar.backgroundColor
                 return false
               })()

@@ -1,11 +1,11 @@
 export type AvatarConfig = {
   backgroundColor: string
   skinTone: 'light' | 'medium-light' | 'medium' | 'medium-dark' | 'dark'
-  hairStyle: 'bald' | 'short' | 'medium' | 'long' | 'curly' | 'wavy' | 'mohawk' | 'ponytail'
+  hairStyle: 'bald' | 'short' | 'medium' | 'long' | 'curly' | 'wavy' | 'mohawk' | 'ponytail' | 'bun' | 'topknot' | 'afro' | 'braids'
   hairColor: string
-  eyeStyle: 'normal' | 'happy' | 'cool' | 'sleepy'
+  eyeStyle: 'normal' | 'happy' | 'cool' | 'sleepy' | 'star' | 'heart'
   mouthStyle: 'smile' | 'grin' | 'neutral' | 'smirk'
-  accessory: 'none' | 'glasses' | 'sunglasses' | 'hat' | 'crown' | 'headband'
+  accessory: 'none' | 'glasses' | 'sunglasses' | 'hat' | 'crown' | 'headband' | 'monocle' | 'bunny_ears' | 'horns' | 'halo' | 'wizard_hat' | 'flower_crown'
   shirtColor: string
   pantsColor: string
   shoesColor: string
@@ -18,6 +18,8 @@ export type User = {
   avatar: AvatarConfig
   createdAt: Date
   groups: string[]
+  coins?: number
+  unlockedItems?: string[]
 }
 
 export type PlazaPreset = {

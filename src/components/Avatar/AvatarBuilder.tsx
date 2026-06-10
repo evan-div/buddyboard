@@ -40,11 +40,13 @@ const HAIR_STYLES: { value: AvatarConfig['hairStyle']; label: string; shopId?: s
   { value: 'braids',   label: 'Braids',   shopId: 'hair_braids'  },
 ]
 
-const EYE_STYLES: { value: AvatarConfig['eyeStyle']; label: string }[] = [
+const EYE_STYLES: { value: AvatarConfig['eyeStyle']; label: string; shopId?: string }[] = [
   { value: 'normal', label: 'Normal' },
   { value: 'happy',  label: 'Happy'  },
   { value: 'cool',   label: 'Cool'   },
   { value: 'sleepy', label: 'Sleepy' },
+  { value: 'star',   label: 'Stars',  shopId: 'eyes_star'  },
+  { value: 'heart',  label: 'Hearts', shopId: 'eyes_heart' },
 ]
 
 const MOUTH_STYLES: { value: AvatarConfig['mouthStyle']; label: string }[] = [
@@ -195,9 +197,18 @@ function StyleTab({ config, onChange, unlockedItems }: { config: AvatarConfig; o
       <div>
         <SectionLabel>Eyes</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {EYE_STYLES.map(({ value, label }) => (
-            <OptionButton key={value} label={label} selected={config.eyeStyle === value} onClick={() => onChange({ ...config, eyeStyle: value })} />
-          ))}
+          {EYE_STYLES.map(({ value, label, shopId }) => {
+            const locked = !!shopId && !unlockedItems.includes(shopId)
+            return (
+              <OptionButton
+                key={value}
+                label={label}
+                selected={config.eyeStyle === value}
+                onClick={() => !locked && onChange({ ...config, eyeStyle: value })}
+                locked={locked}
+              />
+            )
+          })}
         </div>
       </div>
       <div>
