@@ -1,103 +1,321 @@
 'use client'
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
+import { useBeanDims } from '@/lib/beanDims'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
 
 // ─── Hair ─────────────────────────────────────────────────────────────────────
 
-function Hair({ style, color }: { style: AvatarConfig['hairStyle']; color: string }) {
+function BeanHair({ style, color, bodyTop, radius }: {
+  style: AvatarConfig['hairStyle']
+  color: string
+  bodyTop: number
+  radius: number
+}) {
   if (style === 'bald') return null
-  if (style === 'short') return (
-    <mesh position={[0, 0.1, 0]}>
-      <sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
-      <meshStandardMaterial color={color} />
-    </mesh>
-  )
-  if (style === 'medium') return (
-    <group>
-      <mesh position={[0, 0.1, 0]}><sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[-0.215, -0.02, 0]}><boxGeometry args={[0.07, 0.22, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0.215, -0.02, 0]}><boxGeometry args={[0.07, 0.22, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-    </group>
-  )
-  if (style === 'long') return (
-    <group>
-      <mesh position={[0, 0.1, 0]}><sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[-0.215, -0.1, 0]}><boxGeometry args={[0.07, 0.44, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0.215, -0.1, 0]}><boxGeometry args={[0.07, 0.44, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-    </group>
-  )
-  if (style === 'curly') return (
-    <group>
-      <mesh position={[0, 0.18, 0]}><sphereGeometry args={[0.22, 12, 12]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[-0.15, 0.1, 0.08]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0.15, 0.1, 0.08]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color={color} /></mesh>
-    </group>
-  )
-  if (style === 'mohawk') return (
-    <mesh position={[0, 0.26, 0]}><boxGeometry args={[0.09, 0.28, 0.26]} /><meshStandardMaterial color={color} /></mesh>
-  )
-  if (style === 'ponytail') return (
-    <group>
-      <mesh position={[0, 0.1, 0]}><sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0, 0, -0.22]}><boxGeometry args={[0.1, 0.1, 0.1]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0, -0.08, -0.28]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color={color} /></mesh>
-    </group>
-  )
-  if (style === 'wavy') return (
-    <group>
-      <mesh position={[0, 0.1, 0]}><sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[-0.215, -0.02, 0]}><boxGeometry args={[0.07, 0.26, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-      <mesh position={[0.215, -0.02, 0]}><boxGeometry args={[0.07, 0.26, 0.2]} /><meshStandardMaterial color={color} /></mesh>
-    </group>
-  )
-  return (
-    <mesh position={[0, 0.1, 0]}><sphereGeometry args={[0.225, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.52]} /><meshStandardMaterial color={color} /></mesh>
-  )
+  const r = radius
+  const y = bodyTop
+
+  if (style === 'short' || style === 'wavy') {
+    return (
+      <mesh position={[0, y, 0]}>
+        <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    )
+  }
+  if (style === 'medium') {
+    return (
+      <group>
+        <mesh position={[0, y, 0]}>
+          <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[-r * 0.85, y - r * 0.5, 0]}>
+          <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[r * 0.85, y - r * 0.5, 0]}>
+          <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'long') {
+    return (
+      <group>
+        <mesh position={[0, y, 0]}>
+          <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[-r * 0.85, y - r * 1.0, 0]}>
+          <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[r * 0.85, y - r * 1.0, 0]}>
+          <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'curly') {
+    return (
+      <group>
+        <mesh position={[0, y + r * 0.1, 0]}>
+          <sphereGeometry args={[r * 0.82, 10, 10]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[-r * 0.55, y - r * 0.1, r * 0.3]}>
+          <sphereGeometry args={[r * 0.35, 8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[r * 0.55, y - r * 0.1, r * 0.3]}>
+          <sphereGeometry args={[r * 0.35, 8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'mohawk') {
+    return (
+      <mesh position={[0, y + r * 0.35, 0]}>
+        <boxGeometry args={[r * 0.28, r * 0.85, r * 0.75]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    )
+  }
+  if (style === 'ponytail') {
+    return (
+      <group>
+        <mesh position={[0, y, 0]}>
+          <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[0, y - r * 0.3, -r * 0.85]}>
+          <sphereGeometry args={[r * 0.38, 8, 8]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'bun') {
+    return (
+      <mesh position={[0, y + r * 0.12, 0]}>
+        <sphereGeometry args={[r * 0.42, 10, 10]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    )
+  }
+  if (style === 'topknot') {
+    return (
+      <mesh position={[0, y + r * 0.3, 0]} scale={[1, 2.2, 1]}>
+        <sphereGeometry args={[r * 0.28, 8, 8]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    )
+  }
+  if (style === 'afro') {
+    return (
+      <mesh position={[0, y + r * 0.1, 0]}>
+        <sphereGeometry args={[r * 0.78, 12, 12]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    )
+  }
+  if (style === 'braids') {
+    return (
+      <group>
+        <mesh position={[0, y, 0]}>
+          <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[-r * 0.3, y - r * 1.1, 0]}>
+          <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+        <mesh position={[r * 0.3, y - r * 1.1, 0]}>
+          <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+  return null
 }
 
-function Accessory({ style }: { style: AvatarConfig['accessory'] }) {
+// ─── Accessory ────────────────────────────────────────────────────────────────
+
+function BeanAccessory({ style, bodyTop, radius, eyeY, eyeZ }: {
+  style: AvatarConfig['accessory']
+  bodyTop: number
+  radius: number
+  eyeY: number
+  eyeZ: number
+}) {
   if (style === 'none') return null
-  if (style === 'glasses') return (
-    <group position={[0, 0.04, 0.26]}>
-      <mesh position={[-0.1, 0, 0]}><torusGeometry args={[0.054, 0.013, 8, 16]} /><meshStandardMaterial color="#444" /></mesh>
-      <mesh position={[0.1, 0, 0]}><torusGeometry args={[0.054, 0.013, 8, 16]} /><meshStandardMaterial color="#444" /></mesh>
-      <mesh position={[0, 0, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.007, 0.007, 0.05, 6]} /><meshStandardMaterial color="#444" /></mesh>
-    </group>
-  )
-  if (style === 'sunglasses') return (
-    <group position={[0, 0.04, 0.265]}>
-      <mesh position={[-0.1, 0, 0]}><torusGeometry args={[0.054, 0.013, 8, 16]} /><meshStandardMaterial color="#111" /></mesh>
-      <mesh position={[-0.1, 0, 0.005]}><circleGeometry args={[0.05, 16]} /><meshStandardMaterial color="#111" transparent opacity={0.9} /></mesh>
-      <mesh position={[0.1, 0, 0]}><torusGeometry args={[0.054, 0.013, 8, 16]} /><meshStandardMaterial color="#111" /></mesh>
-      <mesh position={[0.1, 0, 0.005]}><circleGeometry args={[0.05, 16]} /><meshStandardMaterial color="#111" transparent opacity={0.9} /></mesh>
-    </group>
-  )
-  if (style === 'hat') return (
-    <group position={[0, 0.2, 0]}>
-      <mesh><cylinderGeometry args={[0.32, 0.32, 0.04, 16]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
-      <mesh position={[0, 0.12, 0]}><cylinderGeometry args={[0.2, 0.22, 0.24, 16]} /><meshStandardMaterial color="#222" /></mesh>
-    </group>
-  )
-  if (style === 'crown') return (
-    <group position={[0, 0.2, 0]}>
-      <mesh><cylinderGeometry args={[0.24, 0.24, 0.07, 16]} /><meshStandardMaterial color="#F5D033" /></mesh>
-      {[0,1,2,3,4].map(i => {
-        const a = (i/5)*Math.PI*2
-        return <mesh key={i} position={[Math.sin(a)*0.21,0.09,Math.cos(a)*0.21]}><coneGeometry args={[0.05,0.14,6]} /><meshStandardMaterial color="#F5D033" /></mesh>
-      })}
-    </group>
-  )
-  if (style === 'headband') return (
-    <mesh position={[0, 0.06, 0]} rotation={[0.25, 0, 0]}>
-      <torusGeometry args={[0.24, 0.026, 8, 32, Math.PI]} /><meshStandardMaterial color="#EC4899" />
-    </mesh>
-  )
+  const r = radius
+
+  if (style === 'glasses') {
+    return (
+      <group position={[0, eyeY, eyeZ + 0.01]}>
+        <mesh position={[-0.1, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+        <mesh position={[0.1, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+        <mesh position={[0, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.007, 0.007, 0.05, 6]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'sunglasses') {
+    return (
+      <group position={[0, eyeY, eyeZ + 0.01]}>
+        <mesh position={[-0.1, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#111" />
+        </mesh>
+        <mesh position={[-0.1, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#111" transparent opacity={0.9} />
+        </mesh>
+        <mesh position={[0.1, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#111" />
+        </mesh>
+        <mesh position={[0.1, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#111" transparent opacity={0.9} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'monocle') {
+    return (
+      <group position={[0.1, eyeY, eyeZ + 0.01]}>
+        <mesh>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#C0A040" />
+        </mesh>
+        <mesh position={[0, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#88AACC" transparent opacity={0.5} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'hat') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 1.1, r * 1.1, 0.06, 16]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
+        <mesh position={[0, 0.15, 0]}><cylinderGeometry args={[r * 0.72, r * 0.78, 0.28, 16]} /><meshStandardMaterial color="#222" /></mesh>
+      </group>
+    )
+  }
+  if (style === 'crown') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 0.85, r * 0.85, 0.08, 16]} /><meshStandardMaterial color="#F5D033" /></mesh>
+        {[0, 1, 2, 3, 4].map(i => {
+          const a = (i / 5) * Math.PI * 2
+          return (
+            <mesh key={i} position={[Math.sin(a) * r * 0.75, 0.13, Math.cos(a) * r * 0.75]}>
+              <coneGeometry args={[0.06, 0.17, 6]} />
+              <meshStandardMaterial color="#F5D033" />
+            </mesh>
+          )
+        })}
+      </group>
+    )
+  }
+  if (style === 'wizard_hat') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 1.0, r * 1.0, 0.05, 16]} /><meshStandardMaterial color="#4B0082" /></mesh>
+        <mesh position={[0, 0.32, 0]}><coneGeometry args={[r * 0.82, 0.6, 16]} /><meshStandardMaterial color="#4B0082" /></mesh>
+        <mesh position={[0, 0.14, 0]}><torusGeometry args={[r * 0.7, 0.04, 8, 16]} /><meshStandardMaterial color="#FFD700" /></mesh>
+      </group>
+    )
+  }
+  if (style === 'headband') {
+    return (
+      <mesh position={[0, bodyTop - r * 0.8, 0]} rotation={[0.25, 0, 0]}>
+        <torusGeometry args={[r * 0.98, 0.038, 8, 32, Math.PI]} />
+        <meshStandardMaterial color="#EC4899" />
+      </mesh>
+    )
+  }
+  if (style === 'bunny_ears') {
+    return (
+      <group position={[0, bodyTop + 0.05, 0]}>
+        <mesh position={[-r * 0.45, 0.28, 0]} rotation={[0, 0, -0.2]}>
+          <capsuleGeometry args={[0.065, 0.36, 4, 8]} />
+          <meshStandardMaterial color="white" />
+        </mesh>
+        <mesh position={[r * 0.45, 0.28, 0]} rotation={[0, 0, 0.2]}>
+          <capsuleGeometry args={[0.065, 0.36, 4, 8]} />
+          <meshStandardMaterial color="white" />
+        </mesh>
+        <mesh position={[-r * 0.45, 0.28, 0]} rotation={[0, 0, -0.2]} scale={[0.5, 0.88, 0.4]}>
+          <capsuleGeometry args={[0.065, 0.36, 4, 8]} />
+          <meshStandardMaterial color="#FFB3C1" />
+        </mesh>
+        <mesh position={[r * 0.45, 0.28, 0]} rotation={[0, 0, 0.2]} scale={[0.5, 0.88, 0.4]}>
+          <capsuleGeometry args={[0.065, 0.36, 4, 8]} />
+          <meshStandardMaterial color="#FFB3C1" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'horns') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh position={[-r * 0.48, 0.12, 0]} rotation={[0, 0, -0.3]}>
+          <coneGeometry args={[0.07, 0.24, 8]} />
+          <meshStandardMaterial color="#CC2200" />
+        </mesh>
+        <mesh position={[r * 0.48, 0.12, 0]} rotation={[0, 0, 0.3]}>
+          <coneGeometry args={[0.07, 0.24, 8]} />
+          <meshStandardMaterial color="#CC2200" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'halo') {
+    return (
+      <mesh position={[0, bodyTop + 0.28, 0]} rotation={[0.3, 0, 0]}>
+        <torusGeometry args={[r * 0.72, 0.04, 8, 24]} />
+        <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.4} />
+      </mesh>
+    )
+  }
+  if (style === 'flower_crown') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        {[0, 1, 2, 3, 4, 5].map(i => {
+          const a = (i / 6) * Math.PI * 2
+          return (
+            <mesh key={i} position={[Math.sin(a) * r * 0.9, 0.06, Math.cos(a) * r * 0.9]}>
+              <sphereGeometry args={[0.075, 8, 8]} />
+              <meshStandardMaterial color={['#FF6B9D', '#FF4757', '#FFA502', '#2ED573', '#7BED9F', '#5352ED'][i]} />
+            </mesh>
+          )
+        })}
+      </group>
+    )
+  }
   return null
 }
 
@@ -108,7 +326,7 @@ function SelectionRing({ visible }: { visible: boolean }) {
   useFrame((_, delta) => { if (groupRef.current) groupRef.current.rotation.y += delta * 2 })
   if (!visible) return null
   return (
-    <group ref={groupRef} position={[0, 0.11, 0]}>
+    <group ref={groupRef} position={[0, 0.08, 0]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.38, 0.46, 32, 1, 0, Math.PI * 1.5]} />
         <meshStandardMaterial color="#6366f1" transparent opacity={0.85} emissive="#6366f1" emissiveIntensity={0.6} />
@@ -119,12 +337,12 @@ function SelectionRing({ visible }: { visible: boolean }) {
 
 // ─── Celebration Particles ────────────────────────────────────────────────────
 
-const CONFETTI_COLORS = ['#F5D033','#FF6B9D','#6366F1','#22c55e','#F97316','#ffffff','#06B6D4']
+const CONFETTI_COLORS = ['#F5D033', '#FF6B9D', '#6366F1', '#22c55e', '#F97316', '#ffffff', '#06B6D4']
 const PARTICLE_COUNT  = 24
 
 type ParticleState = { pos: THREE.Vector3; vel: THREE.Vector3; age: number; maxAge: number }
 
-function CelebrationParticles() {
+function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
   const meshRefs = useRef<(THREE.Mesh | null)[]>(Array(PARTICLE_COUNT).fill(null))
   const particles = useRef<ParticleState[]>([])
 
@@ -132,7 +350,7 @@ function CelebrationParticles() {
     particles.current = Array.from({ length: PARTICLE_COUNT }, () => ({
       pos: new THREE.Vector3(
         (Math.random() - 0.5) * 0.5,
-        1.9 + Math.random() * 0.4,
+        bodyTop + Math.random() * 0.4,
         (Math.random() - 0.5) * 0.5,
       ),
       vel: new THREE.Vector3(
@@ -180,17 +398,15 @@ export type DragMode = 'held' | 'flying' | 'dazed' | 'waking' | 'mad'
 
 // ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
 
-const RD_K  = 9.0   // limb stiffness
-const RD_D  = 3.6   // arm/head damping  (underdamped → wobbles 1-2× before settling)
-const RD_DL = 5.5   // leg/body damping  (overdamped  → slides to rest without bounce)
+const RD_K  = 9.0
+const RD_D  = 3.6
+const RD_DL = 5.5
 
-// Semi-implicit Euler spring step: returns [new_angle, new_vel]
 function rdSpring(r: number, v: number, rest: number, K: number, D: number, dt: number): [number, number] {
   const nv = v + (-K * (r - rest) - D * v) * dt
   return [r + nv * dt, nv]
 }
 
-// Hard angle limit — bounces back with 15% restitution
 function rdClamp(r: number, v: number, lo: number, hi: number): [number, number] {
   if (r < lo) return [lo,  Math.abs(v) * 0.15]
   if (r > hi) return [hi, -Math.abs(v) * 0.15]
@@ -199,19 +415,19 @@ function rdClamp(r: number, v: number, lo: number, hi: number): [number, number]
 
 type BoneRV = { r: number; v: number }
 type RagdollRef = {
-  hX: BoneRV; hZ: BoneRV           // head
-  laX: BoneRV; laZ: BoneRV         // left arm
-  raX: BoneRV; raZ: BoneRV         // right arm
-  llX: BoneRV; llZ: BoneRV         // left leg
-  rlX: BoneRV; rlZ: BoneRV         // right leg
-  byX: BoneRV; byZ: BoneRV         // body group
+  laX: BoneRV; laZ: BoneRV
+  raX: BoneRV; raZ: BoneRV
+  llX: BoneRV; llZ: BoneRV
+  rlX: BoneRV; rlZ: BoneRV
+  byX: BoneRV; byZ: BoneRV
   ready: boolean
 }
 function makeRagdoll(): RagdollRef {
   const z = (): BoneRV => ({ r: 0, v: 0 })
   return {
-    hX: z(), hZ: z(), laX: z(), laZ: z(), raX: z(), raZ: z(),
-    llX: z(), llZ: z(), rlX: z(), rlZ: z(), byX: z(), byZ: z(),
+    laX: z(), laZ: z(), raX: z(), raZ: z(),
+    llX: z(), llZ: z(), rlX: z(), rlZ: z(),
+    byX: z(), byZ: z(),
     ready: false,
   }
 }
@@ -239,30 +455,40 @@ export default function MiiCharacter({
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
-  const headRef      = useRef<THREE.Group>(null)
   const leftArmRef   = useRef<THREE.Group>(null)
   const rightArmRef  = useRef<THREE.Group>(null)
   const leftLegRef   = useRef<THREE.Group>(null)
   const rightLegRef  = useRef<THREE.Group>(null)
 
-  const ragdoll      = useRef<RagdollRef>(makeRagdoll())
-  const animState    = useRef<AnimState>('walking')
-  const idleTimer    = useRef(0)
-  const phase        = useRef(Math.random() * Math.PI * 2)
-  const celebTimer   = useRef(0)
+  const ragdoll       = useRef<RagdollRef>(makeRagdoll())
+  const animState     = useRef<AnimState>('walking')
+  const idleTimer     = useRef(0)
+  const phase         = useRef(Math.random() * Math.PI * 2)
+  const celebTimer    = useRef(0)
   const selectedTimer = useRef(0)
-  const dragTimer    = useRef(0)
-  // Initial target: absolute position within walking circle (same formula as
-  // pickNewTarget) — NOT relative to spawn, which could push near the grass edge.
+  const dragTimer     = useRef(0)
   const _ia = Math.random() * Math.PI * 2
   const _ir = 1.0 + Math.random() * (bounds * 0.85)
   const targetPos = useRef(new THREE.Vector3(Math.cos(_ia) * _ir, 0, Math.sin(_ia) * _ir))
 
+  const dims      = useBeanDims(member.avatar)
   const skinColor = SKIN_TONES[member.avatar.skinTone]
+  const bodyColor = member.avatar.bodyColor ?? member.avatar.shirtColor
 
-  // Expose groupRef to parent and set initial position imperatively.
-  // Do NOT pass position as a JSX prop — R3F re-applies it on every re-render
-  // (e.g. when dragModeMap state changes), teleporting the character back to spawn.
+  const gradientMap = useMemo(() => {
+    const tex = new THREE.DataTexture(new Uint8Array([80, 140, 230]), 3, 1, THREE.RedFormat)
+    tex.minFilter = tex.magFilter = THREE.NearestFilter
+    tex.needsUpdate = true
+    return tex
+  }, [])
+
+  const eyeY      = dims.groundY + dims.capLen * 0.22
+  const eyeZ      = dims.radius * 0.95
+  const eyeSpread = Math.min(0.12, dims.radius * 0.42)
+  const mouthY    = dims.groundY - dims.capLen * 0.05
+  const mouthZ    = dims.radius * 0.92
+  const overlayY  = dims.bodyTop + 0.3
+
   useEffect(() => {
     if (groupRef.current) {
       groupRef.current.position.set(initialPosition[0], initialPosition[1], initialPosition[2])
@@ -272,30 +498,25 @@ export default function MiiCharacter({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Reset all celebration-driven transforms when celebrationType changes
   useEffect(() => {
     celebTimer.current = 0
     bodyGroupRef.current?.position.set(0, 0, 0)
-    if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
+    if (bodyGroupRef.current) { bodyGroupRef.current.rotation.z = 0; bodyGroupRef.current.rotation.x = 0 }
     if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
-    if (headRef.current)     headRef.current.rotation.x = 0
     if (rightLegRef.current) rightLegRef.current.rotation.x = 0
   }, [celebrationType])
 
-  // Reset selection-driven transforms and timer when selection changes
   useEffect(() => {
     selectedTimer.current = 0
     if (!isSelected) {
       if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
       if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
-      if (headRef.current)     headRef.current.rotation.x = 0
       if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
       if (rightLegRef.current) rightLegRef.current.rotation.x = 0
     }
   }, [isSelected])
 
-  // Reset on dragMode change
   useEffect(() => {
     dragTimer.current = 0
     ragdoll.current.ready = false
@@ -303,13 +524,11 @@ export default function MiiCharacter({
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
     if (leftLegRef.current)  { leftLegRef.current.rotation.x  = 0; leftLegRef.current.rotation.z  = 0 }
     if (rightLegRef.current) { rightLegRef.current.rotation.x = 0; rightLegRef.current.rotation.z = 0 }
-    if (headRef.current)     { headRef.current.rotation.x = 0; headRef.current.rotation.z = 0 }
     if (bodyGroupRef.current) {
       bodyGroupRef.current.rotation.x = 0
       bodyGroupRef.current.rotation.z = 0
       bodyGroupRef.current.position.set(0, 0, 0)
     }
-    // When returning to normal, pick a new walk target from current position
     if (dragMode === null && groupRef.current) {
       groupRef.current.rotation.x = 0
       groupRef.current.rotation.z = 0
@@ -331,11 +550,10 @@ export default function MiiCharacter({
     const group = groupRef.current
     if (!group) return
 
-    // ── Drag mode: held ──────────────────────────────────────────────────────
+    // ── held ─────────────────────────────────────────────────────────────────
     if (dragMode === 'held') {
       dragTimer.current += delta
       const t = dragTimer.current
-      // Fast random squirm: all 4 limbs oscillate rapidly at different frequencies
       if (leftArmRef.current) {
         leftArmRef.current.rotation.x  = Math.sin(t * 11.3 + 0.3) * 0.9
         leftArmRef.current.rotation.z  = Math.sin(t * 9.7  + 1.1) * 0.5
@@ -352,7 +570,6 @@ export default function MiiCharacter({
         rightLegRef.current.rotation.x = Math.sin(t * 12.2 + 0.9) * 0.7
         rightLegRef.current.rotation.z = Math.sin(t * 9.1  + 3.5) * 0.2
       }
-      // Slight body tilt / wiggle
       if (bodyGroupRef.current) {
         bodyGroupRef.current.rotation.x = Math.sin(t * 7.3 + 0.5) * 0.1
         bodyGroupRef.current.rotation.z = Math.sin(t * 6.1 + 1.8) * 0.1
@@ -360,10 +577,8 @@ export default function MiiCharacter({
       return
     }
 
-    // ── Drag mode: flying ────────────────────────────────────────────────────
+    // ── flying ───────────────────────────────────────────────────────────────
     if (dragMode === 'flying') {
-      // Limbs fling outward by inertia — spread-eagle ragdoll pose.
-      // The whole-body tumble comes from group.rotation set in MiiPlaza.
       if (leftArmRef.current) {
         leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -0.25, 0.12)
         leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.4,  0.12)
@@ -387,18 +602,14 @@ export default function MiiCharacter({
       return
     }
 
-    // ── Drag mode: dazed (physics-driven ragdoll) ────────────────────────────
+    // ── dazed (ragdoll) ──────────────────────────────────────────────────────
     if (dragMode === 'dazed') {
       dragTimer.current += delta
-      const dt = Math.min(delta, 1 / 30)   // cap to prevent instability on frame drops
+      const dt = Math.min(delta, 1 / 30)
 
-      // Snapshot current bone poses on the first frame of dazed, then kick with a
-      // random impulse that simulates the shock of a hard landing.
       if (!ragdoll.current.ready) {
-        const s  = 7 + Math.random() * 9   // impact magnitude 7–16 rad/s
+        const s  = 7 + Math.random() * 9
         const rd = ragdoll.current
-        rd.hX  = { r: headRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 1.3 }
-        rd.hZ  = { r: headRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 1.0 }
         rd.laX = { r: leftArmRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s }
         rd.laZ = { r: leftArmRef.current?.rotation.z  ?? 0, v: -(0.4 + Math.random() * 0.7) * s }
         rd.raX = { r: rightArmRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s }
@@ -407,73 +618,55 @@ export default function MiiCharacter({
         rd.llZ = { r: leftLegRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
         rd.rlX = { r: rightLegRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
         rd.rlZ = { r: rightLegRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
-        rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.2 }
-        rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.2 }
+        rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
+        rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
         rd.ready = true
       }
 
       const rd = ragdoll.current
       let r: number, v: number
 
-      // Head — underdamped, wobbles before settling
-      ;[r, v] = rdSpring(rd.hX.r, rd.hX.v, 0.28, RD_K, RD_D, dt)
-      ;[rd.hX.r, rd.hX.v] = rdClamp(r, v, -0.7, 1.1)
-      ;[r, v] = rdSpring(rd.hZ.r, rd.hZ.v, 0.14, RD_K, RD_D, dt)
-      ;[rd.hZ.r, rd.hZ.v] = rdClamp(r, v, -0.9, 0.9)
-      if (headRef.current) { headRef.current.rotation.x = rd.hX.r; headRef.current.rotation.z = rd.hZ.r }
-
-      // Left arm — shoulder can swing freely (wide limits)
       ;[r, v] = rdSpring(rd.laX.r, rd.laX.v, 0.28, RD_K, RD_D, dt)
       ;[rd.laX.r, rd.laX.v] = rdClamp(r, v, -2.6, 2.6)
       ;[r, v] = rdSpring(rd.laZ.r, rd.laZ.v, -0.22, RD_K, RD_D, dt)
       ;[rd.laZ.r, rd.laZ.v] = rdClamp(r, v, -1.6, 0.55)
       if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rd.laX.r; leftArmRef.current.rotation.z  = rd.laZ.r }
 
-      // Right arm
       ;[r, v] = rdSpring(rd.raX.r, rd.raX.v, 0.28, RD_K, RD_D, dt)
       ;[rd.raX.r, rd.raX.v] = rdClamp(r, v, -2.6, 2.6)
       ;[r, v] = rdSpring(rd.raZ.r, rd.raZ.v,  0.22, RD_K, RD_D, dt)
       ;[rd.raZ.r, rd.raZ.v] = rdClamp(r, v, -0.55, 1.6)
       if (rightArmRef.current) { rightArmRef.current.rotation.x = rd.raX.r; rightArmRef.current.rotation.z = rd.raZ.r }
 
-      // Left leg — hip joint, overdamped (slides to rest, no oscillation)
       ;[r, v] = rdSpring(rd.llX.r, rd.llX.v, 0.04, RD_K, RD_DL, dt)
       ;[rd.llX.r, rd.llX.v] = rdClamp(r, v, -0.6, 1.0)
       ;[r, v] = rdSpring(rd.llZ.r, rd.llZ.v, -0.04, RD_K, RD_DL, dt)
       ;[rd.llZ.r, rd.llZ.v] = rdClamp(r, v, -0.65, 0.25)
       if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rd.llX.r; leftLegRef.current.rotation.z  = rd.llZ.r }
 
-      // Right leg
       ;[r, v] = rdSpring(rd.rlX.r, rd.rlX.v, 0.04, RD_K, RD_DL, dt)
       ;[rd.rlX.r, rd.rlX.v] = rdClamp(r, v, -0.6, 1.0)
       ;[r, v] = rdSpring(rd.rlZ.r, rd.rlZ.v,  0.04, RD_K, RD_DL, dt)
       ;[rd.rlZ.r, rd.rlZ.v] = rdClamp(r, v, -0.25, 0.65)
       if (rightLegRef.current) { rightLegRef.current.rotation.x = rd.rlX.r; rightLegRef.current.rotation.z = rd.rlZ.r }
 
-      // Body group — subtle settle, overdamped
       ;[r, v] = rdSpring(rd.byX.r, rd.byX.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.35, 0.35)
+      ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.45, 0.45)
       ;[r, v] = rdSpring(rd.byZ.r, rd.byZ.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.35, 0.35)
+      ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.45, 0.45)
       if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
 
       return
     }
 
-    // ── Drag mode: waking ────────────────────────────────────────────────────
+    // ── waking ───────────────────────────────────────────────────────────────
     if (dragMode === 'waking') {
       dragTimer.current += delta
       const t = dragTimer.current
-      // Slowly straighten body/head back to zero
       if (bodyGroupRef.current) {
         bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
-        bodyGroupRef.current.rotation.z = 0
-      }
-      if (headRef.current) {
-        headRef.current.rotation.x = THREE.MathUtils.lerp(headRef.current.rotation.x, 0, 0.03)
-        // Head shake: fast sin, damped over time
         const damp = Math.max(0, 1 - t / 1.5)
-        headRef.current.rotation.z = Math.sin(t * 18) * 0.25 * damp
+        bodyGroupRef.current.rotation.z = Math.sin(t * 18) * 0.18 * damp
       }
       if (leftArmRef.current) {
         leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0, 0.04)
@@ -483,20 +676,15 @@ export default function MiiCharacter({
         rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0, 0.04)
         rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.04)
       }
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
-      }
+      if (leftLegRef.current)  leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
+      if (rightLegRef.current) rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
       return
     }
 
-    // ── Drag mode: mad ───────────────────────────────────────────────────────
+    // ── mad ──────────────────────────────────────────────────────────────────
     if (dragMode === 'mad') {
       dragTimer.current += delta
       const t = dragTimer.current
-      // Arms raised and shaking
       if (leftArmRef.current) {
         leftArmRef.current.rotation.x  = -Math.PI * 0.7 + Math.sin(t * 12) * 0.15
         leftArmRef.current.rotation.z  = -0.5
@@ -505,21 +693,13 @@ export default function MiiCharacter({
         rightArmRef.current.rotation.x = -Math.PI * 0.7 + Math.sin(t * 13 + 1) * 0.15
         rightArmRef.current.rotation.z =  0.5
       }
-      // Feet stomping
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = Math.sin(t * 8) * 0.4
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = Math.sin(t * 8 + Math.PI) * 0.4
-      }
-      // Body bob with anger
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.z = Math.sin(t * 9) * 0.06
-      }
+      if (leftLegRef.current)  leftLegRef.current.rotation.x  = Math.sin(t * 8) * 0.4
+      if (rightLegRef.current) rightLegRef.current.rotation.x = Math.sin(t * 8 + Math.PI) * 0.4
+      if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 9) * 0.06
       return
     }
 
-    // ── Celebrate ────────────────────────────────────────────────────────────
+    // ── celebrate ────────────────────────────────────────────────────────────
     if (celebrationType === 'celebrate') {
       celebTimer.current += delta
       const t    = celebTimer.current
@@ -531,26 +711,27 @@ export default function MiiCharacter({
       return
     }
 
-    // ── Shame ─────────────────────────────────────────────────────────────────
+    // ── shame ─────────────────────────────────────────────────────────────────
     if (celebrationType === 'shame') {
       celebTimer.current += delta
       const t = celebTimer.current
-      if (headRef.current) headRef.current.rotation.x = Math.min(0.48, t * 1.2)
+      if (bodyGroupRef.current) {
+        bodyGroupRef.current.rotation.x = Math.min(0.32, t * 0.8)
+        bodyGroupRef.current.rotation.z = Math.sin(t * 1.4) * 0.04
+      }
       if (rightArmRef.current) {
         const raise   = Math.min(1, t * 1.8)
         const scratch = Math.sin(t * 7) * 0.16
         rightArmRef.current.rotation.x = -raise * 2.1 + scratch
       }
-      if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 1.4) * 0.04
       return
     }
 
-    // ── Selected: face camera then play greeting / idle sequence ─────────────
+    // ── selected ──────────────────────────────────────────────────────────────
     if (isSelected) {
       selectedTimer.current += delta
       const t = selectedTimer.current
 
-      // Face toward the camera (45° isometric from +X+Z → character faces π/4)
       const TARGET_FACING = Math.PI / 4
       let dy = TARGET_FACING - group.rotation.y
       while (dy >  Math.PI) dy -= Math.PI * 2
@@ -558,36 +739,26 @@ export default function MiiCharacter({
       group.rotation.y += dy * Math.min(1, 10 * delta)
 
       if (t < 2.5) {
-        // ── Phase 1: Wave & smile (0–2.5 s) ─────────────────────────────────
         if (rightArmRef.current) {
           rightArmRef.current.rotation.x = -Math.PI * 0.78
           rightArmRef.current.rotation.z = Math.sin(t * 4.5) * 0.62
         }
         if (leftArmRef.current) leftArmRef.current.rotation.x = 0
       } else {
-        // Cycle through three idles, 2.5 s each
         const c = (t - 2.5) % 7.5
-
         if (c < 2.5) {
-          // ── Phase 2: Sheepish fidget ─────────────────────────────────────
           if (rightArmRef.current) { rightArmRef.current.rotation.x = -0.28; rightArmRef.current.rotation.z =  0.30 }
           if (leftArmRef.current)  { leftArmRef.current.rotation.x  = -0.22; leftArmRef.current.rotation.z  = -0.20 }
-          if (headRef.current)     headRef.current.rotation.x = 0.20
           if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(c * 1.6) * 0.055
         } else if (c < 5.0) {
-          // ── Phase 3: Kick the ground ─────────────────────────────────────
           const k = c - 2.5
           if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
           if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
-          if (headRef.current)     headRef.current.rotation.x = 0
           if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = 0
-          // One forward kick, gentle return
           if (rightLegRef.current) rightLegRef.current.rotation.x = Math.sin(k * Math.PI / 1.1) * 0.60
         } else {
-          // ── Phase 4: Scratch head ────────────────────────────────────────
           const s = c - 5.0
           if (rightLegRef.current) rightLegRef.current.rotation.x = 0
-          if (headRef.current)     headRef.current.rotation.x = 0.14
           if (rightArmRef.current) {
             const raise = Math.min(1, s * 2.2)
             rightArmRef.current.rotation.x = -raise * 1.85 + Math.sin(s * 6) * 0.13
@@ -598,16 +769,15 @@ export default function MiiCharacter({
       return
     }
 
-    // ── Normal walk / idle ────────────────────────────────────────────────────
+    // ── normal walk / idle ────────────────────────────────────────────────────
     phase.current += delta
     const t    = phase.current
     const body = bodyGroupRef.current
 
     if (animState.current === 'walking') {
-      group.position.y = 0
       const dx   = targetPos.current.x - group.position.x
       const dz   = targetPos.current.z - group.position.z
-      const dist = Math.sqrt(dx*dx + dz*dz)
+      const dist = Math.sqrt(dx * dx + dz * dz)
       if (dist < 0.15) {
         animState.current = Math.random() < 0.5 ? 'idle_bob' : 'idle_sway'
         idleTimer.current = 2 + Math.random() * 3.5
@@ -620,21 +790,19 @@ export default function MiiCharacter({
         group.position.x += (dx / dist) * spd * delta
         group.position.z += (dz / dist) * spd * delta
         group.rotation.y = Math.atan2(dx, dz)
-        const sw = Math.sin(t*5.5)*0.44
+        const sw = Math.sin(t * 5.5) * 0.44
         if (leftArmRef.current)  leftArmRef.current.rotation.x  =  sw
         if (rightArmRef.current) rightArmRef.current.rotation.x = -sw
         if (leftLegRef.current)  leftLegRef.current.rotation.x  = -sw
         if (rightLegRef.current) rightLegRef.current.rotation.x  =  sw
       }
     } else if (animState.current === 'idle_bob') {
-      group.position.y = 0
       idleTimer.current -= delta
-      if (body) body.position.y = Math.sin(t*2.6)*0.03
+      if (body) body.position.y = Math.sin(t * 2.6) * 0.03
       if (idleTimer.current <= 0) { if (body) body.position.y = 0; pickNewTarget() }
     } else if (animState.current === 'idle_sway') {
-      group.position.y = 0
       idleTimer.current -= delta
-      if (body) body.rotation.z = Math.sin(t*1.8)*0.07
+      if (body) body.rotation.z = Math.sin(t * 1.8) * 0.07
       if (idleTimer.current <= 0) { if (body) body.rotation.z = 0; pickNewTarget() }
     }
   })
@@ -649,14 +817,14 @@ export default function MiiCharacter({
     >
       <SelectionRing visible={isSelected && !dragMode} />
 
-      {celebrationType === 'celebrate' && <CelebrationParticles />}
+      {celebrationType === 'celebrate' && <CelebrationParticles bodyTop={dims.bodyTop} />}
 
       {!dragMode && (() => {
-        const badge = highestBadge(member.badges ?? [])
+        const badge  = highestBadge(member.badges ?? [])
         const streak = member.currentStreak ?? 0
         if (!badge && streak < 3) return null
         return (
-          <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
             <div style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
               {streak >= 3 && <span>🔥{streak}</span>}
               {badge && <span title={badge.label}>{badge.emoji}</span>}
@@ -666,59 +834,152 @@ export default function MiiCharacter({
       })()}
 
       {celebrationType === 'shame' && (
-        <Html position={[0, 2.55, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY - 0.1, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>👎</div>
         </Html>
       )}
 
       {dragMode === 'dazed' && (
-        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>💫</div>
         </Html>
       )}
 
       {dragMode === 'waking' && (
-        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😵</div>
         </Html>
       )}
 
       {dragMode === 'mad' && (
-        <Html position={[0, 2.7, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😤</div>
         </Html>
       )}
 
       <group ref={bodyGroupRef}>
-        <group ref={leftLegRef} position={[-0.12, 0.65, 0]}>
-          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color={member.avatar.pantsColor ?? '#1e293b'} /></mesh>
-          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color={member.avatar.shoesColor ?? '#111'} /></mesh>
+        {/* Ground shadow */}
+        <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[dims.radius * 0.8, 16]} />
+          <meshBasicMaterial color="#000" transparent opacity={0.08} />
+        </mesh>
+
+        {/* Left leg */}
+        <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
+          <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+            <meshBasicMaterial color="black" side={THREE.BackSide} />
+          </mesh>
+          <mesh position={[0, -dims.legLen / 2, 0]}>
+            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+            <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
+          </mesh>
+          <mesh position={[0, -dims.legLen - 0.04, 0.03]}>
+            <sphereGeometry args={[0.068, 8, 8]} />
+            <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
+          </mesh>
         </group>
-        <group ref={rightLegRef} position={[0.12, 0.65, 0]}>
-          <mesh position={[0, -0.325, 0]}><cylinderGeometry args={[0.085, 0.08, 0.65, 8]} /><meshStandardMaterial color={member.avatar.pantsColor ?? '#1e293b'} /></mesh>
-          <mesh position={[0, -0.67, 0.04]}><boxGeometry args={[0.12, 0.08, 0.18]} /><meshStandardMaterial color={member.avatar.shoesColor ?? '#111'} /></mesh>
+
+        {/* Right leg */}
+        <group ref={rightLegRef} position={[dims.radius * 0.4, dims.legAttachY, 0]}>
+          <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+            <meshBasicMaterial color="black" side={THREE.BackSide} />
+          </mesh>
+          <mesh position={[0, -dims.legLen / 2, 0]}>
+            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+            <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
+          </mesh>
+          <mesh position={[0, -dims.legLen - 0.04, 0.03]}>
+            <sphereGeometry args={[0.068, 8, 8]} />
+            <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
+          </mesh>
         </group>
-        <mesh position={[0, 0.9, 0]}><boxGeometry args={[0.52, 0.5, 0.3]} /><meshStandardMaterial color={member.avatar.shirtColor} /></mesh>
-        <group ref={leftArmRef} position={[-0.32, 1.08, 0]}>
-          <mesh position={[-0.02, -0.21, 0]}><cylinderGeometry args={[0.075, 0.065, 0.42, 8]} /><meshStandardMaterial color={member.avatar.shirtColor} /></mesh>
-          <mesh position={[-0.02, -0.45, 0]}><sphereGeometry args={[0.074, 8, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
+
+        {/* Body outline */}
+        <mesh position={[0, dims.groundY, 0]} scale={1.06}>
+          <capsuleGeometry args={[dims.radius, dims.capLen, 8, 16]} />
+          <meshBasicMaterial color="black" side={THREE.BackSide} />
+        </mesh>
+
+        {/* Body capsule */}
+        <mesh position={[0, dims.groundY, 0]}>
+          <capsuleGeometry args={[dims.radius, dims.capLen, 8, 16]} />
+          <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+        </mesh>
+
+        {/* Eyes */}
+        <mesh position={[-eyeSpread, eyeY, eyeZ]}>
+          <sphereGeometry args={[0.055, 8, 8]} />
+          <meshBasicMaterial color="white" />
+        </mesh>
+        <mesh position={[-eyeSpread, eyeY, eyeZ + 0.02]}>
+          <sphereGeometry args={[0.032, 6, 6]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+        <mesh position={[eyeSpread, eyeY, eyeZ]}>
+          <sphereGeometry args={[0.055, 8, 8]} />
+          <meshBasicMaterial color="white" />
+        </mesh>
+        <mesh position={[eyeSpread, eyeY, eyeZ + 0.02]}>
+          <sphereGeometry args={[0.032, 6, 6]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+
+        {/* Mouth (smile arc) */}
+        <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
+          <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
+          <meshBasicMaterial color="#2a1010" />
+        </mesh>
+
+        {/* Left arm */}
+        <group ref={leftArmRef} position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
+          <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+            <meshBasicMaterial color="black" side={THREE.BackSide} />
+          </mesh>
+          <mesh position={[0, -dims.armLen / 2, 0]}>
+            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+            <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+          </mesh>
+          <mesh position={[0, -(dims.armLen + 0.04), 0]}>
+            <sphereGeometry args={[0.055, 8, 8]} />
+            <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+          </mesh>
         </group>
-        <group ref={rightArmRef} position={[0.32, 1.08, 0]}>
-          <mesh position={[0.02, -0.21, 0]}><cylinderGeometry args={[0.075, 0.065, 0.42, 8]} /><meshStandardMaterial color={member.avatar.shirtColor} /></mesh>
-          <mesh position={[0.02, -0.45, 0]}><sphereGeometry args={[0.074, 8, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
+
+        {/* Right arm */}
+        <group ref={rightArmRef} position={[dims.radius + 0.02, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
+          <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+            <meshBasicMaterial color="black" side={THREE.BackSide} />
+          </mesh>
+          <mesh position={[0, -dims.armLen / 2, 0]}>
+            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+            <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+          </mesh>
+          <mesh position={[0, -(dims.armLen + 0.04), 0]}>
+            <sphereGeometry args={[0.055, 8, 8]} />
+            <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+          </mesh>
         </group>
-        <mesh position={[0, 1.21, 0]}><cylinderGeometry args={[0.1, 0.1, 0.18, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
-        <group ref={headRef} position={[0, 1.5, 0]}>
-          <mesh><sphereGeometry args={[0.28, 20, 20]} /><meshStandardMaterial color={skinColor} /></mesh>
-          <mesh position={[-0.1, 0.04, 0.261]}><sphereGeometry args={[0.04, 8, 8]} /><meshStandardMaterial color="#fff" /></mesh>
-          <mesh position={[-0.1, 0.04, 0.276]}><sphereGeometry args={[0.023, 8, 8]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
-          <mesh position={[0.1, 0.04, 0.261]}><sphereGeometry args={[0.04, 8, 8]} /><meshStandardMaterial color="#fff" /></mesh>
-          <mesh position={[0.1, 0.04, 0.276]}><sphereGeometry args={[0.023, 8, 8]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
-          <mesh position={[0, -0.02, 0.278]}><sphereGeometry args={[0.028, 8, 8]} /><meshStandardMaterial color={skinColor} /></mesh>
-          <mesh position={[0, -0.1, 0.262]} rotation={[0, 0, Math.PI]}><torusGeometry args={[0.062, 0.014, 8, 16, Math.PI]} /><meshStandardMaterial color="#2a1010" /></mesh>
-          <Hair style={member.avatar.hairStyle} color={member.avatar.hairColor} />
-          <Accessory style={member.avatar.accessory} />
-        </group>
+
+        {/* Hair */}
+        <BeanHair
+          style={member.avatar.hairStyle}
+          color={member.avatar.hairColor}
+          bodyTop={dims.bodyTop}
+          radius={dims.radius}
+        />
+
+        {/* Accessory */}
+        <BeanAccessory
+          style={member.avatar.accessory}
+          bodyTop={dims.bodyTop}
+          radius={dims.radius}
+          eyeY={eyeY}
+          eyeZ={eyeZ}
+        />
       </group>
     </group>
   )

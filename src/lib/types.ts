@@ -9,6 +9,11 @@ export type AvatarConfig = {
   shirtColor: string
   pantsColor: string
   shoesColor: string
+  bodyColor?:  string
+  bodyHeight?: number
+  bodyWidth?:  number
+  armLength?:  number
+  legLength?:  number
 }
 
 export type User = {
