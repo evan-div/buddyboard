@@ -77,6 +77,25 @@ export const SHOES_COLORS = [
   '#374151', // Dark Gray
 ]
 
+export const BODY_COLORS = [
+  '#FF4757', // Red
+  '#FF6B35', // Orange
+  '#FFA502', // Yellow
+  '#2ED573', // Mint
+  '#1E90FF', // Blue
+  '#5352ED', // Indigo
+  '#FF6B9D', // Pink
+  '#A29BFE', // Lavender
+  '#00D2D3', // Cyan
+  '#FFEAA7', // Pale Yellow
+  '#55EFC4', // Turquoise
+  '#FD79A8', // Hot Pink
+  '#74B9FF', // Light Blue
+  '#81ECEC', // Light Cyan
+  '#B2BEC3', // Silver
+  '#636E72', // Slate
+]
+
 export const DEFAULT_AVATAR: AvatarConfig = {
   backgroundColor: '#6366F1',
   skinTone: 'medium',
@@ -88,4 +107,9 @@ export const DEFAULT_AVATAR: AvatarConfig = {
   shirtColor: '#3B82F6',
   pantsColor: '#1E293B',
   shoesColor: '#111827',
+  bodyColor: '#1E90FF',
+  bodyHeight: 0.5,
+  bodyWidth: 0.5,
+  armLength: 0.5,
+  legLength: 0.5,
 }

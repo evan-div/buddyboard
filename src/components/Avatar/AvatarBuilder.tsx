@@ -1,14 +1,18 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import {
   SKIN_TONES,
   HAIR_COLORS,
   BACKGROUND_COLORS,
   SHIRT_COLORS,
+  BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
 import AvatarDisplay from './AvatarDisplay'
+
+const BeanPreview = dynamic(() => import('./BeanPreview'), { ssr: false })
 
 interface Props {
   value: AvatarConfig
@@ -17,12 +21,13 @@ interface Props {
   unlockedItems?: string[]
 }
 
-type Tab = 'look' | 'style' | 'colors'
+type Tab = 'look' | 'style' | 'colors' | 'body'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'look', label: 'Look' },
-  { id: 'style', label: 'Style' },
+  { id: 'look',   label: 'Look'   },
+  { id: 'style',  label: 'Style'  },
   { id: 'colors', label: 'Colors' },
+  { id: 'body',   label: 'Body'   },
 ]
 
 const HAIR_STYLES: { value: AvatarConfig['hairStyle']; label: string; shopId?: string }[] = [
@@ -263,15 +268,64 @@ function ColorsTab({ config, onChange }: { config: AvatarConfig; onChange: (c: A
   )
 }
 
+function SliderInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <SectionLabel>{label}</SectionLabel>
+        <span style={{ fontSize: 11, color: '#888' }}>{Math.round(value * 100)}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        style={{ width: '100%', accentColor: '#42b842' }}
+      />
+    </div>
+  )
+}
+
+function BodyTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <SectionLabel>Bean Color</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {BODY_COLORS.map((hex) => (
+            <ColorSwatch
+              key={hex}
+              color={hex}
+              selected={(config.bodyColor ?? config.shirtColor) === hex}
+              onClick={() => onChange({ ...config, bodyColor: hex })}
+            />
+          ))}
+        </div>
+      </div>
+      <SliderInput label="Height"   value={config.bodyHeight ?? 0.5} onChange={v => onChange({ ...config, bodyHeight: v })} />
+      <SliderInput label="Size"     value={config.bodyWidth  ?? 0.5} onChange={v => onChange({ ...config, bodyWidth:  v })} />
+      <SliderInput label="Arms"     value={config.armLength  ?? 0.5} onChange={v => onChange({ ...config, armLength:  v })} />
+      <SliderInput label="Legs"     value={config.legLength  ?? 0.5} onChange={v => onChange({ ...config, legLength:  v })} />
+    </div>
+  )
+}
+
 export default function AvatarBuilder({ value, onChange, className, unlockedItems = [] }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('look')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
-      {/* Preview */}
-      <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>
-        <AvatarDisplay config={value} size={140} />
-      </div>
+      {/* Preview: show rotating 3D bean when Body tab is active, otherwise 2D SVG */}
+      {activeTab === 'body'
+        ? <div style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff' }}>
+            <BeanPreview config={value} />
+          </div>
+        : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>
+            <AvatarDisplay config={value} size={140} />
+          </div>
+      }
 
       {/* Panel */}
       <div style={{ width: '100%', background: 'white', borderRadius: 20, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
@@ -305,9 +359,10 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
 
         {/* Tab content */}
         <div style={{ padding: 16 }}>
-          {activeTab === 'look'   && <LookTab  config={value} onChange={onChange} unlockedItems={unlockedItems} />}
-          {activeTab === 'style'  && <StyleTab config={value} onChange={onChange} unlockedItems={unlockedItems} />}
+          {activeTab === 'look'   && <LookTab   config={value} onChange={onChange} unlockedItems={unlockedItems} />}
+          {activeTab === 'style'  && <StyleTab  config={value} onChange={onChange} unlockedItems={unlockedItems} />}
           {activeTab === 'colors' && <ColorsTab config={value} onChange={onChange} />}
+          {activeTab === 'body'   && <BodyTab   config={value} onChange={onChange} />}
         </div>
       </div>
     </div>
