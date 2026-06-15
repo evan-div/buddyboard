@@ -859,6 +859,11 @@ const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
+// Approximate bean geometry constants for effective ground-floor calculation.
+// These match the default dims from useBeanDims (bodyWidth=0.5, bodyHeight=0.5).
+const GROUND_Y_APPROX  = 0.65   // body center height above group root
+const CAP_HALF_APPROX  = 0.225  // capsule half-length (capLen/2)
+const RADIUS_APPROX    = 0.29   // capsule radius
 
 interface PhysState {
   mode: DragMode
@@ -867,6 +872,7 @@ interface PhysState {
   angVel: THREE.Vector3
   modeTimer: number
   gentleDrop: boolean
+  bounceCount: number
 }
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
@@ -976,24 +982,52 @@ function PhysicsUpdater({
           wallFlashRef.current[3] = 1  // -z wall
         }
 
-        // Ground collision — after wall clamping so landing position is always in-bounds
-        if (phys.pos.y <= 0) {
-          phys.pos.y = 0
-          phys.angVel.set(0, 0, 0)
-          const impactSpeed = phys.vel.length()
-          if (impactSpeed >= IMPACT_DAZE) {
-            // Snap immediately to face-forward fallen pose on impact
-            group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
-            group.rotation.z = (Math.random() - 0.5) * 0.3
-            setCharMode(uid, 'dazed')
-          } else if (impactSpeed >= IMPACT_MAD) {
-            group.rotation.x = 0
-            group.rotation.z = 0
-            setCharMode(uid, 'mad')
+        // Ground collision — after wall clamping so landing position is always in-bounds.
+        // effectiveFloor raises the trigger point when the character is tumbling so that
+        // the rotated bean body never visually dips below the ground plane.
+        const cosRx = Math.cos(group.rotation.x)
+        const sinRx = Math.abs(Math.sin(group.rotation.x))
+        const effectiveFloor = Math.max(0, cosRx * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRx * RADIUS_APPROX)
+
+        if (phys.pos.y <= effectiveFloor) {
+          phys.pos.y = effectiveFloor
+
+          const impactVY    = Math.abs(phys.vel.y)
+          const totalSpeed  = phys.vel.length()
+          const bounceAtten = 0.30 - phys.bounceCount * 0.09  // weaker each bounce
+
+          if (bounceAtten > 0.05 && impactVY > 1.2 && phys.bounceCount < 3) {
+            // Bounce: reflect vertical velocity with attenuation; shed lateral + angular velocity
+            phys.vel.y  = impactVY * bounceAtten
+            phys.vel.x *= 0.65
+            phys.vel.z *= 0.65
+            phys.angVel.multiplyScalar(0.45)
+            phys.bounceCount += 1
+            // Stay in flying mode — group.position.copy(phys.pos) at end of block applies
           } else {
-            group.rotation.x = 0
-            group.rotation.z = 0
-            setCharMode(uid, null)
+            // Final landing
+            phys.vel.set(0, 0, 0)
+            phys.angVel.set(0, 0, 0)
+            phys.bounceCount = 0
+
+            if (totalSpeed >= IMPACT_DAZE) {
+              // Hard impact: snap to fallen pose (intentional jarring effect)
+              group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
+              group.rotation.z = (Math.random() - 0.5) * 0.3
+              setCharMode(uid, 'dazed')
+            } else if (totalSpeed >= IMPACT_MAD) {
+              // Medium impact: mad mode will lerp rotation back to upright smoothly
+              setCharMode(uid, 'mad')
+            } else {
+              // Gentle landing: waking mode lerps back to upright if still tilted
+              if (Math.abs(group.rotation.x) > 0.06 || Math.abs(group.rotation.z) > 0.06) {
+                setCharMode(uid, 'waking')
+              } else {
+                group.rotation.x = 0
+                group.rotation.z = 0
+                setCharMode(uid, null)
+              }
+            }
           }
         }
 
@@ -1009,11 +1043,26 @@ function PhysicsUpdater({
         // Lerp back to upright as they recover
         group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 1.8))
         group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 2.5))
+        // Also lower Y to ground as rotation straightens (effectiveFloor → 0)
+        const cosRxW = Math.cos(group.rotation.x)
+        const sinRxW = Math.abs(Math.sin(group.rotation.x))
+        const floorW = Math.max(0, cosRxW * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxW * RADIUS_APPROX)
+        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorW, Math.min(1, delta * 3))
+        group.position.copy(phys.pos)
         if (phys.modeTimer >= 1.5) {
           setCharMode(uid, null)
         }
       } else if (phys.mode === 'mad') {
         phys.modeTimer += delta
+        // Lerp rotation back to upright instead of snapping
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 5))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 5))
+        // Lower Y to ground as rotation straightens
+        const cosRxM = Math.cos(group.rotation.x)
+        const sinRxM = Math.abs(Math.sin(group.rotation.x))
+        const floorM = Math.max(0, cosRxM * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxM * RADIUS_APPROX)
+        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorM, Math.min(1, delta * 5))
+        group.position.copy(phys.pos)
         if (phys.modeTimer >= 2.5) {
           setCharMode(uid, null)
         }
@@ -1284,6 +1333,7 @@ function Scene({
         angVel,
         modeTimer: 0,
         gentleDrop: false,
+        bounceCount: 0,
       })
       setDragModeMap(prev => {
         const next = new Map(prev)
@@ -1325,6 +1375,7 @@ function Scene({
         angVel: new THREE.Vector3(),
         modeTimer: 0,
         gentleDrop: false,
+        bounceCount: 0,
       })
       draggingUid.current = pickup.uid
 
