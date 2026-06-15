@@ -41,11 +41,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 0.85, y - r * 0.5, 0]}>
+        <mesh position={[-r * 1.1, y - r * 0.5, 0]}>
           <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 0.85, y - r * 0.5, 0]}>
+        <mesh position={[r * 1.1, y - r * 0.5, 0]}>
           <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -59,11 +59,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 0.85, y - r * 1.0, 0]}>
+        <mesh position={[-r * 1.1, y - r * 1.0, 0]}>
           <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 0.85, y - r * 1.0, 0]}>
+        <mesh position={[r * 1.1, y - r * 1.0, 0]}>
           <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -77,11 +77,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.82, 10, 10]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 0.55, y - r * 0.1, r * 0.3]}>
+        <mesh position={[-r * 1.0, y - r * 0.1, 0]}>
           <sphereGeometry args={[r * 0.35, 8, 8]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 0.55, y - r * 0.1, r * 0.3]}>
+        <mesh position={[r * 1.0, y - r * 0.1, 0]}>
           <sphereGeometry args={[r * 0.35, 8, 8]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -141,14 +141,183 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 0.3, y - r * 1.1, 0]}>
+        <mesh position={[-r * 0.95, y - r * 1.1, 0]}>
           <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 0.3, y - r * 1.1, 0]}>
+        <mesh position={[r * 0.95, y - r * 1.1, 0]}>
           <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
           <meshStandardMaterial color={color} />
         </mesh>
+      </group>
+    )
+  }
+  return null
+}
+
+function BeanAccessory({ style, bodyTop, radius, eyeY, eyeZ, eyeSpread }: {
+  style: AvatarConfig['accessory']
+  bodyTop: number
+  radius: number
+  eyeY: number
+  eyeZ: number
+  eyeSpread: number
+}) {
+  if (style === 'none') return null
+  const r = radius
+
+  if (style === 'glasses') {
+    const bridge = Math.max(0.01, eyeSpread * 2 - 0.108)
+    return (
+      <group position={[0, eyeY, eyeZ + 0.01]}>
+        <mesh position={[-eyeSpread, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+        <mesh position={[eyeSpread, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+        <mesh rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.007, 0.007, bridge, 6]} />
+          <meshStandardMaterial color="#444" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'sunglasses') {
+    return (
+      <group position={[0, eyeY, eyeZ + 0.01]}>
+        <mesh position={[-eyeSpread, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#111" />
+        </mesh>
+        <mesh position={[-eyeSpread, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#111" transparent opacity={0.9} />
+        </mesh>
+        <mesh position={[eyeSpread, 0, 0]}>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#111" />
+        </mesh>
+        <mesh position={[eyeSpread, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#111" transparent opacity={0.9} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'monocle') {
+    return (
+      <group position={[eyeSpread, eyeY, eyeZ + 0.01]}>
+        <mesh>
+          <torusGeometry args={[0.054, 0.013, 8, 16]} />
+          <meshStandardMaterial color="#C0A040" />
+        </mesh>
+        <mesh position={[0, 0, 0.006]}>
+          <circleGeometry args={[0.05, 16]} />
+          <meshStandardMaterial color="#88AACC" transparent opacity={0.5} />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'hat') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 1.1, r * 1.1, 0.06, 16]} /><meshStandardMaterial color="#1a1a1a" /></mesh>
+        <mesh position={[0, 0.15, 0]}><cylinderGeometry args={[r * 0.72, r * 0.78, 0.28, 16]} /><meshStandardMaterial color="#222" /></mesh>
+      </group>
+    )
+  }
+  if (style === 'crown') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 0.85, r * 0.85, 0.08, 16]} /><meshStandardMaterial color="#F5D033" /></mesh>
+        {[0, 1, 2, 3, 4].map(i => {
+          const a = (i / 5) * Math.PI * 2
+          return (
+            <mesh key={i} position={[Math.sin(a) * r * 0.75, 0.13, Math.cos(a) * r * 0.75]}>
+              <coneGeometry args={[0.06, 0.17, 6]} />
+              <meshStandardMaterial color="#F5D033" />
+            </mesh>
+          )
+        })}
+      </group>
+    )
+  }
+  if (style === 'wizard_hat') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh><cylinderGeometry args={[r * 1.0, r * 1.0, 0.05, 16]} /><meshStandardMaterial color="#4B0082" /></mesh>
+        <mesh position={[0, 0.32, 0]}><coneGeometry args={[r * 0.82, 0.6, 16]} /><meshStandardMaterial color="#4B0082" /></mesh>
+        <mesh position={[0, 0.14, 0]}><torusGeometry args={[r * 0.7, 0.04, 8, 16]} /><meshStandardMaterial color="#FFD700" /></mesh>
+      </group>
+    )
+  }
+  if (style === 'headband') {
+    return (
+      <mesh position={[0, bodyTop - r * 0.8, 0]} rotation={[0.25, 0, 0]}>
+        <torusGeometry args={[r * 0.98, 0.038, 8, 32, Math.PI]} />
+        <meshStandardMaterial color="#EC4899" />
+      </mesh>
+    )
+  }
+  if (style === 'bunny_ears') {
+    return (
+      <group position={[0, bodyTop + 0.05, 0]}>
+        <mesh position={[-r * 0.45, 0.28, 0]} rotation={[0, 0, -0.2]}>
+          <capsuleGeometry args={[r * 0.22, 0.36, 4, 8]} />
+          <meshStandardMaterial color="white" />
+        </mesh>
+        <mesh position={[r * 0.45, 0.28, 0]} rotation={[0, 0, 0.2]}>
+          <capsuleGeometry args={[r * 0.22, 0.36, 4, 8]} />
+          <meshStandardMaterial color="white" />
+        </mesh>
+        <mesh position={[-r * 0.45, 0.28, 0]} rotation={[0, 0, -0.2]} scale={[0.5, 0.88, 0.4]}>
+          <capsuleGeometry args={[r * 0.22, 0.36, 4, 8]} />
+          <meshStandardMaterial color="#FFB3C1" />
+        </mesh>
+        <mesh position={[r * 0.45, 0.28, 0]} rotation={[0, 0, 0.2]} scale={[0.5, 0.88, 0.4]}>
+          <capsuleGeometry args={[r * 0.22, 0.36, 4, 8]} />
+          <meshStandardMaterial color="#FFB3C1" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'horns') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        <mesh position={[-r * 0.48, 0.12, 0]} rotation={[0, 0, -0.3]}>
+          <coneGeometry args={[r * 0.22, 0.24, 8]} />
+          <meshStandardMaterial color="#CC2200" />
+        </mesh>
+        <mesh position={[r * 0.48, 0.12, 0]} rotation={[0, 0, 0.3]}>
+          <coneGeometry args={[r * 0.22, 0.24, 8]} />
+          <meshStandardMaterial color="#CC2200" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'halo') {
+    return (
+      <mesh position={[0, bodyTop + 0.28, 0]} rotation={[0.3, 0, 0]}>
+        <torusGeometry args={[r * 0.72, 0.04, 8, 24]} />
+        <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.4} />
+      </mesh>
+    )
+  }
+  if (style === 'flower_crown') {
+    return (
+      <group position={[0, bodyTop + 0.04, 0]}>
+        {[0, 1, 2, 3, 4, 5].map(i => {
+          const a = (i / 6) * Math.PI * 2
+          return (
+            <mesh key={i} position={[Math.sin(a) * r * 0.9, 0.06, Math.cos(a) * r * 0.9]}>
+              <sphereGeometry args={[r * 0.22, 8, 8]} />
+              <meshStandardMaterial color={['#FF6B9D', '#FF4757', '#FFA502', '#2ED573', '#7BED9F', '#5352ED'][i]} />
+            </mesh>
+          )
+        })}
       </group>
     )
   }
@@ -167,10 +336,10 @@ function BeanScene({ config }: { config: AvatarConfig }) {
   })
 
   const eyeY      = dims.groundY + dims.capLen * 0.22
-  const eyeZ      = dims.radius * 0.95
+  const eyeZ      = dims.radius
   const eyeSpread = Math.min(0.12, dims.radius * 0.42)
   const mouthY    = dims.groundY - dims.capLen * 0.05
-  const mouthZ    = dims.radius * 0.92
+  const mouthZ    = dims.radius
 
   return (
     <group ref={groupRef}>
@@ -236,14 +405,14 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         <meshBasicMaterial color="#1a1a1a" />
       </mesh>
 
-      {/* Mouth (smile arc) */}
+      {/* Mouth */}
       <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
         <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
         <meshBasicMaterial color="#2a1010" />
       </mesh>
 
-      {/* Left arm */}
-      <group position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
+      {/* Left arm — rotated outward (-Z) so it angles away from body */}
+      <group position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -258,8 +427,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         </mesh>
       </group>
 
-      {/* Right arm */}
-      <group position={[dims.radius + 0.02, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
+      {/* Right arm — rotated outward (+Z) */}
+      <group position={[dims.radius + 0.02, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -280,6 +449,16 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         color={config.hairColor}
         bodyTop={dims.bodyTop}
         radius={dims.radius}
+      />
+
+      {/* Accessory */}
+      <BeanAccessory
+        style={config.accessory}
+        bodyTop={dims.bodyTop}
+        radius={dims.radius}
+        eyeY={eyeY}
+        eyeZ={eyeZ}
+        eyeSpread={eyeSpread}
       />
     </group>
   )
