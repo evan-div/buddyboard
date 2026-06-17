@@ -27,7 +27,7 @@ function BeanBody({ dims, color, gradientMap }: {
 
   if (shape === 'peanut') {
     const botR   = r
-    const botY   = gY - cl * 0.06
+    const botY   = dims.legAttachY + botR  // anchor sphere bottom at legAttachY
     const topR   = r * 0.72
     const topY   = gY + cl * 0.60
     const waistR = r * 0.30
@@ -47,7 +47,7 @@ function BeanBody({ dims, color, gradientMap }: {
 
   if (shape === 'gourd') {
     const botR  = r * 1.18
-    const botY  = gY + cl * 0.02
+    const botY  = dims.legAttachY + botR  // anchor sphere bottom at legAttachY
     const topR  = r * 0.60
     const topY  = gY + cl * 0.70
     const neckR = r * 0.52
@@ -66,12 +66,12 @@ function BeanBody({ dims, color, gradientMap }: {
   }
 
   if (shape === 'strawberry') {
-    const topR   = r * 1.12
-    const topY   = gY + cl * 0.42
-    const coneBot = gY - cl * 0.08
-    const coneH   = Math.max(0.04, topY - topR * 0.55 - coneBot)
+    const topR    = r * 1.12
+    const topY    = gY + cl * 0.42
+    const coneBot = dims.legAttachY  // extend down to legAttachY so legs connect
+    const coneH   = Math.max(0.05, topY - topR * 0.55 - coneBot)
     const coneTopR = r * 0.36
-    const coneBotR = r * 0.22
+    const coneBotR = r * 0.18
     const coneY    = coneBot + coneH / 2
     return (
       <>
