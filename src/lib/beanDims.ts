@@ -52,14 +52,20 @@ function shapeExtras(
       }
     }
     case 'strawberry': {
-      const topR = radius * 1.12
-      const topY = groundY + capLen * 0.42
+      // Three overlapping spheres: tiny tip → medium waist → big round top
+      const legAttachY = groundY - capLen * 0.5 - radius * 0.6
+      const tipR = radius * 0.26
+      const midR = radius * 0.66
+      const topR = radius * 1.04
+      const tipY = legAttachY + tipR
+      const midY = tipY + (tipR + midR) * 0.78
+      const topY = midY + (midR + topR) * 0.78
       return {
         bodyTop:     topY + topR,
-        armAttachY:  topY,
+        armAttachY:  midY,
         faceCenterY: topY,
         faceZ:       topR,
-        armX:        topR + 0.02,
+        armX:        midR + 0.03,
       }
     }
     default: { // bean
@@ -82,7 +88,7 @@ function computeDims(config: AvatarConfig): BeanDims {
   const shape: BodyShape = config.bodyShape ?? 'bean'
 
   const radius = lerp(0.18, 0.40, bw)
-  const capLen = lerp(0.15, 0.75, bh)
+  const capLen = lerp(0.15, 0.75, shape === 'strawberry' ? 0.5 : bh)
   const armLen = lerp(0.18, 0.50, al)
   const legLen = lerp(0.12, 0.38, ll)
   const groundY    = legLen + 0.07 + radius

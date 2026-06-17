@@ -67,18 +67,19 @@ function BeanBody({ dims, color, gradientMap }: {
   }
 
   if (shape === 'strawberry') {
-    const topR    = r * 1.12
-    const topY    = gY + cl * 0.42
-    const coneBot = dims.legAttachY  // extend down to legAttachY so legs connect
-    const coneH   = Math.max(0.05, topY - topR * 0.55 - coneBot)
-    const coneTopR = r * 0.36
-    const coneBotR = r * 0.18
-    const coneY    = coneBot + coneH / 2
+    const tipR = r * 0.26
+    const midR = r * 0.66
+    const topR = r * 1.04
+    const tipY = dims.legAttachY + tipR
+    const midY = tipY + (tipR + midR) * 0.78
+    const topY = midY + (midR + topR) * 0.78
     return (
       <>
-        <mesh position={[0, coneY, 0]} scale={1.07}><cylinderGeometry args={[coneTopR, coneBotR, coneH, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, coneY, 0]}><cylinderGeometry args={[coneTopR, coneBotR, coneH, 12]} />{fillMat}</mesh>
-        <mesh position={[0, topY, 0]} scale={1.06}><sphereGeometry args={[topR, 14, 14]} />{outlineMat}</mesh>
+        <mesh position={[0, tipY, 0]} scale={1.07}><sphereGeometry args={[tipR, 10, 10]} />{outlineMat}</mesh>
+        <mesh position={[0, tipY, 0]}><sphereGeometry args={[tipR, 10, 10]} />{fillMat}</mesh>
+        <mesh position={[0, midY, 0]} scale={1.05}><sphereGeometry args={[midR, 12, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, midY, 0]}><sphereGeometry args={[midR, 12, 12]} />{fillMat}</mesh>
+        <mesh position={[0, topY, 0]} scale={1.04}><sphereGeometry args={[topR, 14, 14]} />{outlineMat}</mesh>
         <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 14, 14]} />{fillMat}</mesh>
       </>
     )
