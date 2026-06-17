@@ -108,6 +108,7 @@ export const DEFAULT_AVATAR: AvatarConfig = {
   pantsColor: '#1E293B',
   shoesColor: '#111827',
   bodyColor: '#1E90FF',
+  bodyShape: 'bean',
   bodyHeight: 0.5,
   bodyWidth: 0.5,
   armLength: 0.5,

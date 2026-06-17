@@ -10,6 +10,7 @@ export type AvatarConfig = {
   pantsColor: string
   shoesColor: string
   bodyColor?:  string
+  bodyShape?:  'bean' | 'peanut' | 'gourd' | 'strawberry'
   bodyHeight?: number
   bodyWidth?:  number
   armLength?:  number

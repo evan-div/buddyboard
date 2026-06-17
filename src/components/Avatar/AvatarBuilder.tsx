@@ -288,11 +288,31 @@ function SliderInput({ label, value, onChange }: { label: string; value: number;
   )
 }
 
+const BODY_SHAPES: { value: NonNullable<AvatarConfig['bodyShape']>; label: string }[] = [
+  { value: 'bean',       label: 'Bean'       },
+  { value: 'peanut',     label: 'Peanut'     },
+  { value: 'gourd',      label: 'Gourd'      },
+  { value: 'strawberry', label: 'Strawberry' },
+]
+
 function BodyTab({ config, onChange }: { config: AvatarConfig; onChange: (c: AvatarConfig) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
-        <SectionLabel>Bean Color</SectionLabel>
+        <SectionLabel>Body Shape</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {BODY_SHAPES.map(({ value, label }) => (
+            <OptionButton
+              key={value}
+              label={label}
+              selected={(config.bodyShape ?? 'bean') === value}
+              onClick={() => onChange({ ...config, bodyShape: value })}
+            />
+          ))}
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Body Color</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {BODY_COLORS.map((hex) => (
             <ColorSwatch

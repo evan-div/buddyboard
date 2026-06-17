@@ -5,7 +5,88 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
+import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig } from '@/lib/types'
+
+function BeanBody({ dims, color, gradient }: {
+  dims: BeanDims
+  color: string
+  gradient: THREE.DataTexture
+}) {
+  const r  = dims.radius
+  const cl = dims.capLen
+  const gY = dims.groundY
+  const shape = dims.shape ?? 'bean'
+
+  const fillMat    = <meshToonMaterial color={color} gradientMap={gradient} />
+  const outlineMat = <meshBasicMaterial color="black" side={THREE.BackSide} />
+
+  if (shape === 'peanut') {
+    const botR   = r
+    const botY   = gY - cl * 0.06
+    const topR   = r * 0.72
+    const topY   = gY + cl * 0.60
+    const waistR = r * 0.30
+    const waistH = Math.max(0.04, (topY - topR) - (botY + botR))
+    const waistY = (topY - topR + botY + botR) / 2
+    return (
+      <>
+        <mesh position={[0, botY, 0]} scale={1.06}><sphereGeometry args={[botR, 12, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, botY, 0]}><sphereGeometry args={[botR, 12, 12]} />{fillMat}</mesh>
+        <mesh position={[0, waistY, 0]} scale={1.08}><cylinderGeometry args={[waistR, waistR, waistH + 0.06, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, waistY, 0]}><cylinderGeometry args={[waistR, waistR, waistH + 0.06, 12]} />{fillMat}</mesh>
+        <mesh position={[0, topY, 0]} scale={1.06}><sphereGeometry args={[topR, 12, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 12, 12]} />{fillMat}</mesh>
+      </>
+    )
+  }
+
+  if (shape === 'gourd') {
+    const botR  = r * 1.18
+    const botY  = gY + cl * 0.02
+    const topR  = r * 0.60
+    const topY  = gY + cl * 0.70
+    const neckR = r * 0.52
+    const neckH = Math.max(0.04, (topY - topR * 0.5) - (botY + botR * 0.55))
+    const neckY = (topY - topR * 0.5 + botY + botR * 0.55) / 2
+    return (
+      <>
+        <mesh position={[0, botY, 0]} scale={1.05}><sphereGeometry args={[botR, 14, 14]} />{outlineMat}</mesh>
+        <mesh position={[0, botY, 0]}><sphereGeometry args={[botR, 14, 14]} />{fillMat}</mesh>
+        <mesh position={[0, neckY, 0]} scale={1.08}><cylinderGeometry args={[neckR, botR * 0.62, neckH, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, neckY, 0]}><cylinderGeometry args={[neckR, botR * 0.62, neckH, 12]} />{fillMat}</mesh>
+        <mesh position={[0, topY, 0]} scale={1.08}><sphereGeometry args={[topR, 12, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 12, 12]} />{fillMat}</mesh>
+      </>
+    )
+  }
+
+  if (shape === 'strawberry') {
+    const topR    = r * 1.12
+    const topY    = gY + cl * 0.42
+    const coneBot = gY - cl * 0.08
+    const coneH   = Math.max(0.04, topY - topR * 0.55 - coneBot)
+    const coneTopR = r * 0.36
+    const coneBotR = r * 0.22
+    const coneY    = coneBot + coneH / 2
+    return (
+      <>
+        <mesh position={[0, coneY, 0]} scale={1.07}><cylinderGeometry args={[coneTopR, coneBotR, coneH, 12]} />{outlineMat}</mesh>
+        <mesh position={[0, coneY, 0]}><cylinderGeometry args={[coneTopR, coneBotR, coneH, 12]} />{fillMat}</mesh>
+        <mesh position={[0, topY, 0]} scale={1.06}><sphereGeometry args={[topR, 14, 14]} />{outlineMat}</mesh>
+        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 14, 14]} />{fillMat}</mesh>
+      </>
+    )
+  }
+
+  // bean (capsule)
+  return (
+    <>
+      <mesh position={[0, gY, 0]} scale={1.06}><capsuleGeometry args={[r, cl, 8, 16]} />{outlineMat}</mesh>
+      <mesh position={[0, gY, 0]}><capsuleGeometry args={[r, cl, 8, 16]} />{fillMat}</mesh>
+    </>
+  )
+}
 
 function useGradient() {
   return useMemo(() => {
@@ -335,11 +416,11 @@ function BeanScene({ config }: { config: AvatarConfig }) {
     if (groupRef.current) groupRef.current.rotation.y += dt * 0.6
   })
 
-  const eyeY      = dims.groundY + dims.capLen * 0.22
-  const eyeZ      = dims.radius
-  const eyeSpread = Math.min(0.12, dims.radius * 0.42)
-  const mouthY    = dims.groundY - dims.capLen * 0.05
-  const mouthZ    = dims.radius
+  const eyeY      = dims.faceCenterY
+  const eyeZ      = dims.faceZ
+  const eyeSpread = Math.min(0.12, dims.faceZ * 0.42)
+  const mouthY    = dims.faceCenterY - dims.faceZ * 0.38
+  const mouthZ    = dims.faceZ
 
   return (
     <group ref={groupRef}>
@@ -375,17 +456,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
         </mesh>
       </group>
 
-      {/* Body outline */}
-      <mesh position={[0, dims.groundY, 0]} scale={1.06}>
-        <capsuleGeometry args={[dims.radius, dims.capLen, 8, 16]} />
-        <meshBasicMaterial color="black" side={THREE.BackSide} />
-      </mesh>
-
       {/* Body */}
-      <mesh position={[0, dims.groundY, 0]}>
-        <capsuleGeometry args={[dims.radius, dims.capLen, 8, 16]} />
-        <meshToonMaterial color={bodyColor} gradientMap={gradient} />
-      </mesh>
+      <BeanBody dims={dims} color={bodyColor} gradient={gradient} />
 
       {/* Eyes */}
       <mesh position={[-eyeSpread, eyeY, eyeZ]}>
@@ -412,7 +484,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       </mesh>
 
       {/* Left arm — rotated outward (-Z) so it angles away from body */}
-      <group position={[-(dims.radius + 0.02), dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
+      <group position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />
@@ -428,7 +500,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       </group>
 
       {/* Right arm — rotated outward (+Z) */}
-      <group position={[dims.radius + 0.02, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
+      <group position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
           <meshBasicMaterial color="black" side={THREE.BackSide} />

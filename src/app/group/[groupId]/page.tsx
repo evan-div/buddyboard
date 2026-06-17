@@ -1232,6 +1232,31 @@ export default function GroupPage() {
                   >
                     Info
                   </button>
+
+                  {/* APPEARANCE button */}
+                  <button
+                    onClick={() => { router.push('/profile'); setShowNav(false) }}
+                    style={{
+                      alignSelf: 'flex-start',
+                      padding: '10px 18px',
+                      borderRadius: 9999,
+                      background: 'rgba(255,255,255,0.9)',
+                      fontWeight: 800,
+                      fontSize: 14,
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      color: '#333',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(6px)',
+                      WebkitBackdropFilter: 'blur(6px)',
+                      touchAction: 'manipulation',
+                      minWidth: 90,
+                    }}
+                  >
+                    Appearance
+                  </button>
                 </div>
               )}
             </div>
