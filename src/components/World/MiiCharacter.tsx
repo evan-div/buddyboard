@@ -396,7 +396,7 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
 
 // ─── Drag Mode ────────────────────────────────────────────────────────────────
 
-export type DragMode = 'held' | 'flying' | 'dazed' | 'waking' | 'mad'
+export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad'
 
 // ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
 
@@ -579,8 +579,8 @@ export default function MiiCharacter({
       return
     }
 
-    // ── flying ───────────────────────────────────────────────────────────────
-    if (dragMode === 'flying') {
+    // ── flying / sliding ─────────────────────────────────────────────────────
+    if (dragMode === 'flying' || dragMode === 'sliding') {
       if (leftArmRef.current) {
         leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -0.25, 0.12)
         leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.4,  0.12)

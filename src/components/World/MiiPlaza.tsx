@@ -873,6 +873,7 @@ interface PhysState {
   modeTimer: number
   gentleDrop: boolean
   bounceCount: number
+  pendingMode?: 'dazed' | 'mad'
 }
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
@@ -1006,20 +1007,23 @@ function PhysicsUpdater({
             // Stay in flying mode — group.position.copy(phys.pos) at end of block applies
           } else {
             // Final landing
-            phys.vel.set(0, 0, 0)
-            phys.angVel.set(0, 0, 0)
+            phys.vel.y = 0  // kill vertical; keep lateral so sliding can decelerate it
             phys.bounceCount = 0
 
             if (totalSpeed >= IMPACT_DAZE) {
-              // Hard impact: snap to fallen pose (intentional jarring effect)
-              group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
-              group.rotation.z = (Math.random() - 0.5) * 0.3
-              setCharMode(uid, 'dazed')
+              // Hard impact: slide to a stop, then snap to fallen pose
+              setCharMode(uid, 'sliding')
+              const sp = physicsMap.current.get(uid)
+              if (sp) sp.pendingMode = 'dazed'
             } else if (totalSpeed >= IMPACT_MAD) {
-              // Medium impact: mad mode will lerp rotation back to upright smoothly
-              setCharMode(uid, 'mad')
+              // Medium impact: slide to a stop, then mad (lerps upright smoothly)
+              setCharMode(uid, 'sliding')
+              const sp = physicsMap.current.get(uid)
+              if (sp) sp.pendingMode = 'mad'
             } else {
               // Gentle landing: waking mode lerps back to upright if still tilted
+              phys.vel.set(0, 0, 0)
+              phys.angVel.set(0, 0, 0)
               if (Math.abs(group.rotation.x) > 0.06 || Math.abs(group.rotation.z) > 0.06) {
                 setCharMode(uid, 'waking')
               } else {
@@ -1032,6 +1036,42 @@ function PhysicsUpdater({
         }
 
         group.position.copy(phys.pos)
+      } else if (phys.mode === 'sliding') {
+        // Decelerate lateral velocity with ground friction
+        const friction = Math.pow(0.04, delta)  // reaches near-zero in ~0.5s
+        phys.vel.x *= friction
+        phys.vel.z *= friction
+        phys.vel.y  = 0
+
+        // Continue tumble rotation, also damped by friction
+        group.rotation.x += phys.angVel.x * delta
+        group.rotation.z += phys.angVel.z * delta
+        phys.angVel.multiplyScalar(Math.pow(0.06, delta))
+
+        // Keep Y at effective floor as rotation changes
+        const cosRxS = Math.cos(group.rotation.x)
+        const sinRxS = Math.abs(Math.sin(group.rotation.x))
+        phys.pos.y = Math.max(0, cosRxS * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxS * RADIUS_APPROX)
+
+        // Slide position
+        phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
+        phys.pos.z = THREE.MathUtils.clamp(phys.pos.z + phys.vel.z * delta, -WALL_BOUND, WALL_BOUND)
+        group.position.copy(phys.pos)
+
+        // Once lateral speed and tumble are both negligible, trigger pending animation
+        const lateralSq = phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z
+        const angSq     = phys.angVel.x * phys.angVel.x + phys.angVel.z * phys.angVel.z
+        if (lateralSq < 0.04 && angSq < 0.04) {
+          if (phys.pendingMode === 'dazed') {
+            group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
+            group.rotation.z = (Math.random() - 0.5) * 0.3
+            setCharMode(uid, 'dazed')
+          } else if (phys.pendingMode === 'mad') {
+            setCharMode(uid, 'mad')
+          } else {
+            setCharMode(uid, null)
+          }
+        }
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
         // Hold the fallen pose — rotation was snapped on landing, no lerp needed
