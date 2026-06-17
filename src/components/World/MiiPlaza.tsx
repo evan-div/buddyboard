@@ -874,6 +874,8 @@ interface PhysState {
   gentleDrop: boolean
   bounceCount: number
   pendingMode?: 'dazed' | 'mad'
+  dazedRx: number
+  dazedRz: number
 }
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
@@ -1043,12 +1045,23 @@ function PhysicsUpdater({
         phys.vel.z *= friction
         phys.vel.y  = 0
 
-        // Continue tumble rotation, also damped by friction
+        // Apply any residual angular velocity, then kill it quickly
         group.rotation.x += phys.angVel.x * delta
         group.rotation.z += phys.angVel.z * delta
         phys.angVel.multiplyScalar(Math.pow(0.06, delta))
 
-        // Keep Y at effective floor as rotation changes
+        // Normalize rotation to [-π, π] so accumulated tumble doesn't grow unbounded
+        if (group.rotation.x >  Math.PI) group.rotation.x -= 2 * Math.PI
+        if (group.rotation.x < -Math.PI) group.rotation.x += 2 * Math.PI
+        if (group.rotation.z >  Math.PI) group.rotation.z -= 2 * Math.PI
+        if (group.rotation.z < -Math.PI) group.rotation.z += 2 * Math.PI
+
+        // Settle toward upright while sliding so character is near rotation=0
+        // when the slide ends — keeps the dazed/mad transition small and smooth.
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 3))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 3))
+
+        // Keep Y at effective floor (formula exact for |rx| < π/2; acceptable for larger angles)
         const cosRxS = Math.cos(group.rotation.x)
         const sinRxS = Math.abs(Math.sin(group.rotation.x))
         phys.pos.y = Math.max(0, cosRxS * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxS * RADIUS_APPROX)
@@ -1063,18 +1076,35 @@ function PhysicsUpdater({
         const angSq     = phys.angVel.x * phys.angVel.x + phys.angVel.z * phys.angVel.z
         if (lateralSq < 0.04 && angSq < 0.04) {
           if (phys.pendingMode === 'dazed') {
-            group.rotation.x = 1.25 + (Math.random() - 0.5) * 0.15
-            group.rotation.z = (Math.random() - 0.5) * 0.3
+            // Store random target angles; dazed handler lerps to them smoothly
+            const dazedRx = 1.25 + (Math.random() - 0.5) * 0.15
+            const dazedRz = (Math.random() - 0.5) * 0.3
             setCharMode(uid, 'dazed')
+            const dp = physicsMap.current.get(uid)
+            if (dp) { dp.dazedRx = dazedRx; dp.dazedRz = dazedRz }
           } else if (phys.pendingMode === 'mad') {
+            // Angular velocity is near zero — snap to upright imperceptibly
+            group.rotation.x = 0
+            group.rotation.z = 0
             setCharMode(uid, 'mad')
           } else {
+            group.rotation.x = 0
+            group.rotation.z = 0
             setCharMode(uid, null)
           }
         }
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
-        // Hold the fallen pose — rotation was snapped on landing, no lerp needed
+        if (phys.modeTimer < 0.4) {
+          // Lerp into fallen pose — avoids snapping and keeps body above floor throughout
+          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, phys.dazedRx, Math.min(1, delta * 10))
+          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, phys.dazedRz, Math.min(1, delta * 10))
+          // Use the correct formula so the body bottom stays at y=0 for any rotation angle
+          const cosD  = Math.cos(group.rotation.x)
+          const floorD = Math.max(0, RADIUS_APPROX - GROUND_Y_APPROX * cosD + CAP_HALF_APPROX * Math.abs(cosD))
+          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorD, Math.min(1, delta * 10))
+          group.position.copy(phys.pos)
+        }
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
@@ -1085,8 +1115,7 @@ function PhysicsUpdater({
         group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 2.5))
         // Also lower Y to ground as rotation straightens (effectiveFloor → 0)
         const cosRxW = Math.cos(group.rotation.x)
-        const sinRxW = Math.abs(Math.sin(group.rotation.x))
-        const floorW = Math.max(0, cosRxW * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxW * RADIUS_APPROX)
+        const floorW = Math.max(0, RADIUS_APPROX - GROUND_Y_APPROX * cosRxW + CAP_HALF_APPROX * Math.abs(cosRxW))
         phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorW, Math.min(1, delta * 3))
         group.position.copy(phys.pos)
         if (phys.modeTimer >= 1.5) {
@@ -1374,6 +1403,8 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
+        dazedRx: 1.25,
+        dazedRz: 0,
       })
       setDragModeMap(prev => {
         const next = new Map(prev)
@@ -1416,6 +1447,8 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
+        dazedRx: 1.25,
+        dazedRz: 0,
       })
       draggingUid.current = pickup.uid
 
