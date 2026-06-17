@@ -9,6 +9,7 @@ import { useBeanDims } from '@/lib/beanDims'
 import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
+import { BeanFace } from '@/components/Avatar/BeanFace'
 
 // ─── Shape-specific body geometry ─────────────────────────────────────────────
 
@@ -984,29 +985,16 @@ export default function MiiCharacter({
         {/* Body */}
         <BeanBody dims={dims} color={bodyColor} gradientMap={gradientMap} />
 
-        {/* Eyes */}
-        <mesh position={[-eyeSpread, eyeY, eyeZ]}>
-          <sphereGeometry args={[0.055, 8, 8]} />
-          <meshBasicMaterial color="white" />
-        </mesh>
-        <mesh position={[-eyeSpread, eyeY, eyeZ + 0.02]}>
-          <sphereGeometry args={[0.032, 6, 6]} />
-          <meshBasicMaterial color="#1a1a1a" />
-        </mesh>
-        <mesh position={[eyeSpread, eyeY, eyeZ]}>
-          <sphereGeometry args={[0.055, 8, 8]} />
-          <meshBasicMaterial color="white" />
-        </mesh>
-        <mesh position={[eyeSpread, eyeY, eyeZ + 0.02]}>
-          <sphereGeometry args={[0.032, 6, 6]} />
-          <meshBasicMaterial color="#1a1a1a" />
-        </mesh>
-
-        {/* Mouth (smile arc) */}
-        <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
-          <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
-          <meshBasicMaterial color="#2a1010" />
-        </mesh>
+        <BeanFace
+          eyeStyle={member.avatar.eyeStyle ?? 'normal'}
+          mouthStyle={member.avatar.mouthStyle ?? 'smile'}
+          eyeSize={member.avatar.eyeSize}
+          eyeSpacing={member.avatar.eyeSpacing}
+          eyeY={eyeY}
+          eyeZ={eyeZ}
+          mouthY={mouthY}
+          mouthZ={mouthZ}
+        />
 
         {/* Left arm — rotated outward (-Z) so it angles away from body */}
         <group ref={leftArmRef} position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>

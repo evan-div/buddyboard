@@ -14,6 +14,7 @@ export type BeanDims = {
   bodyTop: number
   legAttachY: number
   armAttachY: number
+  legSpread: number
   // Shape-specific rendering
   shape: BodyShape
   faceCenterY: number  // Y position of eye center
@@ -29,7 +30,6 @@ function shapeExtras(
 ): Pick<BeanDims, 'bodyTop' | 'armAttachY' | 'faceCenterY' | 'faceZ' | 'armX'> {
   switch (shape) {
     case 'peanut': {
-      // Two spheres: bottom (radius) + top (radius * 0.72) joined by a narrow waist
       const topR = radius * 0.72
       const topY = groundY + capLen * 0.60
       return {
@@ -41,7 +41,6 @@ function shapeExtras(
       }
     }
     case 'gourd': {
-      // Wide bottom sphere + narrow top sphere (pear / bowling-pin)
       const topR = radius * 0.60
       const topY = groundY + capLen * 0.70
       return {
@@ -53,7 +52,6 @@ function shapeExtras(
       }
     }
     case 'strawberry': {
-      // Big round upper sphere + narrow lower cylinder
       const topR = radius * 1.12
       const topY = groundY + capLen * 0.42
       return {
@@ -92,7 +90,7 @@ function computeDims(config: AvatarConfig): BeanDims {
 
   const extras = shapeExtras(shape, radius, capLen, groundY)
 
-  return { radius, capLen, armLen, legLen, groundY, legAttachY, shape, ...extras }
+  return { radius, capLen, armLen, legLen, groundY, legAttachY, legSpread: 1.0, shape, ...extras }
 }
 
 export function useBeanDims(config: AvatarConfig): BeanDims {

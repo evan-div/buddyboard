@@ -9,12 +9,14 @@ export type AvatarConfig = {
   shirtColor: string
   pantsColor: string
   shoesColor: string
-  bodyColor?:  string
-  bodyShape?:  'bean' | 'peanut' | 'gourd' | 'strawberry'
-  bodyHeight?: number
-  bodyWidth?:  number
-  armLength?:  number
-  legLength?:  number
+  bodyColor?:   string
+  bodyShape?:   'bean' | 'peanut' | 'gourd' | 'strawberry'
+  bodyHeight?:  number
+  bodyWidth?:   number
+  armLength?:   number
+  legLength?:   number
+  eyeSize?:     number
+  eyeSpacing?:  number
 }
 
 export type User = {

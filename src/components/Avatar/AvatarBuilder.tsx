@@ -7,6 +7,8 @@ import {
   HAIR_COLORS,
   BACKGROUND_COLORS,
   SHIRT_COLORS,
+  PANTS_COLORS,
+  SHOES_COLORS,
   BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
@@ -216,6 +218,8 @@ function StyleTab({ config, onChange, unlockedItems }: { config: AvatarConfig; o
           })}
         </div>
       </div>
+      <SliderInput label="Eye Size"    value={config.eyeSize    ?? 0.5} onChange={v => onChange({ ...config, eyeSize:    v })} />
+      <SliderInput label="Eye Spacing" value={config.eyeSpacing ?? 0.5} onChange={v => onChange({ ...config, eyeSpacing: v })} />
       <div>
         <SectionLabel>Mouth</SectionLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -261,6 +265,22 @@ function ColorsTab({ config, onChange }: { config: AvatarConfig; onChange: (c: A
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {SHIRT_COLORS.map((hex) => (
             <ColorSwatch key={hex} color={hex} selected={config.shirtColor === hex} onClick={() => onChange({ ...config, shirtColor: hex })} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Pants</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {PANTS_COLORS.map((hex) => (
+            <ColorSwatch key={hex} color={hex} selected={config.pantsColor === hex} onClick={() => onChange({ ...config, pantsColor: hex })} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Shoes</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {SHOES_COLORS.map((hex) => (
+            <ColorSwatch key={hex} color={hex} selected={config.shoesColor === hex} onClick={() => onChange({ ...config, shoesColor: hex })} />
           ))}
         </div>
       </div>
@@ -339,7 +359,7 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
       {/* Preview: show rotating 3D bean on Body/Style tabs, 2D SVG on Look/Colors */}
       {(activeTab === 'body' || activeTab === 'style')
-        ? <div style={{ borderRadius: 16, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff' }}>
+        ? <div style={{ borderRadius: 20, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff', width: 200, height: 200 }}>
             <BeanPreview config={value} />
           </div>
         : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>

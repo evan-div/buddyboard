@@ -7,6 +7,7 @@ import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
 import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig } from '@/lib/types'
+import { BeanFace } from './BeanFace'
 
 function BeanBody({ dims, color, gradient }: {
   dims: BeanDims
@@ -23,7 +24,7 @@ function BeanBody({ dims, color, gradient }: {
 
   if (shape === 'peanut') {
     const botR   = r
-    const botY   = dims.legAttachY + botR  // anchor sphere bottom at legAttachY
+    const botY   = dims.legAttachY + botR
     const topR   = r * 0.72
     const topY   = gY + cl * 0.60
     const waistR = r * 0.30
@@ -43,7 +44,7 @@ function BeanBody({ dims, color, gradient }: {
 
   if (shape === 'gourd') {
     const botR  = r * 1.18
-    const botY  = dims.legAttachY + botR  // anchor sphere bottom at legAttachY
+    const botY  = dims.legAttachY + botR
     const topR  = r * 0.60
     const topY  = gY + cl * 0.70
     const neckR = r * 0.52
@@ -64,7 +65,7 @@ function BeanBody({ dims, color, gradient }: {
   if (shape === 'strawberry') {
     const topR    = r * 1.12
     const topY    = gY + cl * 0.42
-    const coneBot = dims.legAttachY  // extend down to legAttachY so legs connect
+    const coneBot = dims.legAttachY
     const coneH   = Math.max(0.05, topY - topR * 0.55 - coneBot)
     const coneTopR = r * 0.36
     const coneBotR = r * 0.18
@@ -122,11 +123,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 1.1, y - r * 0.5, 0]}>
+        <mesh position={[-r * 0.85, y - r * 0.5, 0]}>
           <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 1.1, y - r * 0.5, 0]}>
+        <mesh position={[r * 0.85, y - r * 0.5, 0]}>
           <boxGeometry args={[r * 0.22, r * 0.7, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -140,11 +141,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 1.1, y - r * 1.0, 0]}>
+        <mesh position={[-r * 0.85, y - r * 1.0, 0]}>
           <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 1.1, y - r * 1.0, 0]}>
+        <mesh position={[r * 0.85, y - r * 1.0, 0]}>
           <boxGeometry args={[r * 0.22, r * 1.4, r * 0.55]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -158,11 +159,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.82, 10, 10]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 1.0, y - r * 0.1, 0]}>
+        <mesh position={[-r * 0.55, y - r * 0.1, r * 0.3]}>
           <sphereGeometry args={[r * 0.35, 8, 8]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 1.0, y - r * 0.1, 0]}>
+        <mesh position={[r * 0.55, y - r * 0.1, r * 0.3]}>
           <sphereGeometry args={[r * 0.35, 8, 8]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -222,11 +223,11 @@ function BeanHair({ style, color, bodyTop, radius }: {
           <sphereGeometry args={[r * 0.88, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[-r * 0.95, y - r * 1.1, 0]}>
+        <mesh position={[-r * 0.3, y - r * 1.1, 0]}>
           <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
           <meshStandardMaterial color={color} />
         </mesh>
-        <mesh position={[r * 0.95, y - r * 1.1, 0]}>
+        <mesh position={[r * 0.3, y - r * 1.1, 0]}>
           <cylinderGeometry args={[r * 0.14, r * 0.1, r * 1.8, 6]} />
           <meshStandardMaterial color={color} />
         </mesh>
@@ -422,7 +423,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
   const mouthY    = dims.faceCenterY - dims.faceZ * 0.38
   const mouthZ    = dims.faceZ
 
-  // Center the character in the preview: shift down so midpoint aligns with camera look-at (y=0)
+  // Center the character in the preview
   const charBottom = dims.legAttachY - dims.legLen - 0.04
   const charCenter = (charBottom + dims.bodyTop) / 2
 
@@ -464,29 +465,16 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       {/* Body */}
       <BeanBody dims={dims} color={bodyColor} gradient={gradient} />
 
-      {/* Eyes */}
-      <mesh position={[-eyeSpread, eyeY, eyeZ]}>
-        <sphereGeometry args={[0.055, 8, 8]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[-eyeSpread, eyeY, eyeZ + 0.02]}>
-        <sphereGeometry args={[0.032, 6, 6]} />
-        <meshBasicMaterial color="#1a1a1a" />
-      </mesh>
-      <mesh position={[eyeSpread, eyeY, eyeZ]}>
-        <sphereGeometry args={[0.055, 8, 8]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[eyeSpread, eyeY, eyeZ + 0.02]}>
-        <sphereGeometry args={[0.032, 6, 6]} />
-        <meshBasicMaterial color="#1a1a1a" />
-      </mesh>
-
-      {/* Mouth */}
-      <mesh position={[0, mouthY, mouthZ]} rotation={[0, 0, Math.PI]}>
-        <torusGeometry args={[0.055, 0.014, 8, 12, Math.PI]} />
-        <meshBasicMaterial color="#2a1010" />
-      </mesh>
+      <BeanFace
+        eyeStyle={config.eyeStyle ?? 'normal'}
+        mouthStyle={config.mouthStyle ?? 'smile'}
+        eyeSize={config.eyeSize}
+        eyeSpacing={config.eyeSpacing}
+        eyeY={eyeY}
+        eyeZ={eyeZ}
+        mouthY={mouthY}
+        mouthZ={mouthZ}
+      />
 
       {/* Left arm — rotated outward (-Z) so it angles away from body */}
       <group position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
@@ -544,7 +532,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
 
 export default function BeanPreview({ config }: { config: AvatarConfig }) {
   return (
-    <div style={{ width: 140, height: 140 }}>
+    <div style={{ width: 200, height: 200 }}>
       <Canvas camera={{ position: [0, 0.85, 3.4], fov: 40 }} gl={{ antialias: true }}>
         <ambientLight intensity={0.7} />
         <directionalLight position={[2, 3, 2]} intensity={0.8} />

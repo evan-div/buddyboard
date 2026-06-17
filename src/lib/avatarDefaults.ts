@@ -113,4 +113,6 @@ export const DEFAULT_AVATAR: AvatarConfig = {
   bodyWidth: 0.5,
   armLength: 0.5,
   legLength: 0.5,
+  eyeSize: 0.5,
+  eyeSpacing: 0.5,
 }
