@@ -1050,16 +1050,11 @@ function PhysicsUpdater({
         group.rotation.z += phys.angVel.z * delta
         phys.angVel.multiplyScalar(Math.pow(0.06, delta))
 
-        // Normalize rotation to [-π, π] so accumulated tumble doesn't grow unbounded
-        if (group.rotation.x >  Math.PI) group.rotation.x -= 2 * Math.PI
-        if (group.rotation.x < -Math.PI) group.rotation.x += 2 * Math.PI
-        if (group.rotation.z >  Math.PI) group.rotation.z -= 2 * Math.PI
-        if (group.rotation.z < -Math.PI) group.rotation.z += 2 * Math.PI
-
-        // Settle toward upright while sliding so character is near rotation=0
-        // when the slide ends — keeps the dazed/mad transition small and smooth.
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 3))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 3))
+        // Clamp tumble to a forward-lean range: character skids with at most 90°
+        // forward tilt, never flips fully over.  This keeps pos.y accurate and
+        // the dazed tip-over short (max 18° to reach 1.25 rad).
+        group.rotation.x = THREE.MathUtils.clamp(group.rotation.x, 0, Math.PI * 0.5)
+        group.rotation.z = THREE.MathUtils.clamp(group.rotation.z, -Math.PI * 0.25, Math.PI * 0.25)
 
         // Keep Y at effective floor (formula exact for |rx| < π/2; acceptable for larger angles)
         const cosRxS = Math.cos(group.rotation.x)
@@ -1095,14 +1090,14 @@ function PhysicsUpdater({
         }
       } else if (phys.mode === 'dazed') {
         phys.modeTimer += delta
-        if (phys.modeTimer < 0.4) {
-          // Lerp into fallen pose — avoids snapping and keeps body above floor throughout
-          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, phys.dazedRx, Math.min(1, delta * 10))
-          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, phys.dazedRz, Math.min(1, delta * 10))
+        if (phys.modeTimer < 0.8) {
+          // Lerp into fallen pose — rate is gentle so it reads as a deliberate tip-over
+          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, phys.dazedRx, Math.min(1, delta * 5))
+          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, phys.dazedRz, Math.min(1, delta * 5))
           // Use the correct formula so the body bottom stays at y=0 for any rotation angle
           const cosD  = Math.cos(group.rotation.x)
           const floorD = Math.max(0, RADIUS_APPROX - GROUND_Y_APPROX * cosD + CAP_HALF_APPROX * Math.abs(cosD))
-          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorD, Math.min(1, delta * 10))
+          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorD, Math.min(1, delta * 5))
           group.position.copy(phys.pos)
         }
         if (phys.modeTimer >= 3.0) {
