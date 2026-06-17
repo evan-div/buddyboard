@@ -344,7 +344,9 @@ function BodyTab({ config, onChange }: { config: AvatarConfig; onChange: (c: Ava
           ))}
         </div>
       </div>
-      <SliderInput label="Height"   value={config.bodyHeight ?? 0.5} onChange={v => onChange({ ...config, bodyHeight: v })} />
+      {(config.bodyShape ?? 'bean') !== 'strawberry' && (
+        <SliderInput label="Height" value={config.bodyHeight ?? 0.5} onChange={v => onChange({ ...config, bodyHeight: v })} />
+      )}
       <SliderInput label="Size"     value={config.bodyWidth  ?? 0.5} onChange={v => onChange({ ...config, bodyWidth:  v })} />
       <SliderInput label="Arms"     value={config.armLength  ?? 0.5} onChange={v => onChange({ ...config, armLength:  v })} />
       <SliderInput label="Legs"     value={config.legLength  ?? 0.5} onChange={v => onChange({ ...config, legLength:  v })} />
