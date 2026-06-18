@@ -4,7 +4,7 @@ import { useRef, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
-import { useBeanDims } from '@/lib/beanDims'
+import { useBeanDims, buildBodyProfile } from '@/lib/beanDims'
 import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig } from '@/lib/types'
 import { BeanFace } from './BeanFace'
@@ -14,78 +14,23 @@ function BeanBody({ dims, color, gradient }: {
   color: string
   gradient: THREE.DataTexture
 }) {
-  const r  = dims.radius
-  const cl = dims.capLen
-  const gY = dims.groundY
-  const shape = dims.shape ?? 'bean'
+  const shape   = dims.shape ?? 'bean'
+  const profile = useMemo(
+    () => buildBodyProfile(shape, dims),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shape, dims.radius, dims.legAttachY, dims.bodyTop],
+  )
 
-  const fillMat    = <meshToonMaterial color={color} gradientMap={gradient} />
-  const outlineMat = <meshBasicMaterial color="black" side={THREE.BackSide} />
-
-  if (shape === 'peanut') {
-    const botR   = r
-    const botY   = dims.legAttachY + botR
-    const topR   = r * 0.72
-    const topY   = gY + cl * 0.60
-    const waistR = r * 0.30
-    const waistH = Math.max(0.04, (topY - topR) - (botY + botR))
-    const waistY = (topY - topR + botY + botR) / 2
-    return (
-      <>
-        <mesh position={[0, botY, 0]} scale={1.06}><sphereGeometry args={[botR, 12, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, botY, 0]}><sphereGeometry args={[botR, 12, 12]} />{fillMat}</mesh>
-        <mesh position={[0, waistY, 0]} scale={1.08}><cylinderGeometry args={[waistR, waistR, waistH + 0.06, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, waistY, 0]}><cylinderGeometry args={[waistR, waistR, waistH + 0.06, 12]} />{fillMat}</mesh>
-        <mesh position={[0, topY, 0]} scale={1.06}><sphereGeometry args={[topR, 12, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 12, 12]} />{fillMat}</mesh>
-      </>
-    )
-  }
-
-  if (shape === 'gourd') {
-    const botR  = r * 1.18
-    const botY  = dims.legAttachY + botR
-    const topR  = r * 0.60
-    const topY  = gY + cl * 0.70
-    const neckR = r * 0.52
-    const neckH = Math.max(0.04, (topY - topR * 0.5) - (botY + botR * 0.55))
-    const neckY = (topY - topR * 0.5 + botY + botR * 0.55) / 2
-    return (
-      <>
-        <mesh position={[0, botY, 0]} scale={1.05}><sphereGeometry args={[botR, 14, 14]} />{outlineMat}</mesh>
-        <mesh position={[0, botY, 0]}><sphereGeometry args={[botR, 14, 14]} />{fillMat}</mesh>
-        <mesh position={[0, neckY, 0]} scale={1.08}><cylinderGeometry args={[neckR, botR * 0.62, neckH, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, neckY, 0]}><cylinderGeometry args={[neckR, botR * 0.62, neckH, 12]} />{fillMat}</mesh>
-        <mesh position={[0, topY, 0]} scale={1.08}><sphereGeometry args={[topR, 12, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 12, 12]} />{fillMat}</mesh>
-      </>
-    )
-  }
-
-  if (shape === 'strawberry') {
-    const tipR = r * 0.26
-    const midR = r * 0.66
-    const topR = r * 1.04
-    const tipY = dims.legAttachY + tipR
-    const midY = tipY + (tipR + midR) * 0.78
-    const topY = midY + (midR + topR) * 0.78
-    return (
-      <>
-        <mesh position={[0, tipY, 0]} scale={1.07}><sphereGeometry args={[tipR, 10, 10]} />{outlineMat}</mesh>
-        <mesh position={[0, tipY, 0]}><sphereGeometry args={[tipR, 10, 10]} />{fillMat}</mesh>
-        <mesh position={[0, midY, 0]} scale={1.05}><sphereGeometry args={[midR, 12, 12]} />{outlineMat}</mesh>
-        <mesh position={[0, midY, 0]}><sphereGeometry args={[midR, 12, 12]} />{fillMat}</mesh>
-        <mesh position={[0, topY, 0]} scale={1.04}><sphereGeometry args={[topR, 14, 14]} />{outlineMat}</mesh>
-        <mesh position={[0, topY, 0]}><sphereGeometry args={[topR, 14, 14]} />{fillMat}</mesh>
-      </>
-    )
-  }
-
-  // bean (capsule)
   return (
     <>
-      <mesh position={[0, gY, 0]} scale={1.06}><capsuleGeometry args={[r, cl, 8, 16]} />{outlineMat}</mesh>
-      <mesh position={[0, gY, 0]}><capsuleGeometry args={[r, cl, 8, 16]} />{fillMat}</mesh>
+      <mesh scale={1.045}>
+        <latheGeometry args={[profile, 32]} />
+        <meshBasicMaterial color="black" side={THREE.BackSide} />
+      </mesh>
+      <mesh>
+        <latheGeometry args={[profile, 32]} />
+        <meshToonMaterial color={color} gradientMap={gradient} />
+      </mesh>
     </>
   )
 }
