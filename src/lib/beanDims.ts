@@ -88,10 +88,10 @@ function computeDims(config: AvatarConfig): BeanDims {
   const ll    = config.legLength  ?? 0.5
   const shape: BodyShape = config.bodyShape ?? 'bean'
 
-  const radius = lerp(0.18, 0.40, bw)
-  const capLen = lerp(0.15, 0.75, shape === 'strawberry' ? 0.5 : bh)
+  const radius = lerp(0.18, 0.52, bw)   // was 0.40
+  const capLen = lerp(0.15, shape === 'strawberry' ? 0.75 : 1.00, shape === 'strawberry' ? 0.5 : bh)  // was 0.75
   const armLen = lerp(0.18, 0.50, al)
-  const legLen = lerp(0.12, 0.38, ll)
+  const legLen = lerp(0.12, 0.55, ll)   // was 0.38
   const groundY    = legLen + 0.07 + radius
   const legAttachY = groundY - capLen * 0.5 - radius * 0.6
 
@@ -118,9 +118,12 @@ export function computeBeanDims(config: AvatarConfig): BeanDims {
 // CatmullRom spline so the silhouette is smooth and organic.
 
 export function buildBodyProfile(shape: BodyShape, dims: BeanDims): THREE.Vector2[] {
-  const botY = dims.legAttachY
+  const legY = dims.legAttachY
+  // Extend below legAttachY so the body has ~r*0.70 radius there,
+  // which fully covers the leg tops (at ±r*0.40) — seamless connection.
+  const botY = legY - dims.radius * 0.30
   const topY = dims.bodyTop
-  const h    = topY - botY
+  const h    = topY - legY  // height from leg-attach to top
   const r    = dims.radius
 
   type CP = [number, number] // [radius, worldY]
@@ -130,45 +133,45 @@ export function buildBodyProfile(shape: BodyShape, dims: BeanDims): THREE.Vector
     case 'peanut':
       cps = [
         [0.005, botY],
-        [r * 0.65, botY + h * 0.09],
-        [r * 1.00, botY + h * 0.26],
-        [r * 0.28, botY + h * 0.50],
-        [r * 0.72, botY + h * 0.74],
-        [r * 0.55, botY + h * 0.91],
+        [r * 0.70, legY],                // wide enough to cover leg tops
+        [r * 1.00, legY + h * 0.26],
+        [r * 0.45, legY + h * 0.50],     // subtle waist (was 0.28)
+        [r * 0.72, legY + h * 0.74],
+        [r * 0.55, legY + h * 0.91],
         [0.005, topY],
       ]
       break
     case 'gourd':
       cps = [
         [0.005, botY],
-        [r * 0.75, botY + h * 0.10],
-        [r * 1.18, botY + h * 0.32],
-        [r * 1.12, botY + h * 0.50],
-        [r * 0.44, botY + h * 0.64],
-        [r * 0.60, botY + h * 0.78],
-        [r * 0.50, botY + h * 0.91],
+        [r * 0.72, legY],
+        [r * 1.18, legY + h * 0.32],
+        [r * 1.12, legY + h * 0.50],
+        [r * 0.44, legY + h * 0.64],
+        [r * 0.60, legY + h * 0.78],
+        [r * 0.50, legY + h * 0.91],
         [0.005, topY],
       ]
       break
     case 'strawberry':
       cps = [
         [0.005, botY],
-        [r * 0.18, botY + h * 0.08],
-        [r * 0.48, botY + h * 0.26],
-        [r * 0.80, botY + h * 0.46],
-        [r * 1.04, botY + h * 0.68],
-        [r * 0.90, botY + h * 0.86],
+        [r * 0.38, legY],                // rounder bottom (was a sharp tip)
+        [r * 0.52, legY + h * 0.22],
+        [r * 0.80, legY + h * 0.44],
+        [r * 1.04, legY + h * 0.66],
+        [r * 0.90, legY + h * 0.84],
         [0.005, topY],
       ]
       break
     default: // bean — organic pill, slightly pear-shaped
       cps = [
         [0.005, botY],
-        [r * 0.60, botY + h * 0.10],
-        [r * 1.00, botY + h * 0.30],
-        [r * 0.98, botY + h * 0.55],
-        [r * 0.82, botY + h * 0.75],
-        [r * 0.52, botY + h * 0.91],
+        [r * 0.70, legY],
+        [r * 1.00, legY + h * 0.22],
+        [r * 0.98, legY + h * 0.50],
+        [r * 0.82, legY + h * 0.72],
+        [r * 0.52, legY + h * 0.90],
         [0.005, topY],
       ]
   }
