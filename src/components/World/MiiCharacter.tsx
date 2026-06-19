@@ -499,6 +499,13 @@ export default function MiiCharacter({
   const celebTimer    = useRef(0)
   const selectedTimer = useRef(0)
   const dragTimer     = useRef(0)
+
+  // Squish spring — position-tracked, no extra props needed
+  const squishY    = useRef(1)
+  const squishVelY = useRef(0)
+  const sqPrevPos  = useRef(new THREE.Vector3())
+  const sqPrevVel  = useRef(new THREE.Vector3())
+  const sqInit     = useRef(false)
   const _ia = Math.random() * Math.PI * 2
   const _ir = 1.0 + Math.random() * (bounds * 0.85)
   const targetPos = useRef(new THREE.Vector3(Math.cos(_ia) * _ir, 0, Math.sin(_ia) * _ir))
@@ -560,7 +567,11 @@ export default function MiiCharacter({
       bodyGroupRef.current.rotation.x = 0
       bodyGroupRef.current.rotation.z = 0
       bodyGroupRef.current.position.set(0, 0, 0)
+      bodyGroupRef.current.scale.set(1, 1, 1)
     }
+    squishY.current    = 1
+    squishVelY.current = 0
+    sqInit.current     = false
     if (dragMode === null && groupRef.current) {
       groupRef.current.rotation.x = 0
       groupRef.current.rotation.z = 0
@@ -581,6 +592,46 @@ export default function MiiCharacter({
   useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
+
+    const dt = Math.min(delta, 1 / 30)
+
+    // ── Squish spring (position-tracked, runs every frame) ────────────────────
+    let sqAccelX = 0, sqAccelZ = 0
+    {
+      if (!sqInit.current) {
+        sqPrevPos.current.copy(group.position)
+        sqPrevVel.current.set(0, 0, 0)
+        sqInit.current = true
+      } else {
+        const vx = (group.position.x - sqPrevPos.current.x) / dt
+        const vy = (group.position.y - sqPrevPos.current.y) / dt
+        const vz = (group.position.z - sqPrevPos.current.z) / dt
+
+        if (dragMode) {
+          sqAccelX = (vx - sqPrevVel.current.x) / dt
+          const ay = (vy - sqPrevVel.current.y) / dt
+          sqAccelZ = (vz - sqPrevVel.current.z) / dt
+          // Vertical G: sudden deceleration (downward stop) compresses; lift stretches
+          squishVelY.current -= ay * 0.0010
+          // Lateral impact (wall hits): horizontal acceleration spike compresses
+          squishVelY.current -= Math.sqrt(sqAccelX * sqAccelX + sqAccelZ * sqAccelZ) * 0.0006
+          squishVelY.current  = THREE.MathUtils.clamp(squishVelY.current, -5, 5)
+        }
+
+        sqPrevPos.current.copy(group.position)
+        sqPrevVel.current.set(vx, vy, vz)
+      }
+
+      // Spring solver: stiffness 18, damping 5.5 → ~0.35 s oscillation
+      squishVelY.current += (-(squishY.current - 1) * 18 - squishVelY.current * 5.5) * dt
+      squishY.current    += squishVelY.current * dt
+      squishY.current     = THREE.MathUtils.clamp(squishY.current, 0.62, 1.38)
+
+      if (bodyGroupRef.current) {
+        const sy = squishY.current
+        bodyGroupRef.current.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy))
+      }
+    }
 
     // ── held ─────────────────────────────────────────────────────────────────
     if (dragMode === 'held') {
@@ -603,8 +654,12 @@ export default function MiiCharacter({
         rightLegRef.current.rotation.z = Math.sin(t * 9.1  + 3.5) * 0.2
       }
       if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = Math.sin(t * 7.3 + 0.5) * 0.1
-        bodyGroupRef.current.rotation.z = Math.sin(t * 6.1 + 1.8) * 0.1
+        const wobX  = Math.sin(t * 7.3 + 0.5) * 0.08
+        const wobZ  = Math.sin(t * 6.1 + 1.8) * 0.08
+        const leanX = THREE.MathUtils.clamp(-sqAccelZ * 0.0018, -0.18, 0.18)
+        const leanZ = THREE.MathUtils.clamp(-sqAccelX * 0.0018, -0.18, 0.18)
+        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, wobX + leanX, 0.15)
+        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, wobZ + leanZ, 0.15)
       }
       return
     }
@@ -637,7 +692,6 @@ export default function MiiCharacter({
     // ── dazed (ragdoll) ──────────────────────────────────────────────────────
     if (dragMode === 'dazed') {
       dragTimer.current += delta
-      const dt = Math.min(delta, 1 / 30)
 
       if (!ragdoll.current.ready) {
         const s  = 7 + Math.random() * 9
