@@ -487,6 +487,7 @@ export default function MiiCharacter({
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
+  const upperBodyRef = useRef<THREE.Group>(null)  // hip-pivot — rotates upper body independently
   const leftArmRef   = useRef<THREE.Group>(null)
   const rightArmRef  = useRef<THREE.Group>(null)
   const leftLegRef   = useRef<THREE.Group>(null)
@@ -569,6 +570,10 @@ export default function MiiCharacter({
       bodyGroupRef.current.position.set(0, 0, 0)
       bodyGroupRef.current.scale.set(1, 1, 1)
     }
+    if (upperBodyRef.current) {
+      upperBodyRef.current.rotation.x = 0
+      upperBodyRef.current.rotation.z = 0
+    }
     squishY.current    = 1
     squishVelY.current = 0
     sqInit.current     = false
@@ -597,6 +602,7 @@ export default function MiiCharacter({
 
     // ── Squish spring (position-tracked, runs every frame) ────────────────────
     let sqAccelX = 0, sqAccelZ = 0
+    let sqVelX   = 0, sqVelZ   = 0   // exposed for hip-pivot lean below
     {
       if (!sqInit.current) {
         sqPrevPos.current.copy(group.position)
@@ -606,6 +612,9 @@ export default function MiiCharacter({
         const vx = (group.position.x - sqPrevPos.current.x) / dt
         const vy = (group.position.y - sqPrevPos.current.y) / dt
         const vz = (group.position.z - sqPrevPos.current.z) / dt
+
+        sqVelX = vx
+        sqVelZ = vz
 
         if (dragMode) {
           sqAccelX = (vx - sqPrevVel.current.x) / dt
@@ -653,13 +662,12 @@ export default function MiiCharacter({
         rightLegRef.current.rotation.x = Math.sin(t * 12.2 + 0.9) * 0.7
         rightLegRef.current.rotation.z = Math.sin(t * 9.1  + 3.5) * 0.2
       }
-      if (bodyGroupRef.current) {
-        const wobX  = Math.sin(t * 7.3 + 0.5) * 0.08
-        const wobZ  = Math.sin(t * 6.1 + 1.8) * 0.08
-        const leanX = THREE.MathUtils.clamp(-sqAccelZ * 0.0018, -0.18, 0.18)
-        const leanZ = THREE.MathUtils.clamp(-sqAccelX * 0.0018, -0.18, 0.18)
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, wobX + leanX, 0.15)
-        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, wobZ + leanZ, 0.15)
+      // Hot-dog wave: upper body lags behind movement direction, pivoting at the hip
+      if (upperBodyRef.current) {
+        const targetX = THREE.MathUtils.clamp( sqVelZ * 0.14, -0.44, 0.44)
+        const targetZ = THREE.MathUtils.clamp(-sqVelX * 0.14, -0.44, 0.44)
+        upperBodyRef.current.rotation.x = THREE.MathUtils.lerp(upperBodyRef.current.rotation.x, targetX, 0.10)
+        upperBodyRef.current.rotation.z = THREE.MathUtils.lerp(upperBodyRef.current.rotation.z, targetZ, 0.10)
       }
       return
     }
@@ -950,7 +958,7 @@ export default function MiiCharacter({
           <meshBasicMaterial color="#000" transparent opacity={0.08} />
         </mesh>
 
-        {/* Left leg */}
+        {/* Left leg — stays in bodyGroupRef so legs don't tilt with the upper body */}
         <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
           <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
@@ -982,69 +990,77 @@ export default function MiiCharacter({
           </mesh>
         </group>
 
-        {/* Body */}
-        <BeanBody dims={dims} color={bodyColor} gradientMap={gradientMap} />
+        {/* Hip pivot: rotating upperBodyRef tilts everything above the hip without moving the legs.
+            The inner group cancels the pivot offset so all child positions stay in world-space. */}
+        <group ref={upperBodyRef} position={[0, dims.legAttachY, 0]}>
+          <group position={[0, -dims.legAttachY, 0]}>
 
-        <BeanFace
-          eyeStyle={member.avatar.eyeStyle ?? 'normal'}
-          mouthStyle={member.avatar.mouthStyle ?? 'smile'}
-          eyeSize={member.avatar.eyeSize}
-          eyeSpacing={member.avatar.eyeSpacing}
-          eyeY={eyeY}
-          eyeZ={eyeZ}
-          mouthY={mouthY}
-          mouthZ={mouthZ}
-        />
+            {/* Body */}
+            <BeanBody dims={dims} color={bodyColor} gradientMap={gradientMap} />
 
-        {/* Left arm — rotated outward (-Z) so it angles away from body */}
-        <group ref={leftArmRef} position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
-          <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
-          </mesh>
-          <mesh position={[0, -dims.armLen / 2, 0]}>
-            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
-          </mesh>
-          <mesh position={[0, -(dims.armLen + 0.04), 0]}>
-            <sphereGeometry args={[0.055, 8, 8]} />
-            <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
-          </mesh>
+            <BeanFace
+              eyeStyle={member.avatar.eyeStyle ?? 'normal'}
+              mouthStyle={member.avatar.mouthStyle ?? 'smile'}
+              eyeSize={member.avatar.eyeSize}
+              eyeSpacing={member.avatar.eyeSpacing}
+              eyeY={eyeY}
+              eyeZ={eyeZ}
+              mouthY={mouthY}
+              mouthZ={mouthZ}
+            />
+
+            {/* Left arm */}
+            <group ref={leftArmRef} position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
+              <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+                <meshBasicMaterial color="black" side={THREE.BackSide} />
+              </mesh>
+              <mesh position={[0, -dims.armLen / 2, 0]}>
+                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+                <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+              </mesh>
+              <mesh position={[0, -(dims.armLen + 0.04), 0]}>
+                <sphereGeometry args={[0.055, 8, 8]} />
+                <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+              </mesh>
+            </group>
+
+            {/* Right arm */}
+            <group ref={rightArmRef} position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
+              <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+                <meshBasicMaterial color="black" side={THREE.BackSide} />
+              </mesh>
+              <mesh position={[0, -dims.armLen / 2, 0]}>
+                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+                <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+              </mesh>
+              <mesh position={[0, -(dims.armLen + 0.04), 0]}>
+                <sphereGeometry args={[0.055, 8, 8]} />
+                <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+              </mesh>
+            </group>
+
+            {/* Hair */}
+            <BeanHair
+              style={member.avatar.hairStyle}
+              color={member.avatar.hairColor}
+              bodyTop={dims.bodyTop}
+              radius={dims.radius}
+            />
+
+            {/* Accessory */}
+            <BeanAccessory
+              style={member.avatar.accessory}
+              bodyTop={dims.bodyTop}
+              radius={dims.radius}
+              eyeY={eyeY}
+              eyeZ={eyeZ}
+              eyeSpread={eyeSpread}
+            />
+
+          </group>
         </group>
-
-        {/* Right arm — rotated outward (+Z) */}
-        <group ref={rightArmRef} position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
-          <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
-          </mesh>
-          <mesh position={[0, -dims.armLen / 2, 0]}>
-            <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
-          </mesh>
-          <mesh position={[0, -(dims.armLen + 0.04), 0]}>
-            <sphereGeometry args={[0.055, 8, 8]} />
-            <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
-          </mesh>
-        </group>
-
-        {/* Hair */}
-        <BeanHair
-          style={member.avatar.hairStyle}
-          color={member.avatar.hairColor}
-          bodyTop={dims.bodyTop}
-          radius={dims.radius}
-        />
-
-        {/* Accessory */}
-        <BeanAccessory
-          style={member.avatar.accessory}
-          bodyTop={dims.bodyTop}
-          radius={dims.radius}
-          eyeY={eyeY}
-          eyeZ={eyeZ}
-          eyeSpread={eyeSpread}
-        />
       </group>
     </group>
   )
