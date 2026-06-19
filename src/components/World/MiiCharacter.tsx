@@ -428,40 +428,41 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
 
 export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad'
 
-// ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
-
-const RD_K  = 9.0
-const RD_D  = 3.6
-const RD_DL = 5.5
-
-function rdSpring(r: number, v: number, rest: number, K: number, D: number, dt: number): [number, number] {
-  const nv = v + (-K * (r - rest) - D * v) * dt
-  return [r + nv * dt, nv]
-}
-
-function rdClamp(r: number, v: number, lo: number, hi: number): [number, number] {
-  if (r < lo) return [lo,  Math.abs(v) * 0.15]
-  if (r > hi) return [hi, -Math.abs(v) * 0.15]
-  return [r, v]
-}
+// ─── Joint Spring Physics ─────────────────────────────────────────────────────
 
 type BoneRV = { r: number; v: number }
-type RagdollRef = {
-  laX: BoneRV; laZ: BoneRV
-  raX: BoneRV; raZ: BoneRV
-  llX: BoneRV; llZ: BoneRV
-  rlX: BoneRV; rlZ: BoneRV
-  byX: BoneRV; byZ: BoneRV
+type JointRig = {
+  lsX: BoneRV; lsZ: BoneRV   // left shoulder
+  rsX: BoneRV; rsZ: BoneRV   // right shoulder
+  leX: BoneRV                  // left elbow
+  reX: BoneRV                  // right elbow
+  lhX: BoneRV; lhZ: BoneRV   // left hip
+  rhX: BoneRV; rhZ: BoneRV   // right hip
+  lkX: BoneRV                  // left knee
+  rkX: BoneRV                  // right knee
+  lakX: BoneRV                 // left ankle
+  rakX: BoneRV                 // right ankle
+  byX: BoneRV; byZ: BoneRV   // body
   ready: boolean
 }
-function makeRagdoll(): RagdollRef {
+function makeRig(): JointRig {
   const z = (): BoneRV => ({ r: 0, v: 0 })
   return {
-    laX: z(), laZ: z(), raX: z(), raZ: z(),
-    llX: z(), llZ: z(), rlX: z(), rlZ: z(),
+    lsX: z(), lsZ: z(), rsX: z(), rsZ: z(),
+    leX: z(), reX: z(),
+    lhX: z(), lhZ: z(), rhX: z(), rhZ: z(),
+    lkX: z(), rkX: z(),
+    lakX: z(), rakX: z(),
     byX: z(), byZ: z(),
     ready: false,
   }
+}
+
+function solveJoint(b: BoneRV, rest: number, K: number, D: number, lo: number, hi: number, dt: number) {
+  b.v += (-(b.r - rest) * K - b.v * D) * dt
+  b.r += b.v * dt
+  if (b.r < lo) { b.r = lo; b.v =  Math.abs(b.v) * 0.15 }
+  if (b.r > hi) { b.r = hi; b.v = -Math.abs(b.v) * 0.15 }
 }
 
 // ─── Main Character ───────────────────────────────────────────────────────────
@@ -485,15 +486,21 @@ export default function MiiCharacter({
   isSelected, onSelect, celebrationType = null,
   dragMode = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
-  const groupRef     = useRef<THREE.Group>(null)
-  const bodyGroupRef = useRef<THREE.Group>(null)
-  const upperBodyRef = useRef<THREE.Group>(null)  // hip-pivot — rotates upper body independently
-  const leftArmRef   = useRef<THREE.Group>(null)
-  const rightArmRef  = useRef<THREE.Group>(null)
-  const leftLegRef   = useRef<THREE.Group>(null)
-  const rightLegRef  = useRef<THREE.Group>(null)
+  const groupRef      = useRef<THREE.Group>(null)
+  const bodyGroupRef  = useRef<THREE.Group>(null)
+  const upperBodyRef  = useRef<THREE.Group>(null)  // hip-pivot
+  const leftArmRef    = useRef<THREE.Group>(null)  // shoulder
+  const rightArmRef   = useRef<THREE.Group>(null)
+  const leftElbowRef  = useRef<THREE.Group>(null)
+  const rightElbowRef = useRef<THREE.Group>(null)
+  const leftLegRef    = useRef<THREE.Group>(null)  // hip
+  const rightLegRef   = useRef<THREE.Group>(null)
+  const leftKneeRef   = useRef<THREE.Group>(null)
+  const rightKneeRef  = useRef<THREE.Group>(null)
+  const leftAnkleRef  = useRef<THREE.Group>(null)
+  const rightAnkleRef = useRef<THREE.Group>(null)
 
-  const ragdoll       = useRef<RagdollRef>(makeRagdoll())
+  const jointRig      = useRef<JointRig>(makeRig())
   const animState     = useRef<AnimState>('walking')
   const idleTimer     = useRef(0)
   const phase         = useRef(Math.random() * Math.PI * 2)
@@ -514,6 +521,12 @@ export default function MiiCharacter({
   const dims      = useBeanDims(member.avatar)
   const skinColor = SKIN_TONES[member.avatar.skinTone]
   const bodyColor = member.avatar.bodyColor ?? member.avatar.shirtColor
+
+  // Two-segment arms and three-joint legs
+  const upperArmLen = dims.armLen * 0.55
+  const forearmLen  = dims.armLen * 0.45
+  const thighLen    = dims.legLen * 0.52
+  const shinLen     = dims.legLen * 0.40
 
   const gradientMap = useMemo(() => {
     const tex = new THREE.DataTexture(new Uint8Array([80, 140, 230]), 3, 1, THREE.RedFormat)
@@ -559,11 +572,17 @@ export default function MiiCharacter({
 
   useEffect(() => {
     dragTimer.current = 0
-    ragdoll.current.ready = false
-    if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
-    if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
-    if (leftLegRef.current)  { leftLegRef.current.rotation.x  = 0; leftLegRef.current.rotation.z  = 0 }
-    if (rightLegRef.current) { rightLegRef.current.rotation.x = 0; rightLegRef.current.rotation.z = 0 }
+    jointRig.current  = makeRig()
+    if (leftArmRef.current)    { leftArmRef.current.rotation.x    = 0; leftArmRef.current.rotation.z    = 0 }
+    if (rightArmRef.current)   { rightArmRef.current.rotation.x   = 0; rightArmRef.current.rotation.z   = 0 }
+    if (leftElbowRef.current)  leftElbowRef.current.rotation.x    = 0
+    if (rightElbowRef.current) rightElbowRef.current.rotation.x   = 0
+    if (leftLegRef.current)    { leftLegRef.current.rotation.x    = 0; leftLegRef.current.rotation.z    = 0 }
+    if (rightLegRef.current)   { rightLegRef.current.rotation.x   = 0; rightLegRef.current.rotation.z   = 0 }
+    if (leftKneeRef.current)   leftKneeRef.current.rotation.x     = 0
+    if (rightKneeRef.current)  rightKneeRef.current.rotation.x    = 0
+    if (leftAnkleRef.current)  leftAnkleRef.current.rotation.x    = 0
+    if (rightAnkleRef.current) rightAnkleRef.current.rotation.x   = 0
     if (bodyGroupRef.current) {
       bodyGroupRef.current.rotation.x = 0
       bodyGroupRef.current.rotation.z = 0
@@ -601,8 +620,8 @@ export default function MiiCharacter({
     const dt = Math.min(delta, 1 / 30)
 
     // ── Squish spring (position-tracked, runs every frame) ────────────────────
-    let sqAccelX = 0, sqAccelZ = 0
-    let sqVelX   = 0, sqVelZ   = 0   // exposed for hip-pivot lean below
+    let sqAccelX = 0, sqAccelY = 0, sqAccelZ = 0
+    let sqVelX   = 0, sqVelZ   = 0
     {
       if (!sqInit.current) {
         sqPrevPos.current.copy(group.position)
@@ -618,11 +637,9 @@ export default function MiiCharacter({
 
         if (dragMode) {
           sqAccelX = (vx - sqPrevVel.current.x) / dt
-          const ay = (vy - sqPrevVel.current.y) / dt
+          sqAccelY = (vy - sqPrevVel.current.y) / dt
           sqAccelZ = (vz - sqPrevVel.current.z) / dt
-          // Vertical G: sudden deceleration (downward stop) compresses; lift stretches
-          squishVelY.current -= ay * 0.0010
-          // Lateral impact (wall hits): horizontal acceleration spike compresses
+          squishVelY.current -= sqAccelY * 0.0010
           squishVelY.current -= Math.sqrt(sqAccelX * sqAccelX + sqAccelZ * sqAccelZ) * 0.0006
           squishVelY.current  = THREE.MathUtils.clamp(squishVelY.current, -5, 5)
         }
@@ -642,154 +659,168 @@ export default function MiiCharacter({
       }
     }
 
-    // ── held ─────────────────────────────────────────────────────────────────
-    if (dragMode === 'held') {
+    // ── Unified joint spring physics (all drag modes) ─────────────────────────
+    if (dragMode) {
       dragTimer.current += delta
-      const t = dragTimer.current
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = Math.sin(t * 11.3 + 0.3) * 0.9
-        leftArmRef.current.rotation.z  = Math.sin(t * 9.7  + 1.1) * 0.5
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = Math.sin(t * 10.1 + 2.2) * 0.9
-        rightArmRef.current.rotation.z = Math.sin(t * 12.5 + 0.7) * 0.5
-      }
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = Math.sin(t * 13.7 + 1.5) * 0.7
-        leftLegRef.current.rotation.z  = Math.sin(t * 8.4  + 2.9) * 0.2
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = Math.sin(t * 12.2 + 0.9) * 0.7
-        rightLegRef.current.rotation.z = Math.sin(t * 9.1  + 3.5) * 0.2
-      }
-      // Hot-dog wave: upper body lags behind movement direction, pivoting at the hip
-      if (upperBodyRef.current) {
-        const targetX = THREE.MathUtils.clamp( sqVelZ * 0.14, -0.44, 0.44)
-        const targetZ = THREE.MathUtils.clamp(-sqVelX * 0.14, -0.44, 0.44)
-        upperBodyRef.current.rotation.x = THREE.MathUtils.lerp(upperBodyRef.current.rotation.x, targetX, 0.10)
-        upperBodyRef.current.rotation.z = THREE.MathUtils.lerp(upperBodyRef.current.rotation.z, targetZ, 0.10)
-      }
-      return
-    }
+      const t   = dragTimer.current
+      const rig = jointRig.current
 
-    // ── flying / sliding ─────────────────────────────────────────────────────
-    if (dragMode === 'flying' || dragMode === 'sliding') {
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -0.25, 0.12)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.4,  0.12)
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -0.25, 0.12)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,   1.4, 0.12)
-      }
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  -0.3, 0.12)
-        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  -0.4, 0.12)
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, -0.3, 0.12)
-        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z,   0.4, 0.12)
-      }
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.1)
-        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.1)
-      }
-      return
-    }
+      // Convert world-space vel/accel to character-local frame (Y-rotation only)
+      const cy = Math.cos(-group.rotation.y)
+      const sy = Math.sin(-group.rotation.y)
+      const lacX = sqAccelX * cy - sqAccelZ * sy
+      const lacZ = sqAccelX * sy + sqAccelZ * cy
+      const lvX  = sqVelX   * cy - sqVelZ   * sy
+      const lvZ  = sqVelX   * sy + sqVelZ   * cy
 
-    // ── dazed (ragdoll) ──────────────────────────────────────────────────────
-    if (dragMode === 'dazed') {
-      dragTimer.current += delta
+      // Default spring params (held: underdamped for squishy feel)
+      let Ks = 12, Ds = 4.2
+      let Ke =  7, De = 3.2
+      let Kh = 14, Dh = 4.8
+      let Kk =  8, Dk = 3.6
+      let Ka =  5, Da = 2.8
 
-      if (!ragdoll.current.ready) {
-        const s  = 7 + Math.random() * 9
-        const rd = ragdoll.current
-        rd.laX = { r: leftArmRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s }
-        rd.laZ = { r: leftArmRef.current?.rotation.z  ?? 0, v: -(0.4 + Math.random() * 0.7) * s }
-        rd.raX = { r: rightArmRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s }
-        rd.raZ = { r: rightArmRef.current?.rotation.z ?? 0, v:  (0.4 + Math.random() * 0.7) * s }
-        rd.llX = { r: leftLegRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
-        rd.llZ = { r: leftLegRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
-        rd.rlX = { r: rightLegRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
-        rd.rlZ = { r: rightLegRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
-        rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
-        rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
-        rd.ready = true
+      // Default rest angles
+      let lsXR = 0, lsZR = 0, rsXR = 0, rsZR = 0
+      let leXR = 0, reXR = 0
+      let lhXR = 0, lhZR = 0, rhXR = 0, rhZR = 0
+      let lkXR = 0, rkXR = 0
+      let lakXR = 0, rakXR = 0
+
+      if (dragMode === 'held') {
+        // Gravity droop: limbs hang behind the hold point
+        lsXR = 0.55;  rsXR = 0.55   // arms swing backward under gravity
+        leXR = 0.65;  reXR = 0.65   // elbows bent, gravity-sagging
+        lhXR = 0.75;  rhXR = 0.75   // legs hang backward
+        lkXR = -0.55; rkXR = -0.55  // knees bent
+        lakXR = 0.30; rakXR = 0.30  // ankles/toes droop
+
+        // Inertia: character acceleration kicks joints (chain reaction: shoulder → elbow etc.)
+        const aS = 0.030
+        rig.lsX.v -= lacZ * aS;          rig.rsX.v -= lacZ * aS
+        rig.lsZ.v -= lacX * aS * 0.65;   rig.rsZ.v -= lacX * aS * 0.65
+        rig.leX.v -= lacZ * aS * 0.55;   rig.reX.v -= lacZ * aS * 0.55
+        rig.lhX.v -= lacZ * aS * 0.80;   rig.rhX.v -= lacZ * aS * 0.80
+        rig.lkX.v -= lacZ * aS * 0.55;   rig.rkX.v -= lacZ * aS * 0.55
+        rig.lakX.v -= lacZ * aS * 0.40;  rig.rakX.v -= lacZ * aS * 0.40
+        // Vertical G: lift = arms droop; drop = arms fly up
+        rig.lsX.v += sqAccelY * 0.008;   rig.rsX.v += sqAccelY * 0.008
+        rig.lhX.v += sqAccelY * 0.006;   rig.rhX.v += sqAccelY * 0.006
+
+      } else if (dragMode === 'flying' || dragMode === 'sliding') {
+        // Arms spread out, legs trail — overdamped for smooth settle
+        lsXR = -0.28; rsXR = -0.28
+        lsZR = -1.35; rsZR =  1.35
+        leXR = -0.35; reXR = -0.35
+        lhXR = -0.30; rhXR = -0.30
+        lhZR = -0.35; rhZR =  0.35
+        lkXR =  0.20; rkXR =  0.20
+        lakXR = -0.20; rakXR = -0.20
+        Ks = 10; Ds = 7.0
+        Ke =  7; De = 6.0
+        Kh = 12; Dh = 7.5
+        Kk =  7; Dk = 6.0
+        Ka =  5; Da = 5.5
+
+      } else if (dragMode === 'dazed') {
+        // Explosive initial velocities → spring return
+        if (!rig.ready) {
+          const s = 8 + Math.random() * 10
+          rig.lsX  = { r: leftArmRef.current?.rotation.x    ?? 0, v:  (Math.random()-0.5) * s       }
+          rig.lsZ  = { r: leftArmRef.current?.rotation.z    ?? 0, v: -(0.5+Math.random()*0.7) * s   }
+          rig.rsX  = { r: rightArmRef.current?.rotation.x   ?? 0, v:  (Math.random()-0.5) * s       }
+          rig.rsZ  = { r: rightArmRef.current?.rotation.z   ?? 0, v:  (0.5+Math.random()*0.7) * s   }
+          rig.leX  = { r: leftElbowRef.current?.rotation.x  ?? 0, v:  (Math.random()-0.5) * s * 1.4 }
+          rig.reX  = { r: rightElbowRef.current?.rotation.x ?? 0, v:  (Math.random()-0.5) * s * 1.4 }
+          rig.lhX  = { r: leftLegRef.current?.rotation.x    ?? 0, v:  (Math.random()-0.5) * s * 0.9 }
+          rig.lhZ  = { r: leftLegRef.current?.rotation.z    ?? 0, v:  (Math.random()-0.5) * s * 0.5 }
+          rig.rhX  = { r: rightLegRef.current?.rotation.x   ?? 0, v:  (Math.random()-0.5) * s * 0.9 }
+          rig.rhZ  = { r: rightLegRef.current?.rotation.z   ?? 0, v:  (Math.random()-0.5) * s * 0.5 }
+          rig.lkX  = { r: leftKneeRef.current?.rotation.x   ?? 0, v:  (Math.random()-0.5) * s * 1.2 }
+          rig.rkX  = { r: rightKneeRef.current?.rotation.x  ?? 0, v:  (Math.random()-0.5) * s * 1.2 }
+          rig.lakX = { r: leftAnkleRef.current?.rotation.x  ?? 0, v:  (Math.random()-0.5) * s * 1.3 }
+          rig.rakX = { r: rightAnkleRef.current?.rotation.x ?? 0, v:  (Math.random()-0.5) * s * 1.3 }
+          rig.byX  = { r: bodyGroupRef.current?.rotation.x  ?? 0, v:  (Math.random()-0.5) * s * 0.6 }
+          rig.byZ  = { r: bodyGroupRef.current?.rotation.z  ?? 0, v:  (Math.random()-0.5) * s * 0.6 }
+          rig.ready = true
+        }
+        Ks = 9;  Ds = 3.6
+        Ke = 6;  De = 3.0
+        Kh = 9;  Dh = 5.5
+        Kk = 7;  Dk = 3.8
+        Ka = 5;  Da = 3.0
+
+      } else if (dragMode === 'waking') {
+        // Damp all joints to rest with body settle wobble
+        Ks = 6;  Ds = 5.5
+        Ke = 4;  De = 5.0
+        Kh = 6;  Dh = 5.5
+        Kk = 4;  Dk = 5.0
+        Ka = 3;  Da = 4.5
+        if (bodyGroupRef.current) {
+          bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
+          bodyGroupRef.current.rotation.z = Math.sin(t * 18) * 0.18 * Math.max(0, 1 - t / 1.5)
+        }
+
+      } else if (dragMode === 'mad') {
+        // Arms raised, legs stomp — snappy high-stiffness springs
+        lsXR = -Math.PI * 0.70; rsXR = -Math.PI * 0.70
+        lsZR = -0.50;           rsZR =  0.50
+        leXR = -0.30;            reXR = -0.30
+        lhXR = Math.sin(t * 8) * 0.45; rhXR = Math.sin(t * 8 + Math.PI) * 0.45
+        Ks = 24; Ds = 7.0
+        Ke = 15; De = 5.5
+        Kh = 24; Dh = 7.5
+        Kk = 15; Dk = 5.5
+        Ka = 10; Da = 5.0
+        if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 9) * 0.06
       }
 
-      const rd = ragdoll.current
-      let r: number, v: number
+      // ── Solve + apply all joints ────────────────────────────────────────────
+      solveJoint(rig.lsX, lsXR, Ks, Ds, -2.8,  2.8, dt)
+      solveJoint(rig.lsZ, lsZR, Ks, Ds, -1.8,  0.8, dt)
+      solveJoint(rig.rsX, rsXR, Ks, Ds, -2.8,  2.8, dt)
+      solveJoint(rig.rsZ, rsZR, Ks, Ds, -0.8,  1.8, dt)
+      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rig.lsX.r; leftArmRef.current.rotation.z  = rig.lsZ.r }
+      if (rightArmRef.current) { rightArmRef.current.rotation.x = rig.rsX.r; rightArmRef.current.rotation.z = rig.rsZ.r }
 
-      ;[r, v] = rdSpring(rd.laX.r, rd.laX.v, 0.28, RD_K, RD_D, dt)
-      ;[rd.laX.r, rd.laX.v] = rdClamp(r, v, -2.6, 2.6)
-      ;[r, v] = rdSpring(rd.laZ.r, rd.laZ.v, -0.22, RD_K, RD_D, dt)
-      ;[rd.laZ.r, rd.laZ.v] = rdClamp(r, v, -1.6, 0.55)
-      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rd.laX.r; leftArmRef.current.rotation.z  = rd.laZ.r }
+      solveJoint(rig.leX, leXR, Ke, De, -0.2,  2.5, dt)
+      solveJoint(rig.reX, reXR, Ke, De, -0.2,  2.5, dt)
+      if (leftElbowRef.current)  leftElbowRef.current.rotation.x  = rig.leX.r
+      if (rightElbowRef.current) rightElbowRef.current.rotation.x = rig.reX.r
 
-      ;[r, v] = rdSpring(rd.raX.r, rd.raX.v, 0.28, RD_K, RD_D, dt)
-      ;[rd.raX.r, rd.raX.v] = rdClamp(r, v, -2.6, 2.6)
-      ;[r, v] = rdSpring(rd.raZ.r, rd.raZ.v,  0.22, RD_K, RD_D, dt)
-      ;[rd.raZ.r, rd.raZ.v] = rdClamp(r, v, -0.55, 1.6)
-      if (rightArmRef.current) { rightArmRef.current.rotation.x = rd.raX.r; rightArmRef.current.rotation.z = rd.raZ.r }
+      solveJoint(rig.lhX, lhXR, Kh, Dh, -0.7,  1.3, dt)
+      solveJoint(rig.lhZ, lhZR, Kh, Dh, -0.7,  0.4, dt)
+      solveJoint(rig.rhX, rhXR, Kh, Dh, -0.7,  1.3, dt)
+      solveJoint(rig.rhZ, rhZR, Kh, Dh, -0.4,  0.7, dt)
+      if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rig.lhX.r; leftLegRef.current.rotation.z  = rig.lhZ.r }
+      if (rightLegRef.current) { rightLegRef.current.rotation.x = rig.rhX.r; rightLegRef.current.rotation.z = rig.rhZ.r }
 
-      ;[r, v] = rdSpring(rd.llX.r, rd.llX.v, 0.04, RD_K, RD_DL, dt)
-      ;[rd.llX.r, rd.llX.v] = rdClamp(r, v, -0.6, 1.0)
-      ;[r, v] = rdSpring(rd.llZ.r, rd.llZ.v, -0.04, RD_K, RD_DL, dt)
-      ;[rd.llZ.r, rd.llZ.v] = rdClamp(r, v, -0.65, 0.25)
-      if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rd.llX.r; leftLegRef.current.rotation.z  = rd.llZ.r }
+      solveJoint(rig.lkX, lkXR, Kk, Dk, -2.3,  0.3, dt)
+      solveJoint(rig.rkX, rkXR, Kk, Dk, -2.3,  0.3, dt)
+      if (leftKneeRef.current)  leftKneeRef.current.rotation.x  = rig.lkX.r
+      if (rightKneeRef.current) rightKneeRef.current.rotation.x = rig.rkX.r
 
-      ;[r, v] = rdSpring(rd.rlX.r, rd.rlX.v, 0.04, RD_K, RD_DL, dt)
-      ;[rd.rlX.r, rd.rlX.v] = rdClamp(r, v, -0.6, 1.0)
-      ;[r, v] = rdSpring(rd.rlZ.r, rd.rlZ.v,  0.04, RD_K, RD_DL, dt)
-      ;[rd.rlZ.r, rd.rlZ.v] = rdClamp(r, v, -0.25, 0.65)
-      if (rightLegRef.current) { rightLegRef.current.rotation.x = rd.rlX.r; rightLegRef.current.rotation.z = rd.rlZ.r }
+      solveJoint(rig.lakX, lakXR, Ka, Da, -0.9, 0.9, dt)
+      solveJoint(rig.rakX, rakXR, Ka, Da, -0.9, 0.9, dt)
+      if (leftAnkleRef.current)  leftAnkleRef.current.rotation.x  = rig.lakX.r
+      if (rightAnkleRef.current) rightAnkleRef.current.rotation.x = rig.rakX.r
 
-      ;[r, v] = rdSpring(rd.byX.r, rd.byX.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.45, 0.45)
-      ;[r, v] = rdSpring(rd.byZ.r, rd.byZ.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.45, 0.45)
-      if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
-
-      return
-    }
-
-    // ── waking ───────────────────────────────────────────────────────────────
-    if (dragMode === 'waking') {
-      dragTimer.current += delta
-      const t = dragTimer.current
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
-        const damp = Math.max(0, 1 - t / 1.5)
-        bodyGroupRef.current.rotation.z = Math.sin(t * 18) * 0.18 * damp
+      // Body tumble spring (dazed / waking)
+      if (dragMode === 'dazed' || dragMode === 'waking') {
+        solveJoint(rig.byX, 0, 8, 4.0, -0.45, 0.45, dt)
+        solveJoint(rig.byZ, 0, 8, 4.0, -0.45, 0.45, dt)
+        if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rig.byX.r; bodyGroupRef.current.rotation.z = rig.byZ.r }
       }
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0, 0.04)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  0, 0.04)
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0, 0.04)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.04)
-      }
-      if (leftLegRef.current)  leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
-      if (rightLegRef.current) rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
-      return
-    }
 
-    // ── mad ──────────────────────────────────────────────────────────────────
-    if (dragMode === 'mad') {
-      dragTimer.current += delta
-      const t = dragTimer.current
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = -Math.PI * 0.7 + Math.sin(t * 12) * 0.15
-        leftArmRef.current.rotation.z  = -0.5
+      // Hot-dog wave: upper body lags behind movement direction (held only)
+      if (dragMode === 'held' && upperBodyRef.current) {
+        const tX = THREE.MathUtils.clamp( lvZ * 0.14, -0.44, 0.44)
+        const tZ = THREE.MathUtils.clamp(-lvX * 0.14, -0.44, 0.44)
+        upperBodyRef.current.rotation.x = THREE.MathUtils.lerp(upperBodyRef.current.rotation.x, tX, 0.10)
+        upperBodyRef.current.rotation.z = THREE.MathUtils.lerp(upperBodyRef.current.rotation.z, tZ, 0.10)
       }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = -Math.PI * 0.7 + Math.sin(t * 13 + 1) * 0.15
-        rightArmRef.current.rotation.z =  0.5
-      }
-      if (leftLegRef.current)  leftLegRef.current.rotation.x  = Math.sin(t * 8) * 0.4
-      if (rightLegRef.current) rightLegRef.current.rotation.x = Math.sin(t * 8 + Math.PI) * 0.4
-      if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 9) * 0.06
+
       return
     }
 
@@ -958,36 +989,60 @@ export default function MiiCharacter({
           <meshBasicMaterial color="#000" transparent opacity={0.08} />
         </mesh>
 
-        {/* Left leg — stays in bodyGroupRef so legs don't tilt with the upper body */}
+        {/* Left leg (hip → knee → ankle) — stays in bodyGroupRef */}
         <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
-          <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+          <mesh position={[0, -thighLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.055, 0.050, thighLen, 8]} />
             <meshBasicMaterial color="black" side={THREE.BackSide} />
           </mesh>
-          <mesh position={[0, -dims.legLen / 2, 0]}>
-            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+          <mesh position={[0, -thighLen / 2, 0]}>
+            <cylinderGeometry args={[0.055, 0.050, thighLen, 8]} />
             <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
           </mesh>
-          <mesh position={[0, -dims.legLen - 0.04, 0.03]}>
-            <sphereGeometry args={[0.068, 8, 8]} />
-            <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
-          </mesh>
+          <group ref={leftKneeRef} position={[0, -thighLen, 0]}>
+            <mesh position={[0, -shinLen / 2, 0]} scale={[1.08, 1.06, 1.08]}>
+              <cylinderGeometry args={[0.048, 0.038, shinLen, 8]} />
+              <meshBasicMaterial color="black" side={THREE.BackSide} />
+            </mesh>
+            <mesh position={[0, -shinLen / 2, 0]}>
+              <cylinderGeometry args={[0.048, 0.038, shinLen, 8]} />
+              <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
+            </mesh>
+            <group ref={leftAnkleRef} position={[0, -shinLen, 0]}>
+              <mesh position={[0, -0.022, 0.038]}>
+                <sphereGeometry args={[0.068, 8, 8]} />
+                <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
+              </mesh>
+            </group>
+          </group>
         </group>
 
-        {/* Right leg */}
+        {/* Right leg (hip → knee → ankle) */}
         <group ref={rightLegRef} position={[dims.radius * 0.4, dims.legAttachY, 0]}>
-          <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+          <mesh position={[0, -thighLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+            <cylinderGeometry args={[0.055, 0.050, thighLen, 8]} />
             <meshBasicMaterial color="black" side={THREE.BackSide} />
           </mesh>
-          <mesh position={[0, -dims.legLen / 2, 0]}>
-            <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
+          <mesh position={[0, -thighLen / 2, 0]}>
+            <cylinderGeometry args={[0.055, 0.050, thighLen, 8]} />
             <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
           </mesh>
-          <mesh position={[0, -dims.legLen - 0.04, 0.03]}>
-            <sphereGeometry args={[0.068, 8, 8]} />
-            <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
-          </mesh>
+          <group ref={rightKneeRef} position={[0, -thighLen, 0]}>
+            <mesh position={[0, -shinLen / 2, 0]} scale={[1.08, 1.06, 1.08]}>
+              <cylinderGeometry args={[0.048, 0.038, shinLen, 8]} />
+              <meshBasicMaterial color="black" side={THREE.BackSide} />
+            </mesh>
+            <mesh position={[0, -shinLen / 2, 0]}>
+              <cylinderGeometry args={[0.048, 0.038, shinLen, 8]} />
+              <meshToonMaterial color={member.avatar.pantsColor ?? '#1e293b'} gradientMap={gradientMap} />
+            </mesh>
+            <group ref={rightAnkleRef} position={[0, -shinLen, 0]}>
+              <mesh position={[0, -0.022, 0.038]}>
+                <sphereGeometry args={[0.068, 8, 8]} />
+                <meshToonMaterial color={member.avatar.shoesColor ?? '#111'} gradientMap={gradientMap} />
+              </mesh>
+            </group>
+          </group>
         </group>
 
         {/* Hip pivot: rotating upperBodyRef tilts everything above the hip without moving the legs.
@@ -1009,36 +1064,56 @@ export default function MiiCharacter({
               mouthZ={mouthZ}
             />
 
-            {/* Left arm */}
+            {/* Left arm (shoulder → elbow → hand) */}
             <group ref={leftArmRef} position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
-              <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+              <mesh position={[0, -upperArmLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+                <cylinderGeometry args={[0.04, 0.037, upperArmLen, 8]} />
                 <meshBasicMaterial color="black" side={THREE.BackSide} />
               </mesh>
-              <mesh position={[0, -dims.armLen / 2, 0]}>
-                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+              <mesh position={[0, -upperArmLen / 2, 0]}>
+                <cylinderGeometry args={[0.04, 0.037, upperArmLen, 8]} />
                 <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
               </mesh>
-              <mesh position={[0, -(dims.armLen + 0.04), 0]}>
-                <sphereGeometry args={[0.055, 8, 8]} />
-                <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
-              </mesh>
+              <group ref={leftElbowRef} position={[0, -upperArmLen, 0]}>
+                <mesh position={[0, -forearmLen / 2, 0]} scale={[1.08, 1.06, 1.08]}>
+                  <cylinderGeometry args={[0.036, 0.028, forearmLen, 8]} />
+                  <meshBasicMaterial color="black" side={THREE.BackSide} />
+                </mesh>
+                <mesh position={[0, -forearmLen / 2, 0]}>
+                  <cylinderGeometry args={[0.036, 0.028, forearmLen, 8]} />
+                  <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+                </mesh>
+                <mesh position={[0, -(forearmLen + 0.038), 0]}>
+                  <sphereGeometry args={[0.055, 8, 8]} />
+                  <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+                </mesh>
+              </group>
             </group>
 
-            {/* Right arm */}
+            {/* Right arm (shoulder → elbow → hand) */}
             <group ref={rightArmRef} position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
-              <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
-                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+              <mesh position={[0, -upperArmLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
+                <cylinderGeometry args={[0.04, 0.037, upperArmLen, 8]} />
                 <meshBasicMaterial color="black" side={THREE.BackSide} />
               </mesh>
-              <mesh position={[0, -dims.armLen / 2, 0]}>
-                <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
+              <mesh position={[0, -upperArmLen / 2, 0]}>
+                <cylinderGeometry args={[0.04, 0.037, upperArmLen, 8]} />
                 <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
               </mesh>
-              <mesh position={[0, -(dims.armLen + 0.04), 0]}>
-                <sphereGeometry args={[0.055, 8, 8]} />
-                <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
-              </mesh>
+              <group ref={rightElbowRef} position={[0, -upperArmLen, 0]}>
+                <mesh position={[0, -forearmLen / 2, 0]} scale={[1.08, 1.06, 1.08]}>
+                  <cylinderGeometry args={[0.036, 0.028, forearmLen, 8]} />
+                  <meshBasicMaterial color="black" side={THREE.BackSide} />
+                </mesh>
+                <mesh position={[0, -forearmLen / 2, 0]}>
+                  <cylinderGeometry args={[0.036, 0.028, forearmLen, 8]} />
+                  <meshToonMaterial color={bodyColor} gradientMap={gradientMap} />
+                </mesh>
+                <mesh position={[0, -(forearmLen + 0.038), 0]}>
+                  <sphereGeometry args={[0.055, 8, 8]} />
+                  <meshToonMaterial color={skinColor} gradientMap={gradientMap} />
+                </mesh>
+              </group>
             </group>
 
             {/* Hair */}
