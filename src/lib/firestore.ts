@@ -18,7 +18,8 @@ import {
   increment,
   serverTimestamp,
 } from 'firebase/firestore'
-import { db } from './firebase'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, storage } from './firebase'
 import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost, WallComment } from './types'
 import { BADGE_DEFS } from './badges'
 
@@ -436,7 +437,8 @@ export async function giveOrTakePoints(
         reason: alloc.reason,
         createdAt: serverTimestamp(),
       }
-      if (alloc.caption) txData.caption = alloc.caption
+      if (alloc.caption)   txData.caption   = alloc.caption
+      if (alloc.photoUrl)  txData.photoUrl  = alloc.photoUrl
       transaction.set(txRef, txData)
 
       // Create persistent notification for recipient
@@ -849,4 +851,13 @@ export async function purchaseItem(uid: string, itemId: string, cost: number): P
     if (unlocked.includes(itemId)) throw new Error('Already owned')
     tx.update(userRef, { coins: increment(-cost), unlockedItems: arrayUnion(itemId) })
   })
+}
+
+// ─── Photo upload ─────────────────────────────────────────────────────────────
+
+export async function uploadTransactionPhoto(groupId: string, file: File): Promise<string> {
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const storageRef = ref(storage, `transaction-photos/${groupId}/${name}`)
+  await uploadBytes(storageRef, file, { contentType: file.type })
+  return getDownloadURL(storageRef)
 }

@@ -77,6 +77,7 @@ export type Transaction = {
   points: number
   reason: string
   caption?: string
+  photoUrl?: string
   reactions?: Record<string, string[]>
   createdAt: Date
 }
@@ -86,6 +87,7 @@ export type PointsAllocation = {
   points: number
   reason: string
   caption?: string
+  photoUrl?: string
 }
 
 export type NotificationType =

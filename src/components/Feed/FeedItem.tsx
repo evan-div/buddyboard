@@ -26,6 +26,7 @@ export default function FeedItem({ transaction, members, rotation = 0, currentUi
   const reactions = transaction.reactions ?? {}
   const hasReactions = Object.values(reactions).some((uids) => uids.length > 0)
   const [showPicker, setShowPicker] = useState(false)
+  const [showPhoto, setShowPhoto]   = useState(false)
 
   function handleCardClick() {
     if (onReact) setShowPicker((p) => !p)
@@ -156,11 +157,44 @@ export default function FeedItem({ transaction, members, rotation = 0, currentUi
 
       {/* Caption */}
       {transaction.caption && (
-        <p style={{ fontSize: '10px', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: transaction.reason ? '14px' : '4px', marginBottom: 0 }}>
+        <p style={{ fontSize: '10px', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: transaction.reason ? '14px' : '4px', marginBottom: transaction.photoUrl ? 6 : 0 }}>
           {transaction.caption}
         </p>
       )}
+
+      {/* Photo evidence */}
+      {transaction.photoUrl && (
+        <img
+          src={transaction.photoUrl}
+          alt="Evidence"
+          onClick={e => { e.stopPropagation(); setShowPhoto(true) }}
+          style={{
+            width: '100%', borderRadius: 10, maxHeight: 150,
+            objectFit: 'cover', display: 'block', cursor: 'zoom-in',
+            marginTop: (!transaction.caption && transaction.reason) ? 12 : 0,
+          }}
+        />
+      )}
     </div>
+
+    {/* Photo lightbox */}
+    {showPhoto && transaction.photoUrl && (
+      <div
+        onClick={e => { e.stopPropagation(); setShowPhoto(false) }}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.88)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'zoom-out',
+        }}
+      >
+        <img
+          src={transaction.photoUrl}
+          alt="Evidence"
+          style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 14, objectFit: 'contain' }}
+        />
+      </div>
+    )}
 
     {/* Emoji picker — appears below the card */}
     {showPicker && (

@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, uploadTransactionPhoto } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
 import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase } from '@/lib/types'
@@ -309,16 +309,24 @@ function StatsView({ member, groupId, onBack }: { member: GroupMember; groupId: 
 }
 
 function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake, presets, mobile, onClose, onSubmitted }: CardProps) {
-  const [view, setView]       = useState<'presets' | 'confirm' | 'custom' | 'stats'>('presets')
-  const [mode, setMode]       = useState<'give' | 'take'>('give')
-  const [page, setPage]       = useState(0)
+  const [view, setView]         = useState<'presets' | 'confirm' | 'custom' | 'stats'>('presets')
+  const [mode, setMode]         = useState<'give' | 'take'>('give')
+  const [page, setPage]         = useState(0)
   const [selected, setSelected] = useState<PlazaPreset | null>(null)
-  const [points, setPoints]   = useState(0)
-  const [emoji, setEmoji]     = useState('')
-  const [reason, setReason]   = useState('')
-  const [caption, setCaption] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
+  const [points, setPoints]     = useState(0)
+  const [emoji, setEmoji]       = useState('')
+  const [reason, setReason]     = useState('')
+  const [caption, setCaption]   = useState('')
+  const [photoFile, setPhotoFile]       = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+
+  // Revoke blob URL when it changes or component unmounts
+  useEffect(() => {
+    const url = photoPreview
+    return () => { if (url) URL.revokeObjectURL(url) }
+  }, [photoPreview])
 
   const allPresets   = presets?.length ? presets : DEFAULT_PRESETS
   const modePresets  = allPresets.filter(p => mode === 'give' ? p.points > 0 : p.points < 0)
@@ -362,6 +370,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
         reason: fullReason,
       }
       if (caption.trim()) alloc.caption = caption.trim()
+      if (photoFile) alloc.photoUrl = await uploadTransactionPhoto(groupId, photoFile)
       await giveOrTakePoints(groupId, currentUid, [alloc])
       onSubmitted(mode === 'give' ? 'celebrate' : 'shame')
       onClose()
@@ -603,10 +612,50 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
               width: '100%', boxSizing: 'border-box',
               border: '1.5px solid #e5e7eb', borderRadius: 10,
               padding: '8px 10px', fontSize: 11, color: '#6b7280',
-              outline: 'none', marginBottom: 11, fontFamily: 'inherit',
+              outline: 'none', marginBottom: 8, fontFamily: 'inherit',
               fontStyle: 'italic',
             }}
           />
+
+          {/* Photo evidence */}
+          {photoPreview ? (
+            <div style={{ position: 'relative', marginBottom: 11 }}>
+              <img
+                src={photoPreview}
+                alt="Evidence preview"
+                style={{ width: '100%', borderRadius: 10, maxHeight: 130, objectFit: 'cover', display: 'block' }}
+              />
+              <button
+                onClick={() => { setPhotoFile(null); setPhotoPreview(null) }}
+                style={{
+                  position: 'absolute', top: 5, right: 5,
+                  width: 22, height: 22, borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.55)', border: 'none',
+                  color: '#fff', cursor: 'pointer', fontSize: 11,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >✕</button>
+            </div>
+          ) : (
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 5, marginBottom: 11,
+              cursor: 'pointer', color: '#9ca3af', fontSize: 11, fontWeight: 600,
+            }}>
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  setPhotoFile(f)
+                  setPhotoPreview(URL.createObjectURL(f))
+                  e.target.value = ''
+                }}
+              />
+              📷 Add photo evidence
+            </label>
+          )}
 
           {error && <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8 }}>{error}</div>}
 
