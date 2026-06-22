@@ -36,7 +36,8 @@ import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/P
 import { requestPushPermission } from '@/lib/fcm'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
 
-const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
+const MiiPlaza   = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
+const GamesHub   = dynamic(() => import('@/components/Games/GamesHub'), { ssr: false })
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
 const AdminPanel = dynamic(() => import('@/components/Group/AdminPanel'), { ssr: false })
@@ -852,7 +853,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState<Group | null>(null)
   const [members, setMembers] = useState<GroupMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court' | 'wall'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court' | 'wall' | 'games'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
@@ -1175,6 +1176,7 @@ export default function GroupPage() {
                       { key: 'leaderboard', label: 'Ranks',  badge: 0               },
                       { key: 'court',       label: 'Court',  badge: activeCaseCount  },
                       { key: 'wall',        label: 'Wall',   badge: 0               },
+                      { key: 'games',       label: 'Games',  badge: 0               },
                     ] as const
                   ).map(({ key, label, badge }) => (
                     <button
@@ -1315,6 +1317,15 @@ export default function GroupPage() {
                   groupId={groupId}
                   currentUid={user.uid}
                   currentMember={members.find((m) => m.uid === user.uid) ?? null}
+                />
+              )}
+              {activeTab === 'games' && (
+                <GamesHub
+                  groupId={groupId}
+                  currentUid={user.uid}
+                  displayName={members.find(m => m.uid === user.uid)?.displayName ?? 'You'}
+                  members={members}
+                  timezone={group.timezone}
                 />
               )}
             </div>

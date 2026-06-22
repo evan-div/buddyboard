@@ -141,6 +141,18 @@ export type WallComment = {
   createdAt: Date
 }
 
+export type GameScore = {
+  id: string
+  game: string
+  uid: string
+  displayName: string
+  score: number        // lower = better for golf (strokes)
+  date: string         // YYYY-MM-DD
+  groupId: string
+  completedAt: Date
+  pointsAwarded: boolean
+}
+
 export type CaseStatus =
   | 'pending_review'
   | 'accepted'
