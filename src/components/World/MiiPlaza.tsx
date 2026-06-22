@@ -901,13 +901,16 @@ function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
 
 // ─── Physics / drag constants ─────────────────────────────────────────────────
 
-const HOLD_HEIGHT = 1.8
-const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
-const GRAVITY     = 38
-const FLING_MIN   = 4.0
-const WALL_BOUND  = FSIZE / 2 - 0.5
-const IMPACT_DAZE = 6
-const IMPACT_MAD  = 4
+const HOLD_HEIGHT    = 1.8
+const HEAD_HEIGHT    = 1.5   // head center is 1.5 units above group origin (feet)
+const GRAVITY        = 38
+const FLING_MIN      = 4.0
+const WALL_BOUND     = FSIZE / 2 - 0.5
+const IMPACT_DAZE    = 6
+const IMPACT_MAD     = 4
+const BALL_R         = 0.35
+const CHAR_BODY_R    = 0.36   // pin collision radius (capsule radius + fudge)
+const BALL_SPEED_MIN = 1.5    // min cursor speed to launch a roll
 // Approximate bean geometry constants for effective ground-floor calculation.
 // These match the default dims from useBeanDims (bodyWidth=0.5, bodyHeight=0.5).
 const GROUND_Y_APPROX  = 0.65   // body center height above group root
@@ -1376,6 +1379,153 @@ function WallFlashPlanes({ wallFlashRef }: { wallFlashRef: React.RefObject<numbe
   )
 }
 
+// ─── Bowling ─────────────────────────────────────────────────────────────────
+
+type BowlingPhase = 'idle' | 'ready' | 'rolling' | 'done'
+
+function getPinPositions(n: number): [number, number][] {
+  const pts: [number, number][] = []
+  let row = 0
+  while (pts.length < n) {
+    for (let i = 0; i < row + 1 && pts.length < n; i++) {
+      pts.push([(i - row / 2) * 1.15, -4 - row * 1.0])
+    }
+    row++
+  }
+  return pts
+}
+
+interface BowlingBallProps {
+  phase:         BowlingPhase
+  setPhase:      (p: BowlingPhase) => void
+  ballHeldRef:   React.MutableRefObject<boolean>
+  ballCursorVel: React.MutableRefObject<THREE.Vector3>
+  charGroups:    React.MutableRefObject<Map<string, THREE.Group>>
+  physicsMap:    React.MutableRefObject<Map<string, PhysState>>
+  setCharMode:   (uid: string, mode: DragMode | null) => void
+  knockedRef:    React.MutableRefObject<Set<string>>
+  onKnock:       (uid: string) => void
+  bowlerUid:     string
+  draggingUid:   React.MutableRefObject<string | null>
+}
+
+function BowlingBall({
+  phase, setPhase, ballHeldRef, ballCursorVel,
+  charGroups, physicsMap, setCharMode, knockedRef, onKnock,
+  bowlerUid, draggingUid,
+}: BowlingBallProps) {
+  const meshRef    = useRef<THREE.Mesh>(null)
+  const { pointer, camera } = useThree()
+  const raycaster  = useMemo(() => new THREE.Raycaster(), [])
+  const ballPlane  = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), -BALL_R), [])
+  const hitPt      = useMemo(() => new THREE.Vector3(), [])
+  const posRef     = useRef(new THREE.Vector3(0, BALL_R, 6))
+  const velRef     = useRef(new THREE.Vector3())
+  const prevCursor = useRef(new THREE.Vector3())
+  const settleT    = useRef(0)
+
+  useEffect(() => {
+    if (phase === 'ready') {
+      posRef.current.set(0, BALL_R, 6)
+      velRef.current.set(0, 0, 0)
+      settleT.current = 0
+    }
+  }, [phase])
+
+  useFrame((_, dt) => {
+    const mesh = meshRef.current
+    if (!mesh) return
+
+    if (ballHeldRef.current && phase === 'ready') {
+      raycaster.setFromCamera(pointer, camera)
+      if (raycaster.ray.intersectPlane(ballPlane, hitPt)) {
+        const dvx = (hitPt.x - prevCursor.current.x) / dt
+        const dvz = (hitPt.z - prevCursor.current.z) / dt
+        ballCursorVel.current.x = ballCursorVel.current.x * 0.6 + dvx * 0.4
+        ballCursorVel.current.z = ballCursorVel.current.z * 0.6 + dvz * 0.4
+        prevCursor.current.copy(hitPt)
+        posRef.current.set(
+          THREE.MathUtils.clamp(hitPt.x, -WALL_BOUND, WALL_BOUND),
+          BALL_R,
+          THREE.MathUtils.clamp(hitPt.z, -WALL_BOUND, WALL_BOUND),
+        )
+      }
+    } else if (phase === 'rolling') {
+      velRef.current.y -= GRAVITY * dt
+      posRef.current.addScaledVector(velRef.current, dt)
+
+      if (posRef.current.y < BALL_R) { posRef.current.y = BALL_R; velRef.current.y = 0 }
+
+      if (posRef.current.x >  WALL_BOUND) { posRef.current.x =  WALL_BOUND; velRef.current.x *= -0.45 }
+      else if (posRef.current.x < -WALL_BOUND) { posRef.current.x = -WALL_BOUND; velRef.current.x *= -0.45 }
+      if (posRef.current.z >  WALL_BOUND) { posRef.current.z =  WALL_BOUND; velRef.current.z *= -0.45 }
+      else if (posRef.current.z < -WALL_BOUND) { posRef.current.z = -WALL_BOUND; velRef.current.z *= -0.45 }
+
+      const fr = Math.pow(0.88, dt * 60)
+      velRef.current.x *= fr
+      velRef.current.z *= fr
+
+      const bp = posRef.current
+      charGroups.current.forEach((group, uid) => {
+        if (uid === bowlerUid || knockedRef.current.has(uid)) return
+        const dx  = bp.x - group.position.x
+        const dz  = bp.z - group.position.z
+        const d2D = Math.sqrt(dx * dx + dz * dz)
+        if (d2D < BALL_R + CHAR_BODY_R) {
+          onKnock(uid)
+          const spd = velRef.current.length()
+          const nx = d2D > 0.001 ? dx / d2D : 0
+          const nz = d2D > 0.001 ? dz / d2D : 1
+          setCharMode(uid, 'flying')
+          const ps = physicsMap.current.get(uid)
+          if (ps) {
+            ps.vel.set(
+              -nx * spd * 1.5 + velRef.current.x * 0.45,
+               2.5 + spd * 0.38,
+              -nz * spd * 1.5 + velRef.current.z * 0.45,
+            )
+            ps.angVel.set(
+              (Math.random() - 0.5) * spd * 0.55,
+              (Math.random() - 0.5) * spd * 0.30,
+              (Math.random() - 0.5) * spd * 0.65,
+            )
+          }
+          velRef.current.x *= 0.55
+          velRef.current.z *= 0.55
+        }
+      })
+
+      const ls = Math.sqrt(velRef.current.x ** 2 + velRef.current.z ** 2)
+      if (ls < 0.25) {
+        settleT.current += dt
+        if (settleT.current > 0.9) setPhase('done')
+      } else {
+        settleT.current = 0
+      }
+    }
+
+    mesh.position.copy(posRef.current)
+  })
+
+  if (phase === 'idle') return null
+
+  return (
+    <mesh
+      ref={meshRef}
+      onPointerDown={(e) => {
+        if (phase !== 'ready' || draggingUid.current || ballHeldRef.current) return
+        e.stopPropagation()
+        ballHeldRef.current = true
+        ballCursorVel.current.set(0, 0, 0)
+        prevCursor.current.copy(posRef.current)
+      }}
+    >
+      <sphereGeometry args={[BALL_R, 20, 16]} />
+      <meshStandardMaterial color="#110a2e" roughness={0.22} metalness={0.45} />
+    </mesh>
+  )
+}
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -1388,6 +1538,9 @@ function Scene({
   animatingUid,
   animationType,
   mobile,
+  bowlingActive,
+  currentUid,
+  onBowlingDone,
 }: {
   members: GroupMember[]
   selectedUid: string | null
@@ -1398,6 +1551,9 @@ function Scene({
   animatingUid: string | null
   animationType: 'celebrate' | 'shame' | null
   mobile: boolean
+  bowlingActive: boolean
+  currentUid: string
+  onBowlingDone: (knocked: string[]) => void
 }) {
   const orbitRef     = useRef<any>(null)
   const { gl }       = useThree()
@@ -1411,6 +1567,62 @@ function Scene({
   const dragCursor    = useRef(new THREE.Vector3())
   const dragCursorVel = useRef(new THREE.Vector3())
   const [dragModeMap, setDragModeMap] = useState<Map<string, DragMode>>(new Map())
+
+  // ── Bowling ─────────────────────────────────────────────────────────────────
+  const [bowlingPhase, setBowlingPhaseState] = useState<BowlingPhase>('idle')
+  const bowlingPhaseRef = useRef<BowlingPhase>('idle')
+  const knockedUidsRef  = useRef<Set<string>>(new Set())
+  const [knockedCount, setKnockedCount] = useState(0)
+  const ballHeldRef     = useRef(false)
+  const ballCursorVel   = useRef(new THREE.Vector3())
+  const bowlingActiveRef = useRef(bowlingActive)
+  bowlingActiveRef.current = bowlingActive
+  const onBowlingDoneRef = useRef(onBowlingDone)
+  onBowlingDoneRef.current = onBowlingDone
+
+  function setBowlingPhase(p: BowlingPhase) {
+    bowlingPhaseRef.current = p
+    setBowlingPhaseState(p)
+  }
+
+  // Start/stop bowling when prop flips
+  useEffect(() => {
+    if (bowlingActive) {
+      const pinMems = members.filter(m => m.uid !== currentUid)
+      const positions = getPinPositions(pinMems.length)
+      pinMems.forEach((m, i) => {
+        setCharMode(m.uid, null)
+        const g = charGroups.current.get(m.uid)
+        if (g && positions[i]) {
+          g.position.set(positions[i][0], 0, positions[i][1])
+          g.rotation.set(0, Math.PI, 0)  // pins face the bowler
+        }
+      })
+      knockedUidsRef.current.clear()
+      setKnockedCount(0)
+      ballHeldRef.current = false
+      ballCursorVel.current.set(0, 0, 0)
+      setBowlingPhase('ready')
+    } else {
+      setBowlingPhase('idle')
+      knockedUidsRef.current.clear()
+      setKnockedCount(0)
+      // Gently wake up any knocked/flying members
+      physicsMap.current.forEach((phys, uid) => {
+        if (phys.mode === 'dazed' || phys.mode === 'flying' || phys.mode === 'sliding') {
+          setCharMode(uid, 'waking')
+        }
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bowlingActive])
+
+  // Notify parent when ball settles
+  useEffect(() => {
+    if (bowlingPhase === 'done') {
+      onBowlingDoneRef.current(Array.from(knockedUidsRef.current))
+    }
+  }, [bowlingPhase])
 
   // Spawn positions keyed by uid — assigned once per member, never changed.
   // Indexing by array position (i) would teleport characters when Firestore
@@ -1459,7 +1671,7 @@ function Scene({
   }, [])
 
   const handlePickupStart = useCallback((member: GroupMember) => {
-    if (cameraLocked || draggingUid.current) return
+    if (cameraLocked || draggingUid.current || bowlingActiveRef.current) return
 
     // Always use the character's live position, not the stale spawn position
     const group = charGroups.current.get(member.uid)
@@ -1505,6 +1717,19 @@ function Scene({
   }, [cameraLocked])
 
   const handlePointerUp = useCallback(() => {
+    // Ball release — must come before character logic
+    if (ballHeldRef.current) {
+      ballHeldRef.current = false
+      const spd = ballCursorVel.current.length()
+      if (spd >= BALL_SPEED_MIN) {
+        bowlingPhaseRef.current = 'rolling'
+        setBowlingPhaseState('rolling')
+      }
+      if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null }
+      pendingPickup.current = null
+      return
+    }
+
     // Clear pending hold timer
     if (holdTimer.current) {
       clearTimeout(holdTimer.current)
@@ -1686,6 +1911,22 @@ function Scene({
         wallFlashRef={wallFlashRef}
       />
       <WallFlashPlanes wallFlashRef={wallFlashRef} />
+      <BowlingBall
+        phase={bowlingPhase}
+        setPhase={setBowlingPhase}
+        ballHeldRef={ballHeldRef}
+        ballCursorVel={ballCursorVel}
+        charGroups={charGroups}
+        physicsMap={physicsMap}
+        setCharMode={setCharMode}
+        knockedRef={knockedUidsRef}
+        onKnock={(uid) => {
+          knockedUidsRef.current.add(uid)
+          setKnockedCount(c => c + 1)
+        }}
+        bowlerUid={currentUid}
+        draggingUid={draggingUid}
+      />
       <OrbitControls
         ref={orbitRef}
         enabled={!cameraLocked}
@@ -1746,6 +1987,41 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
+
+  // ── Bowling ──────────────────────────────────────────────────────────────────
+  const [bowlingActive, setBowlingActive]   = useState(false)
+  const [bowlingResults, setBowlingResults] = useState<string[] | null>(null)
+  const [scoringBowling, setScoringBowling] = useState(false)
+
+  const handleBowlingDone = useCallback((knocked: string[]) => {
+    setBowlingResults(knocked)
+  }, [])
+
+  async function applyBowlingScore(knocked: string[]) {
+    if (knocked.length === 0) { setBowlingActive(false); setBowlingResults(null); return }
+    setScoringBowling(true)
+    try {
+      await giveOrTakePoints(groupId, currentUid,
+        knocked.map(uid => ({ toUid: uid, points: -5, reason: '🎳 Knocked down in bowling!' }))
+      )
+      onPointsSubmitted()
+    } catch { /* silent */ }
+    setScoringBowling(false)
+    setBowlingActive(false)
+    setBowlingResults(null)
+  }
+
+  function startBowling() {
+    setSelectedMember(null)
+    setFocusPos(null)
+    setBowlingResults(null)
+    setBowlingActive(true)
+  }
+
+  function stopBowling() {
+    setBowlingActive(false)
+    setBowlingResults(null)
+  }
 
   useEffect(() => {
     function check() { setIsMobile(window.innerWidth < 768) }
@@ -1814,10 +2090,71 @@ export default function MiiPlaza({
             animatingUid={animatingUid}
             animationType={animationType}
             mobile={isMobile}
+            bowlingActive={bowlingActive}
+            currentUid={currentUid}
+            onBowlingDone={handleBowlingDone}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
+
+      {/* Bowling overlay */}
+      {bowlingActive && (
+        <div style={{
+          position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 10, pointerEvents: 'auto',
+          background: 'rgba(10,5,30,0.82)', backdropFilter: 'blur(6px)',
+          borderRadius: 18, padding: '14px 22px',
+          color: '#fff', fontFamily: 'system-ui, sans-serif',
+          textAlign: 'center', minWidth: 220, boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        }}>
+          {bowlingResults === null ? (
+            <>
+              <div style={{ fontSize: 26, marginBottom: 4 }}>🎳 Bowling!</div>
+              <div style={{ fontSize: 12, color: '#c4b5fd', marginBottom: 12 }}>
+                Grab & throw the ball at the pins
+              </div>
+              <button onClick={stopBowling} style={{
+                background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 10, color: '#ddd', padding: '6px 16px',
+                cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              }}>✕ Cancel</button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 24, marginBottom: 6 }}>
+                {bowlingResults.length === 0
+                  ? '😅 Gutter ball!'
+                  : `🎉 ${bowlingResults.length} pin${bowlingResults.length !== 1 ? 's' : ''} knocked!`}
+              </div>
+              {bowlingResults.length > 0 && (
+                <div style={{ fontSize: 11, color: '#fbbf24', marginBottom: 10, lineHeight: 1.5 }}>
+                  {bowlingResults.map(uid => members.find(m => m.uid === uid)?.displayName ?? uid).join(', ')}
+                  <br /><span style={{ color: '#f87171' }}>−5 pts each</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                {bowlingResults.length > 0 && (
+                  <button
+                    onClick={() => applyBowlingScore(bowlingResults!)}
+                    disabled={scoringBowling}
+                    style={{
+                      background: '#22c55e', border: 'none', borderRadius: 10,
+                      color: '#fff', padding: '8px 16px', cursor: scoringBowling ? 'default' : 'pointer',
+                      fontSize: 13, fontWeight: 800, opacity: scoringBowling ? 0.7 : 1,
+                    }}
+                  >{scoringBowling ? '…' : '✓ Score It!'}</button>
+                )}
+                <button onClick={stopBowling} style={{
+                  background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: 10, color: '#ddd', padding: '8px 16px',
+                  cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}>Skip</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
@@ -1869,8 +2206,8 @@ export default function MiiPlaza({
         </div>
       )}
 
-      {/* Hint */}
-      {!selectedMember && (
+      {/* Hint + Bowl button */}
+      {!selectedMember && !bowlingActive && (
         <div style={{
           position: 'absolute',
           bottom: 12,
@@ -1879,9 +2216,9 @@ export default function MiiPlaza({
           background: 'rgba(0,0,0,0.5)',
           color: '#ccc',
           fontSize: 11,
-          padding: '4px 12px',
+          padding: '4px 6px 4px 12px',
           borderRadius: 20,
-          pointerEvents: 'none',
+          pointerEvents: 'auto',
           whiteSpace: 'nowrap',
           display: 'flex',
           alignItems: 'center',
@@ -1894,6 +2231,17 @@ export default function MiiPlaza({
               <span>Code: <strong style={{ color: '#fff', letterSpacing: 1 }}>{inviteCode}</strong></span>
             </>
           )}
+          <span style={{ opacity: 0.4 }}>·</span>
+          <button
+            onClick={startBowling}
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              border: '1px solid rgba(255,255,255,0.25)',
+              borderRadius: 14, color: '#fff',
+              padding: '3px 10px', cursor: 'pointer',
+              fontSize: 12, fontWeight: 700, lineHeight: 1.5,
+            }}
+          >🎳</button>
         </div>
       )}
     </div>
