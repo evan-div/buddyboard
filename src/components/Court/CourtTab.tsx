@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { doc, getDoc } from 'firebase/firestore'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { db } from '@/lib/firebase'
 import { subscribeToCases, castVote, resolveExpiredCase } from '@/lib/appeals'
 import type { CourtCase, GroupMember } from '@/lib/types'
+
+const Avatar3D = dynamic(() => import('@/components/Avatar/Avatar3D'), { ssr: false })
 
 type Props = {
   groupId: string
@@ -175,7 +177,7 @@ function CaseCard({
             display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
             boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
           }}>
-            <AvatarDisplay config={accuserMember?.avatar ?? DEFAULT_AVATAR} size={58} />
+            <Avatar3D config={accuserMember?.avatar ?? DEFAULT_AVATAR} size={58} />
           </div>
           <span style={{ color: 'white', fontWeight: 700, fontSize: 13, textAlign: 'center', lineHeight: 1.3 }}>
             {c.accuserName}
@@ -193,7 +195,7 @@ function CaseCard({
             display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
             boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
           }}>
-            <AvatarDisplay config={defendantMember?.avatar ?? DEFAULT_AVATAR} size={58} />
+            <Avatar3D config={defendantMember?.avatar ?? DEFAULT_AVATAR} size={58} />
           </div>
           <span style={{ color: 'white', fontWeight: 700, fontSize: 13, textAlign: 'center', lineHeight: 1.3 }}>
             {c.defendantName}

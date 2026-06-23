@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarBuilder from '@/components/Avatar/AvatarBuilder'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { updateUserAvatar, updateMemberAvatar, updateUserDisplayName, purchaseItem } from '@/lib/firestore'
 import { SHOP_ITEMS, SHOP_ITEM_MAP } from '@/lib/shopItems'
 import type { AvatarConfig } from '@/lib/types'
 import type { ShopCategory } from '@/lib/shopItems'
 
+const Avatar3D = dynamic(() => import('@/components/Avatar/Avatar3D'), { ssr: false })
 const CloudScene = dynamic(() => import('@/components/World/CloudScene'), { ssr: false })
 
 export default function ProfilePage() {
@@ -231,7 +231,7 @@ export default function ProfilePage() {
               return (
                 <div key={item.id} style={{ background: 'white', borderRadius: 16, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
                   <div style={{ borderRadius: '50%', overflow: 'hidden', border: '3px solid #e5e5e5' }}>
-                    <AvatarDisplay config={previewAvatar} size={64} />
+                    <Avatar3D config={previewAvatar} size={64} />
                   </div>
                   <span style={{ color: '#111', fontSize: 13, fontWeight: 700, textAlign: 'center' }}>{item.label}</span>
                   {owned ? (

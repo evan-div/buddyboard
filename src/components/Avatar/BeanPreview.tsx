@@ -407,7 +407,7 @@ function BeanAccessory({ style, bodyTop, radius, eyeY, eyeZ, eyeSpread }: {
   return null
 }
 
-function BeanScene({ config }: { config: AvatarConfig }) {
+function BeanScene({ config, rotate = true }: { config: AvatarConfig; rotate?: boolean }) {
   const groupRef  = useRef<THREE.Group>(null)
   const dims      = useBeanDims(config)
   const gradient  = useGradient()
@@ -415,7 +415,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
   const bodyColor = config.bodyColor ?? config.shirtColor
 
   useFrame((_, dt) => {
-    if (groupRef.current) groupRef.current.rotation.y += dt * 0.6
+    if (rotate && groupRef.current) groupRef.current.rotation.y += dt * 0.6
   })
 
   const eyeY      = dims.faceCenterY
@@ -530,6 +530,8 @@ function BeanScene({ config }: { config: AvatarConfig }) {
     </group>
   )
 }
+
+export { BeanScene }
 
 export default function BeanPreview({ config }: { config: AvatarConfig }) {
   return (

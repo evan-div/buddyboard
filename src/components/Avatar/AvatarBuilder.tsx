@@ -12,9 +12,8 @@ import {
   BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
-import AvatarDisplay from './AvatarDisplay'
 
-const BeanPreview = dynamic(() => import('./BeanPreview'), { ssr: false })
+const Avatar3D = dynamic(() => import('./Avatar3D'), { ssr: false })
 
 interface Props {
   value: AvatarConfig
@@ -359,15 +358,8 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
-      {/* Preview: show rotating 3D bean on Body/Style tabs, 2D SVG on Look/Colors */}
-      {(activeTab === 'body' || activeTab === 'style')
-        ? <div style={{ borderRadius: 20, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff', width: 200, height: 200 }}>
-            <BeanPreview config={value} />
-          </div>
-        : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>
-            <AvatarDisplay config={value} size={140} />
-          </div>
-      }
+      {/* Preview */}
+      <Avatar3D config={value} size={200} live />
 
       {/* Panel */}
       <div style={{ width: '100%', background: 'white', borderRadius: 20, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>

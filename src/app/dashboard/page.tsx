@@ -6,10 +6,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import CloudScene from '@/components/World/CloudScene'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
+import dynamic from 'next/dynamic'
 import { getUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import CreateGroupModal from '@/components/Group/CreateGroupModal'
 import type { Group, GroupMember } from '@/lib/types'
+
+const Avatar3D = dynamic(() => import('@/components/Avatar/Avatar3D'), { ssr: false })
 
 // ─── Join Group Modal ─────────────────────────────────────────────────────────
 
@@ -99,7 +101,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {members.map((m) => (
                   <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <AvatarDisplay config={m.avatar} size={36} />
+                    <Avatar3D config={m.avatar} size={36} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
                         {m.displayName}

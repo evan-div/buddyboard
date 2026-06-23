@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import type { Transaction, GroupMember } from '@/lib/types'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { timeAgo } from '@/lib/utils'
+
+const Avatar3D = dynamic(() => import('@/components/Avatar/Avatar3D'), { ssr: false })
 
 type FeedItemProps = {
   transaction: Transaction
@@ -68,7 +70,7 @@ export default function FeedItem({ transaction, members, rotation = 0, currentUi
             border: '2px solid #f3f4f6',
           }}
         >
-          <AvatarDisplay config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={52} />
+          <Avatar3D config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={52} />
         </div>
         <span
           style={{

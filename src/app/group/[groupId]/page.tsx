@@ -6,7 +6,6 @@ import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import FeedItem from '@/components/Feed/FeedItem'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import {
@@ -36,6 +35,7 @@ import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/P
 import { requestPushPermission } from '@/lib/fcm'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
 
+const Avatar3D    = dynamic(() => import('@/components/Avatar/Avatar3D'), { ssr: false })
 const MiiPlaza   = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const GamesHub   = dynamic(() => import('@/components/Games/GamesHub'), { ssr: false })
 const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ssr: false })
@@ -240,7 +240,7 @@ function PointsModal({
                   </div>
                 )}
                 <div className="flex items-center gap-3 mb-2">
-                  <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={32} />
+                  <Avatar3D config={member.avatar ?? DEFAULT_AVATAR} size={32} />
                   <span className="text-white font-medium text-sm flex-1 truncate">
                     {member.displayName}
                   </span>
@@ -452,7 +452,7 @@ function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: 
                     }}
                   >
                     <span style={{ fontWeight: 800, fontSize: 13, color: '#999', width: 22, textAlign: 'center' }}>#{rank}</span>
-                    <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={36} />
+                    <Avatar3D config={member.avatar ?? DEFAULT_AVATAR} size={36} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 700, fontSize: 14, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -631,7 +631,7 @@ function WallPostThread({
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
         <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#d4d4d4', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {post.avatarConfig ? (
-            <AvatarDisplay config={post.avatarConfig} size={36} />
+            <Avatar3D config={post.avatarConfig} size={36} />
           ) : (
             <span style={{ color: '#888', fontSize: 16 }}>👤</span>
           )}
@@ -695,7 +695,7 @@ function WallPostThread({
           {comments.map((c) => (
             <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#d4d4d4', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {c.avatarConfig ? <AvatarDisplay config={c.avatarConfig} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
+                {c.avatarConfig ? <Avatar3D config={c.avatarConfig} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
               </div>
               <div style={{ flex: 1, background: '#d4d4d4', borderRadius: 12, padding: '7px 10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
@@ -709,7 +709,7 @@ function WallPostThread({
           {/* Comment composer */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 4 }}>
             <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#d4d4d4', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {currentMember?.avatar ? <AvatarDisplay config={currentMember.avatar} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
+              {currentMember?.avatar ? <Avatar3D config={currentMember.avatar} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
             </div>
             <div style={{ flex: 1, background: '#d4d4d4', borderRadius: 12, padding: '7px 10px', display: 'flex', gap: 6, alignItems: 'flex-end' }}>
               <input
@@ -1403,7 +1403,7 @@ export default function GroupPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {members.map((m) => (
                     <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <AvatarDisplay config={m.avatar} size={36} />
+                      <Avatar3D config={m.avatar} size={36} />
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
                           {m.displayName}
