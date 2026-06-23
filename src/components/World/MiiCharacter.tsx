@@ -9,6 +9,7 @@ import { useBeanDims } from '@/lib/beanDims'
 import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig, GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
+import { getEarnedAccessory, getEarnedBodyShape } from '@/lib/progression'
 import { BeanFace } from '@/components/Avatar/BeanFace'
 
 // ─── Shape-specific body geometry ─────────────────────────────────────────────
@@ -533,12 +534,14 @@ export interface MiiCharacterProps {
   dragMode?: DragMode | null
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
+  isTopStreak?: boolean
 }
 
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
   isSelected, onSelect, celebrationType = null,
   dragMode = null, onPickupStart, onGroupMount,
+  isTopStreak = false,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -558,7 +561,11 @@ export default function MiiCharacter({
   const _ir = 1.0 + Math.random() * (bounds * 0.85)
   const targetPos = useRef(new THREE.Vector3(Math.cos(_ia) * _ir, 0, Math.sin(_ia) * _ir))
 
-  const dims      = useBeanDims(member.avatar)
+  const earnedAccessory = getEarnedAccessory(member.totalPoints)
+  const earnedBodyShape = getEarnedBodyShape(member.totalPoints)
+  const dims      = useBeanDims(
+    earnedBodyShape ? { ...member.avatar, bodyShape: earnedBodyShape } : member.avatar
+  )
   const skinColor = SKIN_TONES[member.avatar.skinTone]
   const bodyColor = member.avatar.bodyColor ?? member.avatar.shirtColor
 
@@ -909,10 +916,11 @@ export default function MiiCharacter({
       {!dragMode && (() => {
         const badge  = highestBadge(member.badges ?? [])
         const streak = member.currentStreak ?? 0
-        if (!badge && streak < 3) return null
+        if (!badge && streak < 3 && !isTopStreak) return null
         return (
           <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
             <div style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {isTopStreak && <span title="Top streak holder">🏆</span>}
               {streak >= 3 && <span>🔥{streak}</span>}
               {badge && <span title={badge.label}>{badge.emoji}</span>}
             </div>
@@ -1039,7 +1047,7 @@ export default function MiiCharacter({
 
         {/* Accessory */}
         <BeanAccessory
-          style={member.avatar.accessory}
+          style={earnedAccessory ?? member.avatar.accessory}
           bodyTop={dims.bodyTop}
           radius={dims.radius}
           eyeY={eyeY}

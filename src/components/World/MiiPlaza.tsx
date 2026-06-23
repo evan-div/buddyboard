@@ -9,6 +9,7 @@ import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactions
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
 import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase } from '@/lib/types'
+import { getEarnedTier } from '@/lib/progression'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -1882,23 +1883,30 @@ function Scene({
         <Clouds />
       </Suspense>
       <GrassFloor />
-      {members.map((member) => (
-        <MiiCharacter
-          key={member.uid}
-          member={member}
-          initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
-          bounds={3.0}
-          isSelected={selectedUid === member.uid}
-          onSelect={onSelect}
-          celebrationType={member.uid === animatingUid ? animationType : null}
-          dragMode={dragModeMap.get(member.uid) ?? null}
-          onPickupStart={() => handlePickupStart(member)}
-          onGroupMount={(uid, g) => {
-            if (g) charGroups.current.set(uid, g)
-            else   charGroups.current.delete(uid)
-          }}
-        />
-      ))}
+      {(() => {
+        const maxStreak   = Math.max(0, ...members.map(m => m.currentStreak ?? 0))
+        const topStreakUid = maxStreak > 0
+          ? (members.find(m => (m.currentStreak ?? 0) === maxStreak)?.uid ?? null)
+          : null
+        return members.map((member) => (
+          <MiiCharacter
+            key={member.uid}
+            member={member}
+            initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
+            bounds={3.0}
+            isSelected={selectedUid === member.uid}
+            onSelect={onSelect}
+            celebrationType={member.uid === animatingUid ? animationType : null}
+            dragMode={dragModeMap.get(member.uid) ?? null}
+            onPickupStart={() => handlePickupStart(member)}
+            isTopStreak={member.uid === topStreakUid}
+            onGroupMount={(uid, g) => {
+              if (g) charGroups.current.set(uid, g)
+              else   charGroups.current.delete(uid)
+            }}
+          />
+        ))
+      })()}
       <PhysicsUpdater
         draggingUid={draggingUid}
         dragCursor={dragCursor}
@@ -1987,6 +1995,24 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
+  const [milestoneToast, setMilestoneToast] = useState<string | null>(null)
+  const prevPointsRef = useRef<number | null>(null)
+
+  // ── Milestone toast ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const me = members.find(m => m.uid === currentUid)
+    if (!me) return
+    const prev = prevPointsRef.current
+    prevPointsRef.current = me.totalPoints
+    if (prev === null || prev === me.totalPoints) return
+    const prevTier = getEarnedTier(prev)
+    const currTier = getEarnedTier(me.totalPoints)
+    if (currTier?.id !== prevTier?.id && currTier) {
+      setMilestoneToast(`${currTier.icon} You've reached ${currTier.label}!`)
+      const t = setTimeout(() => setMilestoneToast(null), 3500)
+      return () => clearTimeout(t)
+    }
+  }, [members, currentUid])
 
   // ── Bowling ──────────────────────────────────────────────────────────────────
   const [bowlingActive, setBowlingActive]   = useState(false)
@@ -2242,6 +2268,22 @@ export default function MiiPlaza({
               fontSize: 12, fontWeight: 700, lineHeight: 1.5,
             }}
           >🎳</button>
+        </div>
+      )}
+
+      {/* Milestone toast */}
+      {milestoneToast && (
+        <div style={{
+          position: 'absolute', top: 60, left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.82)',
+          color: '#fff', borderRadius: 20,
+          padding: '10px 22px', fontSize: 15, fontWeight: 800,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          zIndex: 40, pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+        }}>
+          {milestoneToast}
         </div>
       )}
     </div>
