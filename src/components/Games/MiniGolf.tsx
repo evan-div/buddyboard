@@ -116,23 +116,35 @@ function resolveWall(ball: BallState, [a, b]: Wall): boolean {
 
 // ─── Course Templates ─────────────────────────────────────────────────────────
 
+// Slalom obstacle: spans most of the corridor, alternating left/right side to
+// force the ball to weave. Leaves exactly one gap (gapSide: 'left'|'right').
+function slalomObs(fairwayX: number, fairwayW: number, y: number, gapSide: 'left' | 'right') {
+  const gap = 38                          // gap width in px (≈4.5 ball diameters)
+  const obsW = fairwayW - gap
+  const x = gapSide === 'left' ? fairwayX + gap : fairwayX
+  return { x, y, w: obsW, h: 18 }
+}
+
 function templateStraight(rng: () => number): CourseData {
+  // Wide corridor — tee at bottom, cup at top
+  // Three staggered slalom obstacles force the ball to snake side-to-side
   const polyPts: Vec2[] = [
-    [105, 20],
-    [235, 20],
-    [235, 500],
-    [105, 500],
+    [100, 20],
+    [240, 20],
+    [240, 500],
+    [100, 500],
   ]
-  const tee: Vec2 = [170, 455]
-  const cup: Vec2 = [170, 62]
-  const obstacles: Array<{ x: number; y: number; w: number; h: number }> = []
-  for (let i = 0; i < 2; i++) {
-    const w = 70 + Math.floor(rng() * 21)
-    const x = 105 + Math.floor(rng() * (130 - w))
-    const yBase = 120 + i * 140
-    const y = yBase + Math.floor(rng() * 60)
-    obstacles.push({ x, y, w, h: 16 })
-  }
+  const tee: Vec2 = [170, 460]
+  const cup: Vec2 = [170, 58]
+  const fw = 140   // fairway width (240-100)
+  const gaps: Array<'left' | 'right'> = rng() > 0.5
+    ? ['right', 'left', 'right']
+    : ['left', 'right', 'left']
+  const obstacles = [
+    slalomObs(100, fw, 140 + Math.floor(rng() * 30), gaps[0]),
+    slalomObs(100, fw, 250 + Math.floor(rng() * 30), gaps[1]),
+    slalomObs(100, fw, 360 + Math.floor(rng() * 30), gaps[2]),
+  ]
   const walls: Wall[] = [
     ...polyToWalls(polyPts),
     ...obstacles.flatMap((o) => rectToWalls(o.x, o.y, o.w, o.h)),
@@ -141,52 +153,65 @@ function templateStraight(rng: () => number): CourseData {
 }
 
 function templateDoglegRight(rng: () => number): CourseData {
+  // Vertical arm (x=85-205, y=20-280) → horizontal arm (x=85-315, y=260-390)
+  // Tee at TOP of vertical arm, cup at FAR END of horizontal arm.
   const polyPts: Vec2[] = [
-    [85, 20],
+    [85,  20],
     [205, 20],
-    [205, 255],
-    [315, 255],
+    [205, 260],
+    [315, 260],
     [315, 390],
-    [85, 390],
+    [85,  390],
   ]
-  const tee: Vec2 = [145, 350]
-  const cup: Vec2 = [260, 305]
+  const tee: Vec2 = [145, 55]     // near top of vertical arm
+  const cup: Vec2 = [292, 330]    // far right of horizontal arm
   const obstacles: Array<{ x: number; y: number; w: number; h: number }> = []
-  const w = 60 + Math.floor(rng() * 31)
-  const x = 85 + Math.floor(rng() * (120 - w))
-  const y = 80 + Math.floor(rng() * 120)
-  obstacles.push({ x, y, w, h: 16 })
+  // Obstacle in vertical arm: nearly full width, gap on alternating side
+  const gap1: 'left' | 'right' = rng() > 0.5 ? 'right' : 'left'
+  obstacles.push(slalomObs(85, 120, 120 + Math.floor(rng() * 60), gap1))
+  // Second obstacle lower in vertical arm
+  const gap2: 'left' | 'right' = gap1 === 'left' ? 'right' : 'left'
+  obstacles.push(slalomObs(85, 120, 200 + Math.floor(rng() * 40), gap2))
+  // Obstacle in horizontal arm: blocks near-straight path to cup
+  obstacles.push({ x: 215 + Math.floor(rng() * 30), y: 280 + Math.floor(rng() * 30), w: 60, h: 18 })
   const walls: Wall[] = [
     ...polyToWalls(polyPts),
     ...obstacles.flatMap((o) => rectToWalls(o.x, o.y, o.w, o.h)),
   ]
-  return { polyPts, tee, cup, par: 3, obstacles, walls, templateName: 'DOGLEG_RIGHT' }
+  return { polyPts, tee, cup, par: 4, obstacles, walls, templateName: 'DOGLEG_RIGHT' }
 }
 
 function templateDoglegLeft(rng: () => number): CourseData {
+  // Vertical arm (x=135-255, y=20-280) → horizontal arm extends LEFT (x=25-255, y=260-390)
+  // Tee at TOP of vertical arm, cup at FAR LEFT of horizontal arm.
   const polyPts: Vec2[] = [
     [135, 20],
     [255, 20],
     [255, 390],
-    [25, 390],
-    [25, 255],
-    [135, 255],
+    [25,  390],
+    [25,  260],
+    [135, 260],
   ]
-  const tee: Vec2 = [195, 350]
-  const cup: Vec2 = [80, 305]
+  const tee: Vec2 = [195, 55]    // near top of vertical arm
+  const cup: Vec2 = [52, 330]    // far left of horizontal arm
   const obstacles: Array<{ x: number; y: number; w: number; h: number }> = []
-  const w = 60 + Math.floor(rng() * 31)
-  const x = 135 + Math.floor(rng() * (120 - w))
-  const y = 60 + Math.floor(rng() * 140)
-  obstacles.push({ x, y, w, h: 16 })
+  // Two slalom obstacles in vertical arm
+  const gap1: 'left' | 'right' = rng() > 0.5 ? 'right' : 'left'
+  obstacles.push(slalomObs(135, 120, 110 + Math.floor(rng() * 60), gap1))
+  const gap2: 'left' | 'right' = gap1 === 'left' ? 'right' : 'left'
+  obstacles.push(slalomObs(135, 120, 200 + Math.floor(rng() * 40), gap2))
+  // Obstacle in horizontal arm
+  obstacles.push({ x: 45 + Math.floor(rng() * 50), y: 280 + Math.floor(rng() * 30), w: 65, h: 18 })
   const walls: Wall[] = [
     ...polyToWalls(polyPts),
     ...obstacles.flatMap((o) => rectToWalls(o.x, o.y, o.w, o.h)),
   ]
-  return { polyPts, tee, cup, par: 3, obstacles, walls, templateName: 'DOGLEG_LEFT' }
+  return { polyPts, tee, cup, par: 4, obstacles, walls, templateName: 'DOGLEG_LEFT' }
 }
 
 function templateSBend(rng: () => number): CourseData {
+  // Three staggered sections: top-right → middle → bottom-left
+  // Tee at bottom-left section, cup at top-right section — maximum travel distance
   const polyPts: Vec2[] = [
     [130, 20],
     [280, 20],
@@ -195,25 +220,21 @@ function templateSBend(rng: () => number): CourseData {
     [240, 320],
     [210, 320],
     [210, 480],
-    [60, 480],
-    [60, 290],
+    [60,  480],
+    [60,  290],
     [100, 290],
     [100, 160],
     [130, 160],
   ]
-  const tee: Vec2 = [135, 440]
-  const cup: Vec2 = [205, 60]
+  const tee: Vec2 = [135, 445]   // bottom-left section, near bottom
+  const cup: Vec2 = [205, 55]    // top-right section, near top
   const obstacles: Array<{ x: number; y: number; w: number; h: number }> = []
-  // top section obstacle
-  const w1 = 50 + Math.floor(rng() * 31)
-  const x1 = 130 + Math.floor(rng() * (150 - w1))
-  const y1 = 40 + Math.floor(rng() * 100)
-  obstacles.push({ x: x1, y: y1, w: w1, h: 14 })
-  // bottom section obstacle
-  const w2 = 50 + Math.floor(rng() * 31)
-  const x2 = 60 + Math.floor(rng() * (150 - w2))
-  const y2 = 340 + Math.floor(rng() * 100)
-  obstacles.push({ x: x2, y: y2, w: w2, h: 14 })
+  // Top section obstacle (150px wide section x=130-280)
+  obstacles.push(slalomObs(130, 150, 60 + Math.floor(rng() * 60), rng() > 0.5 ? 'left' : 'right'))
+  // Middle corridor obstacle (x=100-240, width=140) — blocks the pinch point
+  obstacles.push({ x: 115 + Math.floor(rng() * 30), y: 215 + Math.floor(rng() * 40), w: 70, h: 18 })
+  // Bottom section obstacle (x=60-210, width=150)
+  obstacles.push(slalomObs(60, 150, 360 + Math.floor(rng() * 60), rng() > 0.5 ? 'left' : 'right'))
   const walls: Wall[] = [
     ...polyToWalls(polyPts),
     ...obstacles.flatMap((o) => rectToWalls(o.x, o.y, o.w, o.h)),
@@ -222,38 +243,36 @@ function templateSBend(rng: () => number): CourseData {
 }
 
 function templateNarrowGate(rng: () => number): CourseData {
+  // Two wide chambers connected by a narrow 34px passage — must thread the needle
+  // Tee bottom chamber, cup top chamber
   const polyPts: Vec2[] = [
-    [50, 20],
-    [290, 20],
-    [290, 200],
-    [190, 200],
-    [190, 310],
-    [290, 310],
-    [290, 490],
-    [50, 490],
-    [50, 310],
-    [150, 310],
-    [150, 200],
-    [50, 200],
+    [40,  20],
+    [300, 20],
+    [300, 205],
+    [187, 205],
+    [187, 315],
+    [300, 315],
+    [300, 490],
+    [40,  490],
+    [40,  315],
+    [153, 315],
+    [153, 205],
+    [40,  205],
   ]
   const tee: Vec2 = [170, 450]
   const cup: Vec2 = [170, 60]
   const obstacles: Array<{ x: number; y: number; w: number; h: number }> = []
-  // top chamber
-  const w1 = 60 + Math.floor(rng() * 31)
-  const x1 = 50 + Math.floor(rng() * (240 - w1))
-  const y1 = 40 + Math.floor(rng() * 120)
-  obstacles.push({ x: x1, y: y1, w: w1, h: 14 })
-  // bottom chamber
-  const w2 = 60 + Math.floor(rng() * 31)
-  const x2 = 50 + Math.floor(rng() * (240 - w2))
-  const y2 = 330 + Math.floor(rng() * 120)
-  obstacles.push({ x: x2, y: y2, w: w2, h: 14 })
+  // Two obstacles in top chamber that the ball can't just straight-shot through
+  const tw = 260  // top chamber width (300-40)
+  obstacles.push(slalomObs(40, tw, 60 + Math.floor(rng() * 60), rng() > 0.5 ? 'left' : 'right'))
+  obstacles.push(slalomObs(40, tw, 140 + Math.floor(rng() * 30), rng() > 0.5 ? 'right' : 'left'))
+  // One obstacle in bottom chamber
+  obstacles.push(slalomObs(40, tw, 370 + Math.floor(rng() * 60), rng() > 0.5 ? 'left' : 'right'))
   const walls: Wall[] = [
     ...polyToWalls(polyPts),
     ...obstacles.flatMap((o) => rectToWalls(o.x, o.y, o.w, o.h)),
   ]
-  return { polyPts, tee, cup, par: 3, obstacles, walls, templateName: 'NARROW_GATE' }
+  return { polyPts, tee, cup, par: 4, obstacles, walls, templateName: 'NARROW_GATE' }
 }
 
 function generateCourse(dateStr: string): CourseData {

@@ -135,32 +135,28 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
             {selectedGame.description}
           </div>
 
-          {myScore ? (
-            <div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginBottom: 4 }}>Your score today</div>
-              <div style={{ fontSize: 28, fontWeight: 900 }}>
+          {myScore && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginBottom: 4 }}>Your best today</div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>
                 {myRank >= 0 ? medal[myRank] ?? `#${myRank + 1}` : ''}{' '}
                 {selectedGame.scoreLabel(myScore.score)}
               </div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>
-                Come back tomorrow for a new hole!
-              </div>
             </div>
-          ) : (
-            <button
-              onClick={() => setPlaying(true)}
-              disabled={submitting}
-              style={{
-                background: '#fff', color: '#1a5c1a',
-                border: 'none', borderRadius: 14,
-                padding: '12px 32px', fontSize: 15, fontWeight: 900,
-                cursor: submitting ? 'default' : 'pointer',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
-              }}
-            >
-              {submitting ? 'Saving…' : `Play Today's Hole`}
-            </button>
           )}
+          <button
+            onClick={() => setPlaying(true)}
+            disabled={submitting}
+            style={{
+              background: '#fff', color: '#1a5c1a',
+              border: 'none', borderRadius: 14,
+              padding: '12px 32px', fontSize: 15, fontWeight: 900,
+              cursor: submitting ? 'default' : 'pointer',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
+            }}
+          >
+            {submitting ? 'Saving…' : myScore ? 'Play Again' : `Play Today's Hole`}
+          </button>
         </div>
 
         {/* Leaderboard */}
