@@ -81,6 +81,7 @@ export async function settleYesterdayIfNeeded(
   groupId: string,
   game: string,
   today: string,
+  scoringOrder: 'lower' | 'higher' = 'lower',
 ): Promise<void> {
   const yesterday = yesterdayString(today)
   const scores = await getGameScores(groupId, game, yesterday)
@@ -88,8 +89,9 @@ export async function settleYesterdayIfNeeded(
   const unsettled = scores.filter(s => !s.pointsAwarded)
   if (unsettled.length === 0) return
 
-  // Lower score = better (golf)
-  const sorted = [...scores].sort((a, b) => a.score - b.score)
+  const sorted = [...scores].sort((a, b) =>
+    scoringOrder === 'lower' ? a.score - b.score : b.score - a.score,
+  )
   const batch = writeBatch(db)
 
   sorted.forEach((s, i) => {

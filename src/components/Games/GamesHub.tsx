@@ -12,7 +12,8 @@ import {
   submitGameScore,
 } from '@/lib/gameScores'
 
-const MiniGolf = dynamic(() => import('./MiniGolf'), { ssr: false })
+const MiniGolf  = dynamic(() => import('./MiniGolf'),  { ssr: false })
+const Bowling3D = dynamic(() => import('./Bowling3D'), { ssr: false })
 
 interface Props {
   groupId:    string
@@ -40,6 +41,14 @@ const GAMES: GameDef[] = [
     scoreLabel:   (s) => `${s} stroke${s !== 1 ? 's' : ''}`,
     scoringOrder: 'lower',
   },
+  {
+    id:           'bowling',
+    name:         'Bowling',
+    icon:         '🎳',
+    description:  '10 frames of 3D bowling · Highest score wins · Max 300',
+    scoreLabel:   (s) => `${s} pts`,
+    scoringOrder: 'higher',
+  },
 ]
 
 export default function GamesHub({ groupId, currentUid, displayName, members, timezone }: Props) {
@@ -55,7 +64,7 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
   async function load() {
     setLoading(true)
     try {
-      await settleYesterdayIfNeeded(groupId, selectedGame.id, today)
+      await settleYesterdayIfNeeded(groupId, selectedGame.id, today, selectedGame.scoringOrder)
       const [all, mine] = await Promise.all([
         getGameScores(groupId, selectedGame.id, today),
         getUserGameScore(groupId, currentUid, selectedGame.id, today),
@@ -88,9 +97,17 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
 
   return (
     <>
-      {/* Game overlay */}
+      {/* Game overlays */}
       {playing && selectedGame.id === 'minigolf' && (
         <MiniGolf
+          dateStr={today}
+          membersCount={members.length}
+          onComplete={handleGameComplete}
+          onClose={() => setPlaying(false)}
+        />
+      )}
+      {playing && selectedGame.id === 'bowling' && (
+        <Bowling3D
           dateStr={today}
           membersCount={members.length}
           onComplete={handleGameComplete}
@@ -124,7 +141,9 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
 
         {/* Hero card */}
         <div style={{
-          background: 'linear-gradient(135deg, #1a5c1a 0%, #2d8a2d 100%)',
+          background: selectedGame.id === 'bowling'
+            ? 'linear-gradient(135deg, #1a1a5c 0%, #2d2d8a 100%)'
+            : 'linear-gradient(135deg, #1a5c1a 0%, #2d8a2d 100%)',
           borderRadius: 20, padding: '24px 20px 20px',
           color: '#fff', marginBottom: 16, textAlign: 'center',
           boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
@@ -155,7 +174,7 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
               boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
             }}
           >
-            {submitting ? 'Saving…' : myScore ? 'Play Again' : `Play Today's Hole`}
+            {submitting ? 'Saving…' : myScore ? 'Play Again' : selectedGame.id === 'bowling' ? `Bowl Now` : `Play Today's Hole`}
           </button>
         </div>
 
@@ -217,7 +236,7 @@ export default function GamesHub({ groupId, currentUid, displayName, members, ti
                   color: '#fff', padding: '8px 22px', fontSize: 13, fontWeight: 700,
                   cursor: 'pointer',
                 }}
-              >Play Now ⛳</button>
+              >{selectedGame.id === 'bowling' ? 'Bowl Now 🎳' : 'Play Now ⛳'}</button>
             </div>
           )}
         </div>
