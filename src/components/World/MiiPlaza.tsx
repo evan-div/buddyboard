@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { Physics, RigidBody, CapsuleCollider, CuboidCollider, BallCollider, CylinderCollider, type RapierRigidBody } from '@react-three/rapier'
 import * as THREE from 'three'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, uploadTransactionPhoto } from '@/lib/firestore'
@@ -934,20 +935,22 @@ interface PhysState {
 // ─── Physics Updater ──────────────────────────────────────────────────────────
 
 interface PhysicsUpdaterProps {
-  draggingUid:    React.RefObject<string | null>
-  dragCursor:     React.RefObject<THREE.Vector3>
-  dragCursorVel:  React.RefObject<THREE.Vector3>
-  charGroups:     React.RefObject<Map<string, THREE.Group>>
-  physicsMap:     React.RefObject<Map<string, PhysState>>
-  orbitRef:       React.RefObject<any>
-  cameraLocked:   boolean
-  setCharMode:    (uid: string, mode: DragMode | null) => void
-  wallFlashRef:   React.RefObject<number[]>
+  draggingUid:      React.RefObject<string | null>
+  dragCursor:       React.RefObject<THREE.Vector3>
+  dragCursorVel:    React.RefObject<THREE.Vector3>
+  charGroups:       React.RefObject<Map<string, THREE.Group>>
+  physicsMap:       React.RefObject<Map<string, PhysState>>
+  orbitRef:         React.RefObject<any>
+  cameraLocked:     boolean
+  setCharMode:      (uid: string, mode: DragMode | null) => void
+  wallFlashRef:     React.RefObject<number[]>
+  rigidBodyRefMap:  React.RefObject<Map<string, RapierRigidBody>>
 }
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
   charGroups, physicsMap, orbitRef, cameraLocked, setCharMode, wallFlashRef,
+  rigidBodyRefMap,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1184,6 +1187,16 @@ function PhysicsUpdater({
           setCharMode(uid, null)
         }
       }
+    })
+
+    // Sync Rapier kinematic bodies to match THREE.Group positions
+    charGroups.current.forEach((group, uid) => {
+      const body = rigidBodyRefMap.current.get(uid)
+      if (!body) return
+      const p = group.position
+      body.setNextKinematicTranslation({ x: p.x, y: p.y, z: p.z })
+      const q = group.quaternion
+      body.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
     })
   })
 
@@ -1527,6 +1540,66 @@ function BowlingBall({
   )
 }
 
+// ─── Plaza Props (Rapier dynamic furniture) ──────────────────────────────────
+
+function PlazaProps() {
+  const HALF = FSIZE / 2
+  const WALL_H = 4
+
+  return (
+    <>
+      {/* Fixed floor so dynamic props don't fall through */}
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[HALF, 0.1, HALF]} position={[0, -0.1, 0]} />
+      </RigidBody>
+
+      {/* Invisible wall colliders so props stay inside the plaza */}
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[0.1, WALL_H, HALF]} position={[ WALL_BOUND + 0.1, WALL_H / 2, 0]} />
+        <CuboidCollider args={[0.1, WALL_H, HALF]} position={[-WALL_BOUND - 0.1, WALL_H / 2, 0]} />
+        <CuboidCollider args={[HALF, WALL_H, 0.1]} position={[0, WALL_H / 2,  WALL_BOUND + 0.1]} />
+        <CuboidCollider args={[HALF, WALL_H, 0.1]} position={[0, WALL_H / 2, -WALL_BOUND - 0.1]} />
+      </RigidBody>
+
+      {/* Round table */}
+      <RigidBody type="dynamic" position={[4, 0.45, 2]} restitution={0.2} friction={0.8} linearDamping={2.5} angularDamping={4} colliders={false}>
+        <CylinderCollider args={[0.45, 0.48]} />
+        <mesh castShadow>
+          <cylinderGeometry args={[0.48, 0.48, 0.9, 20]} />
+          <meshToonMaterial color="#8B5E3C" />
+        </mesh>
+      </RigidBody>
+
+      {/* Stool */}
+      <RigidBody type="dynamic" position={[-4, 0.25, -2]} restitution={0.2} friction={0.8} linearDamping={2.5} angularDamping={4} colliders={false}>
+        <CylinderCollider args={[0.25, 0.22]} />
+        <mesh castShadow>
+          <cylinderGeometry args={[0.22, 0.22, 0.5, 12]} />
+          <meshToonMaterial color="#6B4226" />
+        </mesh>
+      </RigidBody>
+
+      {/* Beach ball */}
+      <RigidBody type="dynamic" position={[0, 0.32, -4]} restitution={0.65} friction={0.3} linearDamping={0.8} angularDamping={1.2} colliders={false}>
+        <BallCollider args={[0.32]} />
+        <mesh castShadow>
+          <sphereGeometry args={[0.32, 20, 20]} />
+          <meshToonMaterial color="#FF6B6B" />
+        </mesh>
+      </RigidBody>
+
+      {/* Wooden crate */}
+      <RigidBody type="dynamic" position={[-2.5, 0.38, 4]} restitution={0.15} friction={1.0} linearDamping={2.5} angularDamping={4} colliders={false}>
+        <CuboidCollider args={[0.38, 0.38, 0.38]} />
+        <mesh castShadow>
+          <boxGeometry args={[0.76, 0.76, 0.76]} />
+          <meshToonMaterial color="#C8952A" />
+        </mesh>
+      </RigidBody>
+    </>
+  )
+}
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -1560,8 +1633,9 @@ function Scene({
   const { gl }       = useThree()
   const wallFlashRef = useRef<number[]>([0, 0, 0, 0])
 
-  const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
-  const physicsMap    = useRef<Map<string, PhysState>>(new Map())
+  const charGroups      = useRef<Map<string, THREE.Group>>(new Map())
+  const physicsMap      = useRef<Map<string, PhysState>>(new Map())
+  const rigidBodyRefMap = useRef<Map<string, RapierRigidBody>>(new Map())
   const draggingUid   = useRef<string | null>(null)
   const pendingPickup = useRef<{ uid: string; member: GroupMember; pos: [number, number, number] } | null>(null)
   const holdTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1873,7 +1947,7 @@ function Scene({
   }, [gl.domElement, handlePointerUp])
 
   return (
-    <>
+    <Physics gravity={[0, -38, 0]} colliders={false}>
       {/* sky is transparent — CSS gradient on the container div shows through */}
       <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
       <ambientLight intensity={0.75} />
@@ -1888,24 +1962,38 @@ function Scene({
         const topStreakUid = maxStreak > 0
           ? (members.find(m => (m.currentStreak ?? 0) === maxStreak)?.uid ?? null)
           : null
-        return members.map((member) => (
-          <MiiCharacter
-            key={member.uid}
-            member={member}
-            initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
-            bounds={3.0}
-            isSelected={selectedUid === member.uid}
-            onSelect={onSelect}
-            celebrationType={member.uid === animatingUid ? animationType : null}
-            dragMode={dragModeMap.get(member.uid) ?? null}
-            onPickupStart={() => handlePickupStart(member)}
-            isTopStreak={member.uid === topStreakUid}
-            onGroupMount={(uid, g) => {
-              if (g) charGroups.current.set(uid, g)
-              else   charGroups.current.delete(uid)
-            }}
-          />
-        ))
+        return members.map((member) => {
+          const sp = spawnPositions.current.get(member.uid) ?? [0, 0, 0] as [number,number,number]
+          return (
+            <RigidBody
+              key={member.uid}
+              type="kinematicPosition"
+              position={sp}
+              colliders={false}
+              ref={(body: RapierRigidBody | null) => {
+                if (body) rigidBodyRefMap.current.set(member.uid, body)
+                else rigidBodyRefMap.current.delete(member.uid)
+              }}
+            >
+              <CapsuleCollider args={[0.5, CHAR_BODY_R]} position={[0, 0.9, 0]} />
+              <MiiCharacter
+                member={member}
+                initialPosition={sp}
+                bounds={3.0}
+                isSelected={selectedUid === member.uid}
+                onSelect={onSelect}
+                celebrationType={member.uid === animatingUid ? animationType : null}
+                dragMode={dragModeMap.get(member.uid) ?? null}
+                onPickupStart={() => handlePickupStart(member)}
+                isTopStreak={member.uid === topStreakUid}
+                onGroupMount={(uid, g) => {
+                  if (g) charGroups.current.set(uid, g)
+                  else   charGroups.current.delete(uid)
+                }}
+              />
+            </RigidBody>
+          )
+        })
       })()}
       <PhysicsUpdater
         draggingUid={draggingUid}
@@ -1917,7 +2005,9 @@ function Scene({
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
         wallFlashRef={wallFlashRef}
+        rigidBodyRefMap={rigidBodyRefMap}
       />
+      <PlazaProps />
       <WallFlashPlanes wallFlashRef={wallFlashRef} />
       <BowlingBall
         phase={bowlingPhase}
@@ -1947,7 +2037,7 @@ function Scene({
         maxPolarAngle={Math.PI / 2.5}
         makeDefault
       />
-    </>
+    </Physics>
   )
 }
 
