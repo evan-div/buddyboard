@@ -275,6 +275,7 @@ export default function DashboardPage() {
   const [groups, setGroups] = useState<Group[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [groupsError, setGroupsError] = useState<string | null>(null)
+  const [groupsReloadKey, setGroupsReloadKey] = useState(0)
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
   const [wipePhase, setWipePhase] = useState<WipePhase>('idle')
@@ -284,34 +285,39 @@ export default function DashboardPage() {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
 
-  // Fetch groups each time the groups view is opened
+  // Fetch groups each time the groups view is opened (or Retry is pressed)
   useEffect(() => {
     if (view !== 'groups' || !user) return
+    let stale = false
     setLoadingGroups(true)
     setGroupsError(null)
 
+    // Show a retryable error if the request hangs; a late response is discarded
     const timeoutId = setTimeout(() => {
+      stale = true
       setLoadingGroups(false)
       setGroupsError('Taking too long — check your connection and try again.')
     }, 8000)
 
     getUserGroups(user.uid)
       .then(userGroups => {
-        clearTimeout(timeoutId)
+        if (stale) return
         setGroups(userGroups)
-      })
-      .catch(err => {
-        clearTimeout(timeoutId)
-        console.error('Error loading groups:', err)
-        setGroupsError('Failed to load groups. Please try again.')
-      })
-      .finally(() => {
-        clearTimeout(timeoutId)
         setLoadingGroups(false)
       })
+      .catch(err => {
+        if (stale) return
+        console.error('Error loading groups:', err)
+        setGroupsError('Failed to load groups. Please try again.')
+        setLoadingGroups(false)
+      })
+      .finally(() => clearTimeout(timeoutId))
 
-    return () => clearTimeout(timeoutId)
-  }, [view, user])
+    return () => {
+      stale = true
+      clearTimeout(timeoutId)
+    }
+  }, [view, user, groupsReloadKey])
 
   function handleMyGroups() {
     setView('groups')
@@ -438,7 +444,7 @@ export default function DashboardPage() {
                   {groupsError}
                 </p>
                 <button
-                  onClick={() => { setView('welcome'); setTimeout(() => setView('groups'), 50) }}
+                  onClick={() => setGroupsReloadKey((k) => k + 1)}
                   style={{ ...whiteBtnStyle, fontSize: 14, padding: 14 }}
                 >
                   ↻ Retry
