@@ -79,7 +79,7 @@ function CaseCard({
     if (!isActive || !c.courtDeadline || autoResolved.current) return
     if (now >= c.courtDeadline.getTime()) {
       autoResolved.current = true
-      resolveExpiredCase(groupId, c.id, memberUids)
+      resolveExpiredCase(groupId, c.id)
     }
   }, [now, isActive, c.courtDeadline, groupId, c.id, memberUids])
 
@@ -92,7 +92,7 @@ function CaseCard({
     ).length
     if (nonPartyVotes >= eligibleVoters) {
       autoResolved.current = true
-      resolveExpiredCase(groupId, c.id, memberUids)
+      resolveExpiredCase(groupId, c.id)
     }
   }, [isActive, eligibleVoters, c.votes, c.accuserUid, c.defendantUid, groupId, c.id, memberUids])
 
@@ -320,7 +320,7 @@ export default function CourtTab({ groupId, currentUid, memberUids, chiefUid, me
       setCases(cs)
       cs
         .filter((c) => c.status === 'in_court' && c.courtDeadline && c.courtDeadline < new Date())
-        .forEach((c) => resolveExpiredCase(groupId, c.id, memberUids))
+        .forEach((c) => resolveExpiredCase(groupId, c.id))
     })
     return unsub
   }, [groupId, memberUids])

@@ -20,7 +20,6 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost, WallComment } from './types'
-import { BADGE_DEFS } from './badges'
 
 // Helper to get today's date string YYYY-MM-DD
 function todayString(): string {
@@ -480,6 +479,15 @@ export async function giveOrTakePoints(
       lastActiveDate: today,
     })
   })
+
+  // Push-notify each recipient (fire-and-forget — in-app notifications were
+  // already written inside the transaction)
+  for (const alloc of allocations) {
+    const sign = alloc.points > 0 ? '+' : ''
+    const title = alloc.points > 0 ? '🎉 Points received!' : '📉 Points taken'
+    const body = `${sign}${alloc.points} pts${alloc.reason ? ` · ${alloc.reason}` : ''}`
+    sendPushToUser(alloc.toUid, title, body, `/group/${groupId}`).catch(() => {})
+  }
 
   // Award badges to giver (fire-and-forget — don't block the transaction)
   const giverMemberRef = doc(db, 'groups', groupId, 'members', fromUid)

@@ -16,6 +16,7 @@ import {
   DocumentData,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { awardCourtWinBadge } from './firestore'
 import type { GroupNotification, CourtCase, CaseStatus } from './types'
 
 function fromTs(ts: Timestamp | Date | undefined): Date {
@@ -184,8 +185,10 @@ export async function reviewAppeal(
   memberUids: string[]
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
+  let winnerUid: string | null = null
 
   await runTransaction(db, async (tx) => {
+    winnerUid = null
     const caseSnap = await tx.get(caseRef)
     if (!caseSnap.exists()) throw new Error('Case not found')
     const c = caseSnap.data()
@@ -197,6 +200,7 @@ export async function reviewAppeal(
     })
 
     if (decision === 'accept') {
+      winnerUid = c.defendantUid
       // Restore defendant's points
       tx.update(doc(db, 'groups', groupId, 'members', c.defendantUid), {
         totalPoints: increment(c.points),
@@ -279,6 +283,9 @@ export async function reviewAppeal(
       }
     }
   })
+
+  // Winning an appeal outright counts as a court win for the badge
+  if (winnerUid) awardCourtWinBadge(groupId, winnerUid).catch(() => {})
 }
 
 // ─── Voting ───────────────────────────────────────────────────────────────────
@@ -293,8 +300,10 @@ export async function castVote(
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
   const groupRef = doc(db, 'groups', groupId)
+  let winnerUid: string | null = null
 
   await runTransaction(db, async (tx) => {
+    winnerUid = null
     // All reads must come before writes in a Firestore transaction
     const [caseSnap, groupSnap] = await Promise.all([tx.get(caseRef), tx.get(groupRef)])
     if (!caseSnap.exists()) throw new Error('Case not found')
@@ -349,6 +358,7 @@ export async function castVote(
     tx.update(caseRef, voteUpdate)
 
     if (resolved) {
+      winnerUid = (newStatus === 'resolved_innocent' ? c.defendantUid : c.accuserUid) as string
       if (newStatus === 'resolved_innocent') {
         tx.update(doc(db, 'groups', groupId, 'members', c.defendantUid), {
           totalPoints: increment(c.points),
@@ -389,18 +399,21 @@ export async function castVote(
       }
     }
   })
+
+  if (winnerUid) awardCourtWinBadge(groupId, winnerUid).catch(() => {})
 }
 
 // ─── Expired court cases ──────────────────────────────────────────────────────
 
 export async function resolveExpiredCase(
   groupId: string,
-  caseId: string,
-  memberUids: string[]
+  caseId: string
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
+  let winnerUid: string | null = null
 
   await runTransaction(db, async (tx) => {
+    winnerUid = null
     const caseSnap = await tx.get(caseRef)
     if (!caseSnap.exists()) return
     const c = caseSnap.data()
@@ -412,6 +425,7 @@ export async function resolveExpiredCase(
     // Ties go to the defendant (innocent)
     const newStatus: CaseStatus =
       innocentCount >= guiltyCount ? 'resolved_innocent' : 'resolved_guilty'
+    winnerUid = (newStatus === 'resolved_innocent' ? c.defendantUid : c.accuserUid) as string
 
     tx.update(caseRef, { status: newStatus, resolvedAt: serverTimestamp() })
 
@@ -453,6 +467,8 @@ export async function resolveExpiredCase(
       })
     }
   })
+
+  if (winnerUid) awardCourtWinBadge(groupId, winnerUid).catch(() => {})
 }
 
 // ─── Cases subscription ───────────────────────────────────────────────────────
