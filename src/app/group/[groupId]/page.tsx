@@ -89,15 +89,20 @@ const PERIOD_LABELS: Record<Period, string> = {
 function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: { members: GroupMember[], currentUid: string, groupId: string, chiefUid?: string | null, creatorUid?: string }) {
   const [period, setPeriod] = useState<Period>('alltime')
   const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [loading, setLoading] = useState(false)
+  // Which period the loaded transactions belong to; 'alltime' needs no fetch
+  const [loadedPeriod, setLoadedPeriod] = useState<Period>('alltime')
+  const loading = period !== 'alltime' && loadedPeriod !== period
 
   useEffect(() => {
     const since = getPeriodStart(period)
-    if (!since) { setTransactions([]); return }
-    setLoading(true)
-    getTransactionsSince(groupId, since)
-      .then(setTransactions)
-      .finally(() => setLoading(false))
+    if (!since) return
+    let stale = false
+    getTransactionsSince(groupId, since).then((txs) => {
+      if (stale) return
+      setTransactions(txs)
+      setLoadedPeriod(period)
+    })
+    return () => { stale = true }
   }, [period, groupId])
 
   const ranked = computeRankings(members, transactions, period)
@@ -221,7 +226,7 @@ function FeedTab({ groupId, members, currentUid }: FeedTabProps) {
   }
 
   useEffect(() => {
-    setFeedLoading(true)
+    // feedLoading starts true; the first snapshot clears it
     const unsubscribe = subscribeToFeed(groupId, (transactions) => {
       setFeed(transactions)
       setFeedLoading(false)
@@ -644,12 +649,14 @@ export default function GroupPage() {
   }, [user, groupId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch; loadGroupData only toggles the loading flag synchronously
     if (user) loadGroupData()
   }, [user, loadGroupData])
 
   // Real-time notification subscription — shows toasts when current user receives/loses points
+  const currentUid = user?.uid
   useEffect(() => {
-    if (!user || !groupId) return
+    if (!currentUid || !groupId) return
 
     const seenIds = seenTxIds.current
 
@@ -668,7 +675,7 @@ export default function GroupPage() {
           if (activeTabRef.current !== 'feed') {
             setUnreadFeedCount((prev) => prev + 1)
           }
-          if (tx.toUid === user.uid) {
+          if (tx.toUid === currentUid) {
             const item: PointsToastItem = {
               id: tx.id,
               fromUid: tx.fromUid,
@@ -689,14 +696,14 @@ export default function GroupPage() {
       notifInitialized.current = false
       seenIds.clear()
     }
-  }, [user?.uid, groupId])
+  }, [currentUid, groupId])
 
   // Subscribe to persistent notifications
   useEffect(() => {
-    if (!user || !groupId) return
-    const unsub = subscribeToNotifications(groupId, user.uid, setNotifications)
+    if (!currentUid || !groupId) return
+    const unsub = subscribeToNotifications(groupId, currentUid, setNotifications)
     return unsub
-  }, [user?.uid, groupId])
+  }, [currentUid, groupId])
 
   async function handleFileAppeal() {
     if (!pendingAppeal || !userProfile || !appealComment.trim()) return

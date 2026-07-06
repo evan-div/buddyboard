@@ -37,12 +37,14 @@ export default function ProfilePage() {
   }, [user, authLoading, router])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- initialize form fields once the async profile arrives */
     if (userProfile) {
       setDisplayName(userProfile.displayName ?? '')
       if (!avatarDraft) setAvatarDraft(userProfile.avatar)
       setCoins(userProfile.coins ?? 0)
       setUnlockedItems(userProfile.unlockedItems ?? [])
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSaveName(e: React.FormEvent) {

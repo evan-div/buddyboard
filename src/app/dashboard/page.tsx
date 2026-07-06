@@ -289,6 +289,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (view !== 'groups' || !user) return
     let stale = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset visible state when the groups view (re)opens, then fetch
     setLoadingGroups(true)
     setGroupsError(null)
 

@@ -54,7 +54,7 @@ function CaseCard({
   members: GroupMember[]
 }) {
   const [voting, setVoting] = useState(false)
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
   const autoResolved = useRef(false)
   const [txReason, setTxReason] = useState<string | null>(null)
 
