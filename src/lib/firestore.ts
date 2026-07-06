@@ -310,7 +310,7 @@ export async function addReaction(
     const snap = await tx.get(txRef)
     if (!snap.exists()) return
     const data = snap.data()
-    const existing: string[] = data?.[`reactions.${emoji}`] ?? (data?.reactions?.[emoji] ?? [])
+    const existing: string[] = data?.reactions?.[emoji] ?? []
     if (existing.includes(uid)) {
       tx.update(txRef, { [`reactions.${emoji}`]: arrayRemove(uid) })
     } else {
@@ -391,7 +391,7 @@ export async function giveOrTakePoints(
         `Exceeds daily give limit. You have ${giveLimit - dailyPointsGiven} points left to give today.`
       )
     }
-    if (dailyPointsTaken + totalTaking > 20) {
+    if (dailyPointsTaken + totalTaking > takeLimit) {
       throw new Error(
         `Exceeds daily take limit. You have ${takeLimit - dailyPointsTaken} points left to take today.`
       )
@@ -553,26 +553,21 @@ export async function getGroupDailyStats(
 }> {
   const today = todayString()
   const memberRef = doc(db, 'groups', groupId, 'members', uid)
-  const snap = await getDoc(memberRef)
+  const groupRef = doc(db, 'groups', groupId)
+  const [snap, groupSnap] = await Promise.all([getDoc(memberRef), getDoc(groupRef)])
 
-  if (!snap.exists()) {
+  const giveLimit: number = groupSnap.data()?.dailyGiveLimit ?? 100
+  const takeLimit: number = groupSnap.data()?.dailyTakeLimit ?? 20
+
+  const data = snap.exists() ? snap.data() : null
+
+  // Counters reset each day; a stale lastResetDate means nothing spent yet today
+  if (!data || data.lastResetDate !== today) {
     return {
       dailyPointsGiven: 0,
       dailyPointsTaken: 0,
-      remainingGive: 100,
-      remainingTake: 20,
-    }
-  }
-
-  const data = snap.data()
-
-  // Reset if date has changed
-  if (data.lastResetDate !== today) {
-    return {
-      dailyPointsGiven: 0,
-      dailyPointsTaken: 0,
-      remainingGive: 100,
-      remainingTake: 20,
+      remainingGive: giveLimit,
+      remainingTake: takeLimit,
     }
   }
 
@@ -582,8 +577,8 @@ export async function getGroupDailyStats(
   return {
     dailyPointsGiven: given,
     dailyPointsTaken: taken,
-    remainingGive: Math.max(0, 100 - given),
-    remainingTake: Math.max(0, 20 - taken),
+    remainingGive: Math.max(0, giveLimit - given),
+    remainingTake: Math.max(0, takeLimit - taken),
   }
 }
 
