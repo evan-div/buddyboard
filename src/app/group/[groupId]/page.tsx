@@ -1063,14 +1063,16 @@ export default function GroupPage() {
 
       {showGroupInfo && group && (
         <div
+          className="overlay-fade"
           style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowGroupInfo(false) }}
         >
-          <div style={{ width: '100%', maxWidth: 360, background: '#fff', borderRadius: 24, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' }}>
+          <div className="sheet-rise" style={{ width: '100%', maxWidth: 360, background: '#fff', borderRadius: 24, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' }}>
             {/* Header */}
             <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)', padding: '28px 24px 20px', textAlign: 'center', position: 'relative' }}>
               <button
                 onClick={() => setShowGroupInfo(false)}
+                aria-label="Close"
                 style={{ position: 'absolute', top: 14, right: 14, background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', width: 32, height: 32, color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 ✕
@@ -1148,15 +1150,17 @@ export default function GroupPage() {
         return (
           <div
             onClick={() => setShowAppearance(false)}
+            className="overlay-fade"
             style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
           >
             <div
               onClick={e => e.stopPropagation()}
+              className="sheet-rise"
               style={{ width: '100%', maxWidth: 480, maxHeight: '92dvh', overflowY: 'auto', background: '#f5f5f5', borderRadius: '24px 24px 0 0', padding: '20px 16px 32px' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <span style={{ fontSize: 17, fontWeight: 800, color: '#111' }}>Customize Avatar</span>
-                <button onClick={() => setShowAppearance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#888', lineHeight: 1 }}>✕</button>
+                <button onClick={() => setShowAppearance(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#888', lineHeight: 1 }}>✕</button>
               </div>
               <AvatarBuilder value={appearanceDraft} onChange={setAppearanceDraft} unlockedItems={appearanceUnlocked} />
               <button
@@ -1196,12 +1200,12 @@ export default function GroupPage() {
 
       {/* Appeal modal */}
       {pendingAppeal && (
-        <div style={{
+        <div className="overlay-fade" style={{
           position: 'fixed', inset: 0, zIndex: 400,
           background: 'rgba(0,0,0,0.7)',
           display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         }}>
-          <div style={{
+          <div className="sheet-rise" style={{
             background: '#0f0f13',
             borderRadius: '20px 20px 0 0',
             borderTop: '1px solid #1f2937',

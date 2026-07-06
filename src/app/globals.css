@@ -10,6 +10,18 @@ body {
   color: var(--foreground);
 }
 
+/* Keyframes referenced from inline styles (loading indicators). Tailwind v4
+   only emits its own keyframes when the matching utility class is used, so
+   these must be defined here. */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
 @keyframes bell-wiggle {
   0%, 70%, 100% { transform: rotate(0deg); }
   10%           { transform: rotate(-18deg); }
@@ -21,4 +33,39 @@ body {
 .bell-wiggle {
   animation: bell-wiggle 1.8s ease-in-out infinite;
   transform-origin: top center;
+}
+
+/* Overlays/panels ease in instead of popping */
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sheet-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes panel-slide {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.overlay-fade { animation: overlay-fade 0.18s ease-out; }
+.sheet-rise   { animation: sheet-rise 0.22s ease-out; }
+.panel-slide  { animation: panel-slide 0.22s ease-out; }
+
+button {
+  touch-action: manipulation;
+}
+
+/* Subtle, universal press feedback. Buttons that set an inline transform
+   (e.g. selected color swatches) keep their own behavior — inline wins. */
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled) { transition: transform 0.1s ease; }
+  button:not(:disabled):active { transform: scale(0.97); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bell-wiggle, .overlay-fade, .sheet-rise, .panel-slide { animation: none; }
 }

@@ -138,6 +138,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
 
   return (
     <div
+      className="overlay-fade"
       style={{
         position: 'fixed',
         inset: 0,
@@ -150,6 +151,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
+        className="sheet-rise"
         style={{
           background: '#efefef',
           borderRadius: 28,
@@ -189,6 +191,7 @@ export default function CreateGroupModal({ onClose, onCreated, userUid }: Props)
             </div>
             <button
               onClick={onClose}
+              aria-label="Close"
               style={{ color: '#999', background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}
             >
               ✕

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -16,6 +16,18 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "BuddyBoard",
   description: "Reward your people. Track the vibe.",
+  appleWebApp: {
+    capable: true,
+    title: "BuddyBoard",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#3476c8",
 };
 
 export default function RootLayout({

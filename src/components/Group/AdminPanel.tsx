@@ -125,8 +125,8 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 300 }} />
-      <div style={{
+      <div onClick={onClose} className="overlay-fade" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 300 }} />
+      <div className="panel-slide" style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(380px, 100vw)',
         background: '#efefef', zIndex: 301,
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
@@ -146,6 +146,7 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
           </div>
           <button
             onClick={onClose}
+            aria-label="Close"
             style={{
               background: '#d4d4d4', border: 'none', borderRadius: '50%',
               color: '#555', fontSize: 18, width: 34, height: 34,

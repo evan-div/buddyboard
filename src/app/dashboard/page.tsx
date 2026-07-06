@@ -59,8 +59,8 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
     const takeLimit = group.dailyTakeLimit ?? 20
 
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center px-4 overlay-fade">
+        <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden sheet-rise">
           {/* Header */}
           <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)', padding: '28px 24px 20px' }}>
             <div style={{ textAlign: 'center' }}>
@@ -142,6 +142,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
 
   return (
     <div
+      className="overlay-fade"
       style={{
         position: 'fixed',
         inset: 0,
@@ -153,6 +154,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
       }}
     >
       <div
+        className="sheet-rise"
         style={{
           background: '#efefef',
           borderRadius: 28,

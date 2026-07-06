@@ -397,6 +397,7 @@ export default function NotificationPanel({ groupId, notifications, memberUids, 
       {/* Backdrop */}
       <div
         onClick={onClose}
+        className="overlay-fade"
         style={{
           position: 'fixed',
           inset: 0,
@@ -406,7 +407,7 @@ export default function NotificationPanel({ groupId, notifications, memberUids, 
       />
 
       {/* Panel */}
-      <div style={{
+      <div className="panel-slide" style={{
         position: 'fixed',
         top: 0,
         right: 0,
@@ -443,6 +444,7 @@ export default function NotificationPanel({ groupId, notifications, memberUids, 
           </div>
           <button
             onClick={onClose}
+            aria-label="Close"
             style={{
               background: '#1f2937',
               border: 'none',

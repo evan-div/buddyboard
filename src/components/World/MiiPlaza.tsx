@@ -427,7 +427,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
             )}
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
+        <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
       </div>
 
       {isOwn ? (
@@ -748,7 +748,7 @@ function SelfCard({ member, groupId, mobile, onClose, onAvatarUpdated }: {
           <div style={{ fontWeight: 800, fontSize: 15, color: '#111', letterSpacing: -0.3 }}>{member.displayName}</div>
           <div style={{ fontSize: 11, color: '#6366f1', marginTop: 2, fontWeight: 600 }}>Customize your look</div>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
+        <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#bbb', fontSize: 18, lineHeight: 1, padding: 0, marginTop: 1 }}>✕</button>
       </div>
 
       {/* Tab bar — 5 tabs */}
@@ -1785,7 +1785,7 @@ export default function MiiPlaza({
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
-        <div style={isMobile ? {
+        <div className="sheet-rise" style={isMobile ? {
           position: 'absolute',
           bottom: 0, left: 0, right: 0,
           zIndex: 10,
