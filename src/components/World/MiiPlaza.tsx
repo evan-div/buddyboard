@@ -4,6 +4,7 @@ import { Suspense, useMemo, useRef, useState, useEffect, useCallback } from 'rea
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
@@ -44,20 +45,28 @@ const DEFAULT_PRESETS: PlazaPreset[] = [
 
 const FSIZE      = 26
 const PATCH_GRID = 10                               // 10×10 checker squares
-const PATCH_W    = FSIZE / PATCH_GRID               // 1.625 per patch
-const N_BLADES   = 3000                             // blades per patch (3D texture only)
+const PATCH_W    = FSIZE / PATCH_GRID               // 2.6 per patch
+// Blades are decorative texture on top of the solid checkerboard base, so a
+// moderate count reads the same. 3000/patch (300k triangles total) measurably
+// hurt low-end mobile GPUs.
+const N_BLADES   = 1000                             // blades per patch
 const BLADE_H    = 0.16
 const BLADE_W    = 0.022
-const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 5120
+const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 50k per color
 
 const LIGHT_COLOR = '#6dc957'
 const DARK_COLOR  = '#246b24'
 
-function makeBladeMat(color: string): THREE.MeshStandardMaterial {
+// Registers each compiled shader's uTime uniform into the passed ref so the
+// render loop can advance the sway animation without touching the material.
+function makeBladeMat(
+  color: string,
+  timeUniforms: React.RefObject<{ value: number }[]>,
+): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.85 })
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 }
-    mat.userData.shader = shader
+    timeUniforms.current.push(shader.uniforms.uTime as { value: number })
     shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
@@ -74,6 +83,7 @@ function makeBladeMat(color: string): THREE.MeshStandardMaterial {
 function GrassFloor() {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
+  const timeUniforms = useRef<{ value: number }[]>([])
 
   // Canvas-drawn checkerboard — solid full coverage, no gaps between blades
   const baseTex = useMemo(() => {
@@ -101,8 +111,8 @@ function GrassFloor() {
     return geo
   }, [])
 
-  const lightMat = useMemo(() => makeBladeMat(LIGHT_COLOR), [])
-  const darkMat  = useMemo(() => makeBladeMat(DARK_COLOR), [])
+  const lightMat = useMemo(() => makeBladeMat(LIGHT_COLOR, timeUniforms), [])
+  const darkMat  = useMemo(() => makeBladeMat(DARK_COLOR, timeUniforms), [])
 
   useEffect(() => {
     const dummy = new THREE.Object3D()
@@ -131,10 +141,7 @@ function GrassFloor() {
   }, [])
 
   useFrame((_, delta) => {
-    const ls = lightMat.userData.shader
-    const ds = darkMat.userData.shader
-    if (ls) ls.uniforms.uTime.value += delta
-    if (ds) ds.uniforms.uTime.value += delta
+    for (const u of timeUniforms.current) u.value += delta
   })
 
   return (
@@ -173,7 +180,7 @@ function CameraController({
   mobile,
 }: {
   focusPos: [number, number, number] | null
-  orbitRef: React.RefObject<any>
+  orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
   mobile: boolean
 }) {
@@ -240,20 +247,24 @@ interface CardProps {
 }
 
 function StatsView({ member, groupId }: { member: GroupMember; groupId: string }) {
-  const [txns, setTxns] = useState<Transaction[]>([])
+  // fetchedAt doubles as the loading flag and the reference point for the
+  // 7-day cutoff, so render doesn't have to call Date.now() itself
+  const [txData, setTxData] = useState<{ txns: Transaction[]; fetchedAt: number } | null>(null)
   const [cases, setCases] = useState<CourtCase[]>([])
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    getTransactionsSince(groupId, thirtyDaysAgo)
-      .then((all) => { setTxns(all); setLoading(false) })
-      .catch(() => setLoading(false))
+    let stale = false
+    const fetchedAt = Date.now()
+    getTransactionsSince(groupId, new Date(fetchedAt - 30 * 24 * 60 * 60 * 1000))
+      .then((all) => { if (!stale) setTxData({ txns: all, fetchedAt }) })
+      .catch(() => { if (!stale) setTxData({ txns: [], fetchedAt }) })
     const unsub = subscribeToCases(groupId, setCases)
-    return unsub
+    return () => { stale = true; unsub() }
   }, [groupId])
 
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const loading = txData === null
+  const txns = txData?.txns ?? []
+  const sevenDaysAgo = new Date((txData?.fetchedAt ?? 0) - 7 * 24 * 60 * 60 * 1000)
   const ptsWeek  = txns.filter((t) => t.toUid === member.uid && t.createdAt >= sevenDaysAgo).reduce((s, t) => s + t.points, 0)
   const ptsMonth = txns.filter((t) => t.toUid === member.uid).reduce((s, t) => s + t.points, 0)
   const totalGiven    = txns.filter((t) => t.fromUid === member.uid).reduce((s, t) => s + Math.abs(t.points), 0)
@@ -886,7 +897,7 @@ interface PhysicsUpdaterProps {
   dragCursorVel:  React.RefObject<THREE.Vector3>
   charGroups:     React.RefObject<Map<string, THREE.Group>>
   physicsMap:     React.RefObject<Map<string, PhysState>>
-  orbitRef:       React.RefObject<any>
+  orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
   wallFlashRef:   React.RefObject<number[]>
@@ -1221,12 +1232,13 @@ function CloudSprite({ pos, texture, width }: {
   width: number
 }) {
   const ref    = useRef<THREE.Sprite>(null)
-  const driftT = useRef(Math.random() * Math.PI * 2)
+  // Deterministic per-sprite drift offset (render must stay pure)
+  const driftT = (Math.abs(pos[0] * 12.9898 + pos[2] * 78.233) % (Math.PI * 2))
   const height = width * 0.5  // 2:1 aspect matches canvas texture
 
   useFrame(({ clock }) => {
     if (!ref.current) return
-    const t = clock.elapsedTime * 0.05 + driftT.current
+    const t = clock.elapsedTime * 0.05 + driftT
     ref.current.position.x = pos[0] + Math.sin(t)        * 4.0
     ref.current.position.z = pos[2] + Math.cos(t * 0.65) * 3.0
   })
@@ -1350,7 +1362,7 @@ function Scene({
   animationType: 'celebrate' | 'shame' | null
   mobile: boolean
 }) {
-  const orbitRef     = useRef<any>(null)
+  const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
   const wallFlashRef = useRef<number[]>([0, 0, 0, 0])
 
@@ -1363,19 +1375,21 @@ function Scene({
   const dragCursorVel = useRef(new THREE.Vector3())
   const [dragModeMap, setDragModeMap] = useState<Map<string, DragMode>>(new Map())
 
-  // Spawn positions keyed by uid — assigned once per member, never changed.
-  // Indexing by array position (i) would teleport characters when Firestore
-  // re-orders members after a points update, because the same uid would receive
-  // a different initialPosition prop reference and R3F would re-apply it.
-  const spawnPositions = useRef<Map<string, [number, number, number]>>(new Map())
-  members.forEach((member, i) => {
-    if (!spawnPositions.current.has(member.uid)) {
-      const total  = members.length
-      const angle  = (i / Math.max(total, 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.8
-      const radius = 0.5 + Math.random() * 2.0
-      spawnPositions.current.set(member.uid, [Math.cos(angle) * radius, 0, Math.sin(angle) * radius])
+  // Spawn positions derived deterministically from each uid, so a member keeps
+  // the same spawn point no matter how Firestore re-orders the list. (The
+  // position is only applied on mount inside MiiCharacter; after that the
+  // character wanders on its own.)
+  const spawnPositions = useMemo(() => {
+    const map = new Map<string, [number, number, number]>()
+    for (const member of members) {
+      let h = 0
+      for (let i = 0; i < member.uid.length; i++) h = (Math.imul(31, h) + member.uid.charCodeAt(i)) | 0
+      const angle  = ((h >>> 0) / 4294967295) * Math.PI * 2
+      const radius = 0.5 + ((h >>> 8) & 0xffff) / 65535 * 2.0
+      map.set(member.uid, [Math.cos(angle) * radius, 0, Math.sin(angle) * radius])
     }
-  })
+    return map
+  }, [members])
 
   const setCharMode = useCallback((uid: string, mode: DragMode | null) => {
     const existing = physicsMap.current.get(uid)
@@ -1612,7 +1626,7 @@ function Scene({
         <MiiCharacter
           key={member.uid}
           member={member}
-          initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
+          initialPosition={spawnPositions.get(member.uid) ?? [0, 0, 0]}
           bounds={3.0}
           isSelected={selectedUid === member.uid}
           celebrationType={member.uid === animatingUid ? animationType : null}

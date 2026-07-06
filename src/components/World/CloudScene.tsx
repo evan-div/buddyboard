@@ -57,12 +57,13 @@ function CloudSprite({ pos, texture, width }: {
   width: number
 }) {
   const ref    = useRef<THREE.Sprite>(null)
-  const driftT = useRef(Math.random() * Math.PI * 2)
+  // Deterministic per-sprite drift offset (render must stay pure)
+  const driftT = (Math.abs(pos[0] * 12.9898 + pos[2] * 78.233) % (Math.PI * 2))
   const height = width * (1080 / 1920)
 
   useFrame(({ clock }) => {
     if (wipeActive.current || !ref.current) return
-    const t = clock.elapsedTime * 0.05 + driftT.current
+    const t = clock.elapsedTime * 0.05 + driftT
     ref.current.position.x = pos[0] + Math.sin(t)        * 4.0
     ref.current.position.z = pos[2] + Math.cos(t * 0.65) * 3.0
   })

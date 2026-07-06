@@ -46,7 +46,7 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
   useEffect(() => { cbCovered.current = onCovered }, [onCovered])
   useEffect(() => { cbDone.current    = onDone    }, [onDone])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Position clouds for the initial phase, once, before first paint
   useLayoutEffect(() => {
     const inCovered = phase === 'covered'
     cloudRefs.current.forEach((el, i) => {
@@ -55,9 +55,12 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
       el.style.transition = 'none'
       el.style.transform  = `translateX(${inCovered ? ALL_CLOUDS[i].covX : ALL_CLOUDS[i].idleX})`
     })
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount-only initial positioning
 
   useLayoutEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- imperative multi-phase
+       animation controller: overlay visibility/pointer state must mirror the
+       externally driven wipe phase the moment it changes */
     const ts: ReturnType<typeof setTimeout>[] = []
 
     function promote() {
@@ -123,6 +126,7 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
     }
 
     return () => ts.forEach(clearTimeout)
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [phase])
 
   return (

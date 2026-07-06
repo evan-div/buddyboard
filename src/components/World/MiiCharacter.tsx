@@ -432,24 +432,25 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
   const meshRefs = useRef<(THREE.Mesh | null)[]>(Array(PARTICLE_COUNT).fill(null))
   const particles = useRef<ParticleState[]>([])
 
-  if (particles.current.length === 0) {
-    particles.current = Array.from({ length: PARTICLE_COUNT }, () => ({
-      pos: new THREE.Vector3(
-        (Math.random() - 0.5) * 0.5,
-        bodyTop + Math.random() * 0.4,
-        (Math.random() - 0.5) * 0.5,
-      ),
-      vel: new THREE.Vector3(
-        (Math.random() - 0.5) * 5,
-        2.5 + Math.random() * 3.5,
-        (Math.random() - 0.5) * 5,
-      ),
-      age: 0,
-      maxAge: 1.0 + Math.random() * 1.2,
-    }))
-  }
-
   useFrame((_, delta) => {
+    // Lazy init on the first animation frame keeps render pure
+    if (particles.current.length === 0) {
+      particles.current = Array.from({ length: PARTICLE_COUNT }, () => ({
+        pos: new THREE.Vector3(
+          (Math.random() - 0.5) * 0.5,
+          bodyTop + Math.random() * 0.4,
+          (Math.random() - 0.5) * 0.5,
+        ),
+        vel: new THREE.Vector3(
+          (Math.random() - 0.5) * 5,
+          2.5 + Math.random() * 3.5,
+          (Math.random() - 0.5) * 5,
+        ),
+        age: 0,
+        maxAge: 1.0 + Math.random() * 1.2,
+      }))
+    }
+
     particles.current.forEach((p, i) => {
       p.age = Math.min(p.maxAge, p.age + delta)
       p.vel.y -= delta * 9
@@ -548,13 +549,13 @@ export default function MiiCharacter({
   const ragdoll       = useRef<RagdollRef>(makeRagdoll())
   const animState     = useRef<AnimState>('walking')
   const idleTimer     = useRef(0)
-  const phase         = useRef(Math.random() * Math.PI * 2)
+  const phase         = useRef(0)
   const celebTimer    = useRef(0)
   const selectedTimer = useRef(0)
   const dragTimer     = useRef(0)
-  const _ia = Math.random() * Math.PI * 2
-  const _ir = 1.0 + Math.random() * (bounds * 0.85)
-  const targetPos = useRef(new THREE.Vector3(Math.cos(_ia) * _ir, 0, Math.sin(_ia) * _ir))
+  // Seeded lazily (first frame / mount effect) so render stays pure and we
+  // don't allocate a new Vector3 + call Math.random on every re-render
+  const targetPos = useRef<THREE.Vector3 | null>(null)
 
   const dims      = useBeanDims(member.avatar)
   const skinColor = SKIN_TONES[member.avatar.skinTone]
@@ -578,6 +579,9 @@ export default function MiiCharacter({
     if (groupRef.current) {
       groupRef.current.position.set(initialPosition[0], initialPosition[1], initialPosition[2])
     }
+    // Desync this character's animation cycle from the others
+    phase.current = Math.random() * Math.PI * 2
+    pickNewTarget()
     onGroupMount?.(member.uid, groupRef.current)
     return () => { onGroupMount?.(member.uid, null) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -617,10 +621,7 @@ export default function MiiCharacter({
     if (dragMode === null && groupRef.current) {
       groupRef.current.rotation.x = 0
       groupRef.current.rotation.z = 0
-      animState.current = 'walking'
-      const angle  = Math.random() * Math.PI * 2
-      const radius = 1.0 + Math.random() * (bounds * 0.85)
-      targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
+      pickNewTarget()
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -628,6 +629,7 @@ export default function MiiCharacter({
     animState.current = 'walking'
     const angle  = Math.random() * Math.PI * 2
     const radius = 1.0 + Math.random() * (bounds * 0.85)
+    if (!targetPos.current) targetPos.current = new THREE.Vector3()
     targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
   }
 
@@ -860,8 +862,9 @@ export default function MiiCharacter({
     const body = bodyGroupRef.current
 
     if (animState.current === 'walking') {
-      const dx   = targetPos.current.x - group.position.x
-      const dz   = targetPos.current.z - group.position.z
+      if (!targetPos.current) pickNewTarget()
+      const dx   = targetPos.current!.x - group.position.x
+      const dz   = targetPos.current!.z - group.position.z
       const dist = Math.sqrt(dx * dx + dz * dz)
       if (dist < 0.15) {
         animState.current = Math.random() < 0.5 ? 'idle_bob' : 'idle_sway'
