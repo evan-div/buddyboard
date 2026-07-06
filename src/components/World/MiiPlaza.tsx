@@ -239,7 +239,7 @@ interface CardProps {
   onSubmitted: (type: 'celebrate' | 'shame') => void
 }
 
-function StatsView({ member, groupId, onBack }: { member: GroupMember; groupId: string; onBack: () => void }) {
+function StatsView({ member, groupId }: { member: GroupMember; groupId: string }) {
   const [txns, setTxns] = useState<Transaction[]>([])
   const [cases, setCases] = useState<CourtCase[]>([])
   const [loading, setLoading] = useState(true)
@@ -484,7 +484,7 @@ function MemberCard({ member, currentUid, groupId, remainingGive, remainingTake,
         </>
 
       ) : view === 'stats' ? (
-        <StatsView member={member} groupId={groupId} onBack={() => setView('presets')} />
+        <StatsView member={member} groupId={groupId} />
 
       ) : view === 'confirm' ? (
         <>
@@ -1615,7 +1615,6 @@ function Scene({
           initialPosition={spawnPositions.current.get(member.uid) ?? [0, 0, 0]}
           bounds={3.0}
           isSelected={selectedUid === member.uid}
-          onSelect={onSelect}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
           onPickupStart={() => handlePickupStart(member)}

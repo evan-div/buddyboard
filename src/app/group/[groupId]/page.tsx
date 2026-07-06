@@ -14,7 +14,6 @@ import {
   getGroupMembers,
   getUser,
   subscribeToFeed,
-  giveOrTakePoints,
   getGroupDailyStats,
   getTransactionsSince,
   addReaction,
@@ -23,13 +22,13 @@ import {
   reactToPost,
   addWallComment,
   subscribeToWallComments,
-  sendPushToUser,
   updateUserAvatar,
   updateMemberAvatar,
 } from '@/lib/firestore'
 import type { WallPost, WallComment } from '@/lib/types'
-import type { Group, GroupMember, Transaction, PointsAllocation, GroupNotification, PlazaPreset } from '@/lib/types'
+import type { Group, GroupMember, Transaction, GroupNotification } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
+import { timeAgo } from '@/lib/utils'
 import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
@@ -41,288 +40,6 @@ const PodiumScene = dynamic(() => import('@/components/World/PodiumScene'), { ss
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
 const AdminPanel = dynamic(() => import('@/components/Group/AdminPanel'), { ssr: false })
 const AvatarBuilder = dynamic(() => import('@/components/Avatar/AvatarBuilder'), { ssr: false })
-
-// ─── Points Modal ─────────────────────────────────────────────────────────────
-
-type PointsModalProps = {
-  groupId: string
-  currentUid: string
-  members: GroupMember[]
-  remainingGive: number
-  remainingTake: number
-  isChief?: boolean
-  presets?: PlazaPreset[]
-  onClose: () => void
-  onSubmitted: () => void
-}
-
-type AllocationEntry = {
-  points: string
-  reason: string
-}
-
-function PointsModal({
-  groupId,
-  currentUid,
-  members,
-  remainingGive,
-  remainingTake,
-  isChief,
-  presets,
-  onClose,
-  onSubmitted,
-}: PointsModalProps) {
-  const [mode, setMode] = useState<'give' | 'take'>('give')
-  const [allocations, setAllocations] = useState<Record<string, AllocationEntry>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  const otherMembers = members.filter((m) => m.uid !== currentUid)
-
-  const dailyLimit = mode === 'give' ? remainingGive + (isChief ? 25 : 0) : remainingTake
-  const modePresets = (presets ?? []).filter((p) => mode === 'give' ? p.points > 0 : p.points < 0)
-
-  const totalAllocated = otherMembers.reduce((sum, m) => {
-    const val = parseInt(allocations[m.uid]?.points ?? '0', 10)
-    return sum + (isNaN(val) || val < 0 ? 0 : val)
-  }, 0)
-
-  function updateAllocation(uid: string, field: 'points' | 'reason', value: string) {
-    setAllocations((prev) => ({
-      ...prev,
-      [uid]: {
-        points: prev[uid]?.points ?? '0',
-        reason: prev[uid]?.reason ?? '',
-        [field]: value,
-      },
-    }))
-  }
-
-  function handleModeChange(newMode: 'give' | 'take') {
-    setMode(newMode)
-    setAllocations({})
-    setError('')
-  }
-
-  async function handleSubmit() {
-    setError('')
-
-    const allocs: PointsAllocation[] = otherMembers
-      .map((m) => {
-        const raw = parseInt(allocations[m.uid]?.points ?? '0', 10)
-        const pts = isNaN(raw) || raw <= 0 ? 0 : raw
-        return {
-          toUid: m.uid,
-          points: mode === 'give' ? pts : -pts,
-          reason: allocations[m.uid]?.reason?.trim() ?? '',
-        }
-      })
-      .filter((a) => a.points !== 0)
-
-    if (allocs.length === 0) {
-      setError('Please allocate at least 1 point to someone.')
-      return
-    }
-
-    if (totalAllocated > dailyLimit) {
-      setError(
-        `Total exceeds your daily ${mode} limit. You have ${dailyLimit} pts remaining.`
-      )
-      return
-    }
-
-    setSubmitting(true)
-    try {
-      await giveOrTakePoints(groupId, currentUid, allocs, isChief ?? false)
-      // Fire-and-forget push notifications to each recipient
-      allocs.forEach((a) => {
-        const pts = a.points
-        const sign = pts > 0 ? '+' : ''
-        const title = pts > 0 ? '🎉 Points received!' : '📉 Points taken'
-        const body = `${sign}${pts} pts${a.reason ? ` · ${a.reason}` : ''}`
-        sendPushToUser(a.toUid, title, body, `/group/${groupId}`).catch(() => {})
-      })
-      onSubmitted()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to submit points.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const isOverLimit = totalAllocated > dailyLimit
-  const hasAllocations = totalAllocated > 0
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="w-full max-w-lg bg-gray-900 rounded-t-2xl sm:rounded-2xl border border-gray-800 shadow-2xl max-h-[90vh] flex flex-col">
-        {/* Modal header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-800 flex-shrink-0">
-          <h2 className="text-lg font-bold text-white">Give / Take Points</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 transition-colors text-xl leading-none"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Mode tabs */}
-        <div className="px-5 pt-4 flex-shrink-0">
-          <div className="flex bg-gray-800 rounded-xl p-1 gap-1">
-            <button
-              onClick={() => handleModeChange('give')}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-                mode === 'give'
-                  ? 'bg-green-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Give Points
-            </button>
-            <button
-              onClick={() => handleModeChange('take')}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-                mode === 'take'
-                  ? 'bg-red-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Take Points
-            </button>
-          </div>
-
-          <p className="text-gray-500 text-xs mt-2 text-center">
-            {mode === 'give'
-              ? `You can give up to ${remainingGive} pts today`
-              : `You can take up to ${remainingTake} pts today`}
-          </p>
-        </div>
-
-        {/* Member list */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {otherMembers.length === 0 && (
-            <p className="text-gray-500 text-sm text-center py-8">
-              No other members in this group yet.
-            </p>
-          )}
-          {otherMembers.map((member) => {
-            const rawVal = allocations[member.uid]?.points ?? '0'
-            const numVal = parseInt(rawVal, 10)
-            const pts = isNaN(numVal) || numVal < 0 ? 0 : numVal
-
-            return (
-              <div
-                key={member.uid}
-                className="bg-gray-800 rounded-xl p-3 border border-gray-700"
-              >
-                {modePresets.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {modePresets.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          updateAllocation(member.uid, 'points', String(Math.abs(p.points)))
-                          updateAllocation(member.uid, 'reason', p.label)
-                        }}
-                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-400 hover:border-indigo-500 hover:text-white transition-all"
-                      >
-                        {p.emoji} {p.label}
-                        <span className={`ml-1 font-bold ${p.points > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {p.points > 0 ? `+${p.points}` : p.points}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="flex items-center gap-3 mb-2">
-                  <AvatarDisplay config={member.avatar ?? DEFAULT_AVATAR} size={32} />
-                  <span className="text-white font-medium text-sm flex-1 truncate">
-                    {member.displayName}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={rawVal === '0' ? '' : rawVal}
-                      placeholder="0"
-                      onChange={(e) => updateAllocation(member.uid, 'points', e.target.value || '0')}
-                      className="w-16 bg-gray-900 border border-gray-600 rounded-lg px-2 py-1.5 text-white text-sm text-center focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    />
-                    <span
-                      className={`text-xs font-medium ${
-                        mode === 'give' ? 'text-green-400' : 'text-red-400'
-                      }`}
-                    >
-                      pts
-                    </span>
-                  </div>
-                </div>
-                {pts > 0 && (
-                  <input
-                    type="text"
-                    value={allocations[member.uid]?.reason ?? ''}
-                    onChange={(e) => updateAllocation(member.uid, 'reason', e.target.value)}
-                    placeholder="Reason (optional)"
-                    maxLength={100}
-                    className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  />
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 pb-5 pt-3 border-t border-gray-800 flex-shrink-0 space-y-3">
-          {/* Running total */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-400">Total allocated</span>
-            <span
-              className={`font-bold ${
-                isOverLimit
-                  ? 'text-red-400'
-                  : totalAllocated > 0
-                  ? mode === 'give'
-                    ? 'text-green-400'
-                    : 'text-red-400'
-                  : 'text-gray-500'
-              }`}
-            >
-              {totalAllocated} / {dailyLimit} pts
-            </span>
-          </div>
-
-          {error && (
-            <div className="px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-              {error}
-            </div>
-          )}
-
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || isOverLimit || !hasAllocations}
-            className={`w-full py-3 rounded-xl font-semibold text-white transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-              mode === 'give'
-                ? 'bg-green-600 hover:bg-green-500 shadow-green-500/20'
-                : 'bg-red-600 hover:bg-red-500 shadow-red-500/20'
-            }`}
-          >
-            {submitting
-              ? 'Submitting...'
-              : mode === 'give'
-              ? `Give ${totalAllocated} pts`
-              : `Take ${totalAllocated} pts`}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Leaderboard Tab ──────────────────────────────────────────────────────────
 
@@ -384,12 +101,7 @@ function LeaderboardTab({ members, currentUid, groupId, chiefUid, creatorUid }: 
   }, [period, groupId])
 
   const ranked = computeRankings(members, transactions, period)
-  const top3 = ranked.slice(0, 3) as (RankedMember | undefined)[]
-  const rest  = ranked.slice(3)
-
-  const first  = top3[0]
-  const second = top3[1]
-  const third  = top3[2]
+  const rest   = ranked.slice(3)
 
   return (
     <div>
@@ -638,7 +350,7 @@ function WallPostThread({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: post.uid === currentUid ? '#42b842' : '#111' }}>{post.displayName}</span>
-            <span style={{ fontSize: 10, color: '#999', flexShrink: 0 }}>{timeAgoWall(post.createdAt)}</span>
+            <span style={{ fontSize: 10, color: '#999', flexShrink: 0 }}>{timeAgo(post.createdAt)}</span>
           </div>
           <p style={{ fontSize: 14, color: '#333', margin: '4px 0 0', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{post.text}</p>
         </div>
@@ -699,7 +411,7 @@ function WallPostThread({
               <div style={{ flex: 1, background: '#d4d4d4', borderRadius: 12, padding: '7px 10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
                   <span style={{ fontWeight: 700, fontSize: 12, color: c.uid === currentUid ? '#42b842' : '#111' }}>{c.displayName}</span>
-                  <span style={{ fontSize: 10, color: '#999' }}>{timeAgoWall(c.createdAt)}</span>
+                  <span style={{ fontSize: 10, color: '#999' }}>{timeAgo(c.createdAt)}</span>
                 </div>
                 <p style={{ fontSize: 13, color: '#333', margin: 0, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.text}</p>
               </div>
@@ -830,14 +542,6 @@ function WallTab({ groupId, currentUid, currentMember }: { groupId: string; curr
       )}
     </div>
   )
-}
-
-function timeAgoWall(date: Date): string {
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (sec < 60)   return 'just now'
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
 }
 
 // ─── Group Page ───────────────────────────────────────────────────────────────

@@ -100,7 +100,3 @@ export function useBeanDims(config: AvatarConfig): BeanDims {
     [config.bodyHeight, config.bodyWidth, config.armLength, config.legLength, config.bodyShape],
   )
 }
-
-export function computeBeanDims(config: AvatarConfig): BeanDims {
-  return computeDims(config)
-}

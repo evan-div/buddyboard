@@ -527,7 +527,6 @@ export interface MiiCharacterProps {
   initialPosition: [number, number, number]
   bounds?: number
   isSelected: boolean
-  onSelect: (member: GroupMember, pos: [number, number, number]) => void
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   onPickupStart?: () => void
@@ -536,7 +535,7 @@ export interface MiiCharacterProps {
 
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
-  isSelected, onSelect, celebrationType = null,
+  isSelected, celebrationType = null,
   dragMode = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)

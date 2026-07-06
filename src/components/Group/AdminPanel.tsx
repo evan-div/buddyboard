@@ -6,20 +6,8 @@ import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { timeAgo } from '@/lib/utils'
 import { banishMember, adminSetPoints, updateGroupSettings } from '@/lib/firestore'
 import { subscribeToCases, dismissCase } from '@/lib/appeals'
+import { TIMEZONES } from '@/lib/timezones'
 import type { Group, GroupMember, CourtCase, PlazaPreset } from '@/lib/types'
-
-const TIMEZONES = [
-  { label: 'Eastern (ET)', value: 'America/New_York' },
-  { label: 'Central (CT)', value: 'America/Chicago' },
-  { label: 'Mountain (MT)', value: 'America/Denver' },
-  { label: 'Pacific (PT)', value: 'America/Los_Angeles' },
-  { label: 'Hawaii', value: 'Pacific/Honolulu' },
-  { label: 'London', value: 'Europe/London' },
-  { label: 'Paris', value: 'Europe/Paris' },
-  { label: 'Tokyo', value: 'Asia/Tokyo' },
-  { label: 'Sydney', value: 'Australia/Sydney' },
-  { label: 'UTC', value: 'UTC' },
-]
 
 type Props = {
   group: Group
