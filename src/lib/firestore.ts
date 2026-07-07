@@ -9,6 +9,7 @@ import {
   orderBy,
   limit,
   getDocs,
+  documentId,
   onSnapshot,
   runTransaction,
   Timestamp,
@@ -214,30 +215,51 @@ export async function joinGroup(inviteCode: string, user: User): Promise<string>
   return groupId
 }
 
+function mapGroupDoc(id: string, data: Record<string, unknown>): Group {
+  return {
+    id: (data.id as string) ?? id,
+    name: data.name,
+    description: data.description,
+    createdBy: data.createdBy,
+    inviteCode: data.inviteCode,
+    createdAt: fromTimestamp(data.createdAt as Timestamp | Date | undefined),
+    memberCount: data.memberCount ?? 0,
+    emoji: data.emoji ?? '🏠',
+    dailyGiveLimit: data.dailyGiveLimit ?? 100,
+    dailyTakeLimit: data.dailyTakeLimit ?? 20,
+    timezone: data.timezone ?? 'UTC',
+    presets: data.presets ?? [],
+  } as Group
+}
+
 export async function getGroup(groupId: string): Promise<Group | null> {
   try {
     const groupRef = doc(db, 'groups', groupId)
     const snap = await getDoc(groupRef)
     if (!snap.exists()) return null
-    const data = snap.data()
-    return {
-      id: data.id ?? snap.id,
-      name: data.name,
-      description: data.description,
-      createdBy: data.createdBy,
-      inviteCode: data.inviteCode,
-      createdAt: fromTimestamp(data.createdAt),
-      memberCount: data.memberCount ?? 0,
-      emoji: data.emoji ?? '🏠',
-      dailyGiveLimit: data.dailyGiveLimit ?? 100,
-      dailyTakeLimit: data.dailyTakeLimit ?? 20,
-      timezone: data.timezone ?? 'UTC',
-      presets: data.presets ?? [],
-    } as Group
+    return mapGroupDoc(snap.id, snap.data())
   } catch (error) {
     console.error('Error getting group:', error)
     return null
   }
+}
+
+function mapMemberDoc(data: Record<string, unknown>): GroupMember {
+  return {
+    uid: data.uid,
+    displayName: data.displayName,
+    avatar: data.avatar,
+    totalPoints: data.totalPoints ?? 0,
+    dailyPointsGiven: data.dailyPointsGiven ?? 0,
+    dailyPointsTaken: data.dailyPointsTaken ?? 0,
+    lastResetDate: data.lastResetDate ?? todayString(),
+    joinedAt: fromTimestamp(data.joinedAt as Timestamp | Date | undefined),
+    isAdmin: data.isAdmin ?? false,
+    currentStreak: data.currentStreak,
+    longestStreak: data.longestStreak,
+    lastActiveDate: data.lastActiveDate,
+    badges: data.badges ?? [],
+  } as GroupMember
 }
 
 export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
@@ -245,36 +267,85 @@ export async function getGroupMembers(groupId: string): Promise<GroupMember[]> {
     const membersRef = collection(db, 'groups', groupId, 'members')
     const q = query(membersRef, orderBy('totalPoints', 'desc'))
     const snap = await getDocs(q)
-    return snap.docs.map((d) => {
-      const data = d.data()
-      return {
-        uid: data.uid,
-        displayName: data.displayName,
-        avatar: data.avatar,
-        totalPoints: data.totalPoints ?? 0,
-        dailyPointsGiven: data.dailyPointsGiven ?? 0,
-        dailyPointsTaken: data.dailyPointsTaken ?? 0,
-        lastResetDate: data.lastResetDate ?? todayString(),
-        joinedAt: fromTimestamp(data.joinedAt),
-        isAdmin: data.isAdmin ?? false,
-        currentStreak: data.currentStreak,
-        longestStreak: data.longestStreak,
-        lastActiveDate: data.lastActiveDate,
-        badges: data.badges ?? [],
-      } as GroupMember
-    })
+    return snap.docs.map((d) => mapMemberDoc(d.data()))
   } catch (error) {
     console.error('Error getting group members:', error)
     return []
   }
 }
 
-export async function getUserGroups(uid: string): Promise<Group[]> {
-  const user = await getUser(uid)
-  if (!user || !user.groups || user.groups.length === 0) return []
+// Live variants used by the group screen — listeners emit from the local
+// cache immediately and survive stale connections (one-shot reads hang)
 
-  const groups = await Promise.all(user.groups.map((groupId) => getGroup(groupId)))
-  return groups.filter((g): g is Group => g !== null)
+export function subscribeToGroup(
+  groupId: string,
+  callback: (group: Group | null) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, 'groups', groupId),
+    (snap) => callback(snap.exists() ? mapGroupDoc(snap.id, snap.data()) : null),
+    (error) => onError?.(error),
+  )
+}
+
+export function subscribeToGroupMembers(
+  groupId: string,
+  callback: (members: GroupMember[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const q = query(collection(db, 'groups', groupId, 'members'), orderBy('totalPoints', 'desc'))
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => mapMemberDoc(d.data()))),
+    (error) => onError?.(error),
+  )
+}
+
+// Real-time subscription to the groups a user belongs to. Unlike one-shot
+// getDoc reads — which hang indefinitely when the SDK's backend connection has
+// gone stale (e.g. after the app was backgrounded on mobile) — listeners emit
+// straight from the local cache and recover automatically when the connection
+// re-establishes.
+export function subscribeToUserGroups(
+  uid: string,
+  callback: (groups: Group[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  let groupsUnsub: (() => void) | null = null
+
+  const userUnsub = onSnapshot(
+    doc(db, 'users', uid),
+    (userSnap) => {
+      const groupIds: string[] = userSnap.data()?.groups ?? []
+      groupsUnsub?.()
+      groupsUnsub = null
+
+      if (groupIds.length === 0) {
+        callback([])
+        return
+      }
+
+      // documentId() 'in' queries accept at most 30 ids — far above the
+      // realistic number of groups per user
+      const q = query(collection(db, 'groups'), where(documentId(), 'in', groupIds.slice(0, 30)))
+      groupsUnsub = onSnapshot(
+        q,
+        (snap) => {
+          const byId = new Map(snap.docs.map((d) => [d.id, mapGroupDoc(d.id, d.data())]))
+          // Preserve the order of the user's groups array
+          callback(groupIds.map((id) => byId.get(id)).filter((g): g is Group => !!g))
+        },
+        (error) => onError?.(error),
+      )
+    },
+    (error) => onError?.(error),
+  )
+
+  return () => {
+    groupsUnsub?.()
+    userUnsub()
+  }
 }
 
 export async function leaveGroup(groupId: string, uid: string): Promise<void> {

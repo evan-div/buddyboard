@@ -1692,7 +1692,7 @@ interface Props {
   remainingTake: number
   isChief?: boolean
   presets?: PlazaPreset[]
-  onPointsSubmitted: () => void
+  onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
 }
@@ -1817,7 +1817,7 @@ export default function MiiPlaza({
               mobile={isMobile}
               onClose={handleClose}
               onSubmitted={(type) => {
-                onPointsSubmitted()
+                onPointsSubmitted?.()
                 const uid = selectedMember!.uid
                 handleClose()
                 if (animTimerRef.current) clearTimeout(animTimerRef.current)

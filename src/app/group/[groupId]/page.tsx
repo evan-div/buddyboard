@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
@@ -10,11 +10,10 @@ import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import FeedItem from '@/components/Feed/FeedItem'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import {
-  getGroup,
-  getGroupMembers,
   getUser,
+  subscribeToGroup,
+  subscribeToGroupMembers,
   subscribeToFeed,
-  getGroupDailyStats,
   getTransactionsSince,
   addReaction,
   postToWall,
@@ -558,12 +557,11 @@ export default function GroupPage() {
 
   const { user, userProfile, loading: authLoading } = useAuth()
 
-  const [group, setGroup] = useState<Group | null>(null)
-  const [members, setMembers] = useState<GroupMember[]>([])
-  const [loading, setLoading] = useState(true)
+  // undefined = still loading, null = group not found
+  const [group, setGroup] = useState<Group | null | undefined>(undefined)
+  const [membersData, setMembersData] = useState<GroupMember[] | null>(null)
   const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court' | 'wall'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
-  const [dailyStats, setDailyStats] = useState({ remainingGive: 100, remainingTake: 20 })
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
   const [unreadFeedCount, setUnreadFeedCount] = useState(0)
   const [activeCaseCount, setActiveCaseCount] = useState(0)
@@ -604,57 +602,47 @@ export default function GroupPage() {
     setWipePhase('exiting')
   }, [])
 
-  // Load group data (shows loading spinner — use only on initial load)
-  const loadGroupData = useCallback(async () => {
-    if (!user || !groupId) return
-    setLoading(true)
-    try {
-      const [groupData, membersData, stats] = await Promise.all([
-        getGroup(groupId),
-        getGroupMembers(groupId),
-        getGroupDailyStats(groupId, user.uid),
-      ])
-      setGroup(groupData)
-      setMembers(membersData)
-      setDailyStats({
-        remainingGive: stats.remainingGive,
-        remainingTake: stats.remainingTake,
-      })
-    } catch (err) {
-      console.error('Error loading group:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [user, groupId])
+  const currentUid = user?.uid
 
-  // Silent background refresh — does not trigger the loading screen,
-  // so components like MiiPlaza stay mounted and animations can finish
-  const refreshGroupData = useCallback(async () => {
-    if (!user || !groupId) return
-    try {
-      const [groupData, membersData, stats] = await Promise.all([
-        getGroup(groupId),
-        getGroupMembers(groupId),
-        getGroupDailyStats(groupId, user.uid),
-      ])
-      setGroup(groupData)
-      setMembers(membersData)
-      setDailyStats({
-        remainingGive: stats.remainingGive,
-        remainingTake: stats.remainingTake,
-      })
-    } catch (err) {
-      console.error('Error refreshing group:', err)
-    }
-  }, [user, groupId])
-
+  // Live group + member subscriptions. Listeners emit from the local cache
+  // immediately and recover from stale connections on their own, so the
+  // loading screen can't get stuck the way one-shot reads could. They also
+  // keep the plaza, limits, and admin views current without manual refreshes.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch; loadGroupData only toggles the loading flag synchronously
-    if (user) loadGroupData()
-  }, [user, loadGroupData])
+    if (!currentUid || !groupId) return
+    const unsubGroup = subscribeToGroup(groupId, setGroup, (err) => {
+      console.error('Error loading group:', err)
+      setGroup(null)
+    })
+    const unsubMembers = subscribeToGroupMembers(groupId, setMembersData, (err) => {
+      console.error('Error loading members:', err)
+      setMembersData([])
+    })
+    return () => {
+      unsubGroup()
+      unsubMembers()
+    }
+  }, [currentUid, groupId])
+
+  const loading = group === undefined || membersData === null
+  const members = useMemo(() => membersData ?? [], [membersData])
+
+  // Remaining daily budgets derived from the live member/group data
+  const dailyStats = useMemo(() => {
+    const giveLimit = group?.dailyGiveLimit ?? 100
+    const takeLimit = group?.dailyTakeLimit ?? 20
+    const me = members.find((m) => m.uid === currentUid)
+    // Today's date only detects stale daily counters; drift until the next snapshot is harmless
+    const today = new Date().toISOString().split('T')[0]
+    const given = me && me.lastResetDate === today ? me.dailyPointsGiven : 0
+    const taken = me && me.lastResetDate === today ? me.dailyPointsTaken : 0
+    return {
+      remainingGive: Math.max(0, giveLimit - given),
+      remainingTake: Math.max(0, takeLimit - taken),
+    }
+  }, [group, members, currentUid])
 
   // Real-time notification subscription — shows toasts when current user receives/loses points
-  const currentUid = user?.uid
   useEffect(() => {
     if (!currentUid || !groupId) return
 
@@ -999,8 +987,6 @@ export default function GroupPage() {
               remainingTake={dailyStats.remainingTake}
               isChief={isCurrentUserChief}
               presets={group.presets}
-              onPointsSubmitted={refreshGroupData}
-              onAvatarUpdated={refreshGroupData}
               onReady={handlePlazaReady}
             />
           )}
@@ -1041,7 +1027,6 @@ export default function GroupPage() {
           currentUid={user!.uid}
           chiefUid={chiefUid}
           onClose={() => setShowAdminPanel(false)}
-          onRefresh={refreshGroupData}
         />
       )}
 
@@ -1141,7 +1126,6 @@ export default function GroupPage() {
               updateUserAvatar(uid, appearanceDraft),
               updateMemberAvatar(groupId, uid, appearanceDraft),
             ])
-            refreshGroupData()
             setShowAppearance(false)
           } finally {
             setAppearanceSaving(false)

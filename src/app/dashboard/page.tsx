@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import CloudScene from '@/components/World/CloudScene'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
-import { getUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
+import { subscribeToUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
 import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
 import CreateGroupModal from '@/components/Group/CreateGroupModal'
 import type { Group, GroupMember } from '@/lib/types'
@@ -287,38 +287,41 @@ export default function DashboardPage() {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
 
-  // Fetch groups each time the groups view is opened (or Retry is pressed)
+  // Live subscription while the groups view is open (re-armed by Retry).
+  // Emits from the local cache immediately when available, then updates from
+  // the server — one-shot reads used to hang forever on stale connections.
   useEffect(() => {
     if (view !== 'groups' || !user) return
-    let stale = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset visible state when the groups view (re)opens, then fetch
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset visible state when the groups view (re)opens, then subscribe
     setLoadingGroups(true)
     setGroupsError(null)
 
-    // Show a retryable error if the request hangs; a late response is discarded
+    // Fallback if neither cache nor server produce a snapshot in time.
+    // The subscription stays alive, so data still fills in if it recovers.
     const timeoutId = setTimeout(() => {
-      stale = true
       setLoadingGroups(false)
       setGroupsError('Taking too long — check your connection and try again.')
     }, 8000)
 
-    getUserGroups(user.uid)
-      .then(userGroups => {
-        if (stale) return
+    const unsubscribe = subscribeToUserGroups(
+      user.uid,
+      (userGroups) => {
+        clearTimeout(timeoutId)
         setGroups(userGroups)
+        setGroupsError(null)
         setLoadingGroups(false)
-      })
-      .catch(err => {
-        if (stale) return
+      },
+      (err) => {
+        clearTimeout(timeoutId)
         console.error('Error loading groups:', err)
         setGroupsError('Failed to load groups. Please try again.')
         setLoadingGroups(false)
-      })
-      .finally(() => clearTimeout(timeoutId))
+      },
+    )
 
     return () => {
-      stale = true
       clearTimeout(timeoutId)
+      unsubscribe()
     }
   }, [view, user, groupsReloadKey])
 

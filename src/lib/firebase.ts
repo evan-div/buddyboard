@@ -1,6 +1,11 @@
 import { initializeApp, getApps } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -18,5 +23,15 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 // validates the API key immediately, so calling it during a build without
 // Firebase env vars crashes prerendering. Initialize it client-side only.
 export const auth: Auth = (typeof window !== 'undefined' ? getAuth(app) : null) as Auth
-export const db = getFirestore(app)
+
+// Persistent (IndexedDB) cache lets listeners emit data instantly on repeat
+// visits and keeps the app usable while the connection re-establishes — the
+// SDK falls back to memory cache where IndexedDB isn't available. Server-side
+// (prerendering) has no IndexedDB, so use the plain instance there.
+export const db =
+  typeof window !== 'undefined'
+    ? initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      })
+    : getFirestore(app)
 export default app

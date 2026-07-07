@@ -15,7 +15,7 @@ type Props = {
   currentUid: string
   chiefUid: string | null
   onClose: () => void
-  onRefresh: () => void
+  onRefresh?: () => void
 }
 
 const inputStyle: React.CSSProperties = {
@@ -83,7 +83,7 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
         timezone,
         presets,
       })
-      onRefresh()
+      onRefresh?.()
     } finally {
       setSavingSettings(false)
     }
@@ -108,14 +108,14 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
     await adminSetPoints(group.id, member.uid, pts, currentUid, adminMember?.displayName ?? 'Mayor', member.displayName)
     setEditingPoints(null)
     setNewPointsVal('')
-    onRefresh()
+    onRefresh?.()
   }
 
   async function handleBanish(member: GroupMember) {
     setBanishing(member.uid)
     try {
       await banishMember(group.id, member.uid)
-      onRefresh()
+      onRefresh?.()
     } finally {
       setBanishing(null)
     }
