@@ -930,6 +930,10 @@ const FLING_MIN   = 4.0
 const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
+// Thrown off the island: fall into the clouds, despawn, drop back in from the sky
+const FALL_DEPTH     = -30   // y below which a fallen character despawns
+const RESPAWN_DELAY  = 1.6   // seconds hidden before dropping back in
+const RESPAWN_HEIGHT = 9     // drop-in height above the island center
 // Approximate bean geometry constants for effective ground-floor calculation.
 // These match the default dims from useBeanDims (bodyWidth=0.5, bodyHeight=0.5).
 const GROUND_Y_APPROX  = 0.65   // body center height above group root
@@ -960,12 +964,11 @@ interface PhysicsUpdaterProps {
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
-  wallFlashRef:   React.RefObject<number[]>
 }
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode, wallFlashRef,
+  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1025,47 +1028,23 @@ function PhysicsUpdater({
         const angDrag = Math.pow(0.984, delta * 60)
         phys.angVel.multiplyScalar(angDrag)
 
-        // Wall clamping — ALWAYS applied, independent of ground.
-        // Must run before the ground check so a fast throw that overshoots
-        // both the wall and y=0 in the same frame still lands within bounds.
-        // Do NOT touch vel.y: walls only redirect lateral velocity; killing
-        // it was what caused characters to snap to the ground after bounces.
-        if (phys.pos.x > WALL_BOUND) {
-          phys.pos.x = WALL_BOUND
-          phys.vel.x *= -0.45
-          phys.vel.z *= 0.7
-          phys.angVel.z *= -0.5
-          wallFlashRef.current[0] = 1  // +x wall
-        } else if (phys.pos.x < -WALL_BOUND) {
-          phys.pos.x = -WALL_BOUND
-          phys.vel.x *= -0.45
-          phys.vel.z *= 0.7
-          phys.angVel.z *= -0.5
-          wallFlashRef.current[1] = 1  // -x wall
-        }
-        if (phys.pos.z > WALL_BOUND) {
-          phys.pos.z = WALL_BOUND
-          phys.vel.z *= -0.45
-          phys.vel.x *= 0.7
-          phys.angVel.x *= -0.5
-          wallFlashRef.current[2] = 1  // +z wall
-        } else if (phys.pos.z < -WALL_BOUND) {
-          phys.pos.z = -WALL_BOUND
-          phys.vel.z *= -0.45
-          phys.vel.x *= 0.7
-          phys.angVel.x *= -0.5
-          wallFlashRef.current[3] = 1  // -z wall
+        // A throw that crosses the rounded edge leaves the island: no walls,
+        // no ground — the character sails off and tumbles into the clouds,
+        // then despawns for a sky respawn.
+        const overIsland =
+          Math.hypot(phys.pos.x, phys.pos.z) <=
+          plazaEdgeRadius(Math.atan2(phys.pos.z, phys.pos.x))
+
+        if (!overIsland) {
+          if (phys.pos.y < FALL_DEPTH) {
+            group.visible = false
+            setCharMode(uid, 'fallen')
+          }
+          group.position.copy(phys.pos)
+          return
         }
 
-        // Rounded corners: the squircle edge cuts in where the square walls
-        // don't. Bounce back toward the center when a throw crosses it.
-        if (clampToPlazaEdge(phys.pos)) {
-          phys.vel.x *= -0.45
-          phys.vel.z *= -0.45
-          phys.angVel.multiplyScalar(-0.5)
-        }
-
-        // Ground collision — after wall clamping so landing position is always in-bounds.
+        // Ground collision — only while over the island.
         // effectiveFloor raises the trigger point when the character is tumbling so that
         // the rotated bean body never visually dips below the ground plane.
         const cosRx = Math.cos(group.rotation.x)
@@ -1210,6 +1189,20 @@ function PhysicsUpdater({
         group.position.copy(phys.pos)
         if (phys.modeTimer >= 2.5) {
           setCharMode(uid, null)
+        }
+      } else if (phys.mode === 'fallen') {
+        // Hidden below the clouds; after a beat, drop back in from the sky
+        phys.modeTimer += delta
+        if (phys.modeTimer >= RESPAWN_DELAY) {
+          const a = Math.random() * Math.PI * 2
+          const r = Math.random() * 1.2
+          phys.pos.set(Math.cos(a) * r, RESPAWN_HEIGHT, Math.sin(a) * r)
+          phys.vel.set(0, 0, 0)
+          phys.angVel.set(0, 0, 0)
+          group.rotation.set(0, Math.random() * Math.PI * 2, 0)
+          group.position.copy(phys.pos)
+          group.visible = true
+          setCharMode(uid, 'flying')
         }
       }
     })
@@ -1356,59 +1349,6 @@ function Clouds() {
   )
 }
 
-// ─── Wall Flash Planes ────────────────────────────────────────────────────────
-
-function WallFlashPlanes({ wallFlashRef }: { wallFlashRef: React.RefObject<number[]> }) {
-  const matsRef = useRef<THREE.MeshBasicMaterial[]>([])
-
-  // 4 planes: +x, -x, +z, -z
-  // Each sits flush with the wall boundary, faces inward, covers the full height range
-  const WALL_H = 6
-  const WALL_Y = WALL_H / 2
-
-  useFrame((_, delta) => {
-    for (let i = 0; i < 4; i++) {
-      const mat = matsRef.current[i]
-      if (!mat) continue
-      if (wallFlashRef.current[i] > 0) {
-        mat.opacity = 0.25
-        wallFlashRef.current[i] = 0
-      } else {
-        mat.opacity = Math.max(0, mat.opacity - delta * 3.5)
-      }
-    }
-  })
-
-  function setMat(i: number) {
-    return (mat: THREE.MeshBasicMaterial | null) => { if (mat) matsRef.current[i] = mat }
-  }
-
-  return (
-    <>
-      {/* +x wall */}
-      <mesh position={[WALL_BOUND, WALL_Y, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(0)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-      {/* -x wall */}
-      <mesh position={[-WALL_BOUND, WALL_Y, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(1)} color="#ef4444" transparent opacity={0} side={THREE.FrontSide} depthWrite={false} />
-      </mesh>
-      {/* +z wall */}
-      <mesh position={[0, WALL_Y, WALL_BOUND]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(2)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-      {/* -z wall */}
-      <mesh position={[0, WALL_Y, -WALL_BOUND]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[FSIZE, WALL_H]} />
-        <meshBasicMaterial ref={setMat(3)} color="#ef4444" transparent opacity={0} side={THREE.BackSide} depthWrite={false} />
-      </mesh>
-    </>
-  )
-}
-
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 function Scene({
@@ -1434,7 +1374,6 @@ function Scene({
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
-  const wallFlashRef = useRef<number[]>([0, 0, 0, 0])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -1717,9 +1656,7 @@ function Scene({
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
-        wallFlashRef={wallFlashRef}
       />
-      <WallFlashPlanes wallFlashRef={wallFlashRef} />
       <OrbitControls
         ref={orbitRef}
         enabled={!cameraLocked}

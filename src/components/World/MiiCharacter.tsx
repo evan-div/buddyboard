@@ -481,7 +481,7 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
 
 // ─── Drag Mode ────────────────────────────────────────────────────────────────
 
-export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad'
+export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad' | 'fallen'
 
 // ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
 
@@ -636,6 +636,9 @@ export default function MiiCharacter({
   useFrame((_, delta) => {
     const group = groupRef.current
     if (!group) return
+
+    // ── fallen (off the island, hidden until respawn) ────────────────────────
+    if (dragMode === 'fallen') return
 
     // ── held ─────────────────────────────────────────────────────────────────
     if (dragMode === 'held') {
