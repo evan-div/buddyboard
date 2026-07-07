@@ -57,6 +57,44 @@ const BLADES_EACH = (PATCH_GRID * PATCH_GRID / 2) * N_BLADES   // 50k per color
 const LIGHT_COLOR = '#6dc957'
 const DARK_COLOR  = '#246b24'
 
+// ─── Plaza outline ────────────────────────────────────────────────────────────
+// A superellipse ("squircle") with a gentle sinusoidal wobble: the plaza keeps
+// its square footprint but the corners are rounded and the edge reads organic.
+// The floor, dirt base, grass blades, and physics bounds all follow this line.
+
+const EDGE_EXP = 4
+
+function plazaEdgeRadius(theta: number): number {
+  const c = Math.abs(Math.cos(theta))
+  const s = Math.abs(Math.sin(theta))
+  const base = (FSIZE / 2) / Math.pow(c ** EDGE_EXP + s ** EDGE_EXP, 1 / EDGE_EXP)
+  const wobble = 1 + 0.025 * Math.sin(theta * 5 + 1.7) + 0.015 * Math.sin(theta * 9 + 0.4)
+  return base * wobble
+}
+
+function makePlazaShape(): THREE.Shape {
+  const pts: THREE.Vector2[] = []
+  const N = 96
+  for (let i = 0; i < N; i++) {
+    const th = (i / N) * Math.PI * 2
+    const r = plazaEdgeRadius(th)
+    pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
+  }
+  return new THREE.Shape(pts)
+}
+
+// Pull a position back inside the rounded edge; returns true if it was outside
+function clampToPlazaEdge(pos: THREE.Vector3, margin = 0.45): boolean {
+  const r = Math.hypot(pos.x, pos.z)
+  if (r === 0) return false
+  const maxR = plazaEdgeRadius(Math.atan2(pos.z, pos.x)) - margin
+  if (r <= maxR) return false
+  const scale = maxR / r
+  pos.x *= scale
+  pos.z *= scale
+  return true
+}
+
 // Registers each compiled shader's uTime uniform into the passed ref so the
 // render loop can advance the sway animation without touching the material.
 function makeBladeMat(
@@ -85,7 +123,9 @@ function GrassFloor() {
   const darkRef  = useRef<THREE.InstancedMesh>(null)
   const timeUniforms = useRef<{ value: number }[]>([])
 
-  // Canvas-drawn checkerboard — solid full coverage, no gaps between blades
+  // Canvas-drawn checkerboard — solid full coverage, no gaps between blades.
+  // Mapped onto the rounded plaza shape via repeat/offset (shape UVs are the
+  // raw XY coordinates).
   const baseTex = useMemo(() => {
     const PX = 512, TILES = PATCH_GRID, TW = PX / TILES
     const cv  = document.createElement('canvas')
@@ -96,8 +136,19 @@ function GrassFloor() {
         ctx.fillStyle = (x + y) % 2 === 0 ? LIGHT_COLOR : DARK_COLOR
         ctx.fillRect(x * TW, y * TW, TW, TW)
       }
-    return new THREE.CanvasTexture(cv)
+    const tex = new THREE.CanvasTexture(cv)
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+    tex.repeat.set(1 / FSIZE, 1 / FSIZE)
+    tex.offset.set(0.5, 0.5)
+    return tex
   }, [])
+
+  const plazaShape = useMemo(() => makePlazaShape(), [])
+  const topGeo = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
+  const dirtGeo = useMemo(
+    () => new THREE.ExtrudeGeometry(plazaShape, { depth: 150, bevelEnabled: false }),
+    [plazaShape],
+  )
 
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
@@ -127,7 +178,11 @@ function GrassFloor() {
         for (let b = 0; b < N_BLADES; b++) {
           const ox = (Math.random() - 0.5) * PATCH_W * 1.1
           const oz = (Math.random() - 0.5) * PATCH_W * 1.1
-          dummy.position.set(cx + ox, 0, cz + oz)
+          const px = cx + ox
+          const pz = cz + oz
+          // No blades beyond the rounded plaza edge
+          if (Math.hypot(px, pz) > plazaEdgeRadius(Math.atan2(pz, px)) - 0.06) continue
+          dummy.position.set(px, 0, pz)
           dummy.rotation.set(tiltX, yawBase + (Math.random() - 0.5) * 1.2, 0)
           dummy.scale.setScalar(0.80 + Math.random() * 0.45)
           dummy.updateMatrix()
@@ -136,8 +191,14 @@ function GrassFloor() {
         }
       }
     }
-    if (lightRef.current) lightRef.current.instanceMatrix.needsUpdate = true
-    if (darkRef.current)  darkRef.current.instanceMatrix.needsUpdate  = true
+    if (lightRef.current) {
+      lightRef.current.count = li
+      lightRef.current.instanceMatrix.needsUpdate = true
+    }
+    if (darkRef.current) {
+      darkRef.current.count = di
+      darkRef.current.instanceMatrix.needsUpdate = true
+    }
   }, [])
 
   useFrame((_, delta) => {
@@ -146,17 +207,16 @@ function GrassFloor() {
 
   return (
     <group>
-      {/* Solid checkerboard base — canvas texture guarantees full coverage */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-        <planeGeometry args={[FSIZE, FSIZE]} />
-        <meshStandardMaterial map={baseTex} roughness={0.95} />
+      {/* Rounded checkerboard top — rotated to lie flat, DoubleSide so the
+          face stays visible with the same orientation as the dirt below */}
+      <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+        <meshStandardMaterial map={baseTex} roughness={0.95} side={THREE.DoubleSide} />
       </mesh>
       {/* Blade instances sit on top for 3D raised-grass texture */}
       <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
-      {/* Spire — single deep column, bottom well beyond any camera angle */}
-      <mesh position={[0, -75, 0]}>
-        <boxGeometry args={[FSIZE, 150, FSIZE]} />
+      {/* Dirt base — the plaza outline extruded deep below any camera angle */}
+      <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <meshStandardMaterial color="#6B4226" roughness={0.95} />
       </mesh>
     </group>
@@ -939,6 +999,7 @@ function PhysicsUpdater({
           phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, clampedX, 0.14)
           phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
           phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, clampedZ, 0.14)
+          clampToPlazaEdge(phys.pos)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
@@ -994,6 +1055,14 @@ function PhysicsUpdater({
           phys.vel.x *= 0.7
           phys.angVel.x *= -0.5
           wallFlashRef.current[3] = 1  // -z wall
+        }
+
+        // Rounded corners: the squircle edge cuts in where the square walls
+        // don't. Bounce back toward the center when a throw crosses it.
+        if (clampToPlazaEdge(phys.pos)) {
+          phys.vel.x *= -0.45
+          phys.vel.z *= -0.45
+          phys.angVel.multiplyScalar(-0.5)
         }
 
         // Ground collision — after wall clamping so landing position is always in-bounds.
@@ -1075,6 +1144,7 @@ function PhysicsUpdater({
         // Slide position
         phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
         phys.pos.z = THREE.MathUtils.clamp(phys.pos.z + phys.vel.z * delta, -WALL_BOUND, WALL_BOUND)
+        clampToPlazaEdge(phys.pos)
         group.position.copy(phys.pos)
 
         // Once lateral speed and tumble are both negligible, trigger pending animation
@@ -1167,20 +1237,20 @@ interface SpriteDef {
   width: number
 }
 
-// 240 sprites in 7 concentric rings — dense inner wrap, full horizon coverage
+// ~410 sprites in concentric rings — dense inner wrap, full horizon coverage
 const SPRITE_DEFS: SpriteDef[] = (() => {
   const r    = seededRandom(42)
   const defs: SpriteDef[] = []
   const rings = [
-    { count: 20, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0:  6, w1:  9 },  // foreground — near camera, above plaza
-    { count: 18, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0:  6, w1: 11 },  // mid foreground
-    { count: 29, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  2, w1:  4 },  // wraps the spire
-    { count: 43, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  3, w1:  6 },
-    { count: 49, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0:  4, w1:  7 },
-    { count: 45, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0:  6, w1: 10 },  // transition — rising
-    { count: 43, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0:  8, w1: 13 },
-    { count: 40, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 10, w1: 17 }, // horizon level
-    { count: 38, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 14, w1: 22 }, // sky clouds past plaza
+    { count: 26, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // foreground — near camera, above plaza
+    { count: 24, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },  // mid foreground
+    { count: 36, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  3, w1:  6 },  // wraps the spire
+    { count: 52, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  4, w1:  8 },
+    { count: 60, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0:  6, w1: 10 },
+    { count: 56, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0:  8, w1: 14 },  // transition — rising
+    { count: 52, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
+    { count: 50, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 14, w1: 23 }, // horizon level
+    { count: 48, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 19, w1: 30 }, // sky clouds past plaza
   ]
   rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
     for (let i = 0; i < count; i++) {
