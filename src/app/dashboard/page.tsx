@@ -7,7 +7,7 @@ import CloudScene from '@/components/World/CloudScene'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
 import { subscribeToUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
+import Avatar3D from '@/components/Avatar/Avatar3D'
 import CreateGroupModal from '@/components/Group/CreateGroupModal'
 import type { Group, GroupMember } from '@/lib/types'
 
@@ -99,7 +99,7 @@ function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {members.map((m) => (
                   <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <AvatarDisplay config={m.avatar} size={36} />
+                    <Avatar3D config={m.avatar} size={36} />
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
                         {m.displayName}

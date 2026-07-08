@@ -12,7 +12,7 @@ import {
   BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
-import AvatarDisplay from './AvatarDisplay'
+import Avatar3D from './Avatar3D'
 
 const BeanPreview = dynamic(() => import('./BeanPreview'), { ssr: false })
 
@@ -365,7 +365,7 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
             <BeanPreview config={value} />
           </div>
         : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>
-            <AvatarDisplay config={value} size={140} />
+            <Avatar3D config={value} size={140} />
           </div>
       }
 

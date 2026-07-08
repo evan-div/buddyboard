@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { Transaction, GroupMember } from '@/lib/types'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
+import Avatar3D from '@/components/Avatar/Avatar3D'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { timeAgo } from '@/lib/utils'
 
@@ -67,7 +67,7 @@ export default function FeedItem({ transaction, members, rotation = 0, currentUi
             border: '2px solid #f3f4f6',
           }}
         >
-          <AvatarDisplay config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={52} />
+          <Avatar3D config={recipientMember?.avatar ?? DEFAULT_AVATAR} size={52} />
         </div>
         <span
           style={{

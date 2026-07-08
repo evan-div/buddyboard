@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import AvatarDisplay from '@/components/Avatar/AvatarDisplay'
+import Avatar3D from '@/components/Avatar/Avatar3D'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { timeAgo } from '@/lib/utils'
 import { banishMember, adminSetPoints, updateGroupSettings } from '@/lib/firestore'
@@ -353,7 +353,7 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
                 return (
                   <div key={m.uid} style={{ background: '#d4d4d4', borderRadius: 16, padding: 14 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSelf ? 0 : 10 }}>
-                      <AvatarDisplay config={m.avatar ?? DEFAULT_AVATAR} size={38} />
+                      <Avatar3D config={m.avatar ?? DEFAULT_AVATAR} size={38} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{m.displayName}</span>
