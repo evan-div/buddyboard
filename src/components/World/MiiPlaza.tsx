@@ -118,9 +118,12 @@ function makeBladeMat(
   return mat
 }
 
+const N_ROCKS = 90
+
 function GrassFloor() {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
+  const rocksRef = useRef<THREE.InstancedMesh>(null)
   const timeUniforms = useRef<{ value: number }[]>([])
 
   // Canvas-drawn checkerboard — solid full coverage, no gaps between blades.
@@ -149,6 +152,50 @@ function GrassFloor() {
     () => new THREE.ExtrudeGeometry(plazaShape, { depth: 150, bevelEnabled: false }),
     [plazaShape],
   )
+
+  // Noisy dirt texture: soft earth-tone patches, faint strata, and grit so the
+  // column reads as soil instead of a flat brown wall
+  const dirtTex = useMemo(() => {
+    const S = 256
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = S
+    const ctx = cv.getContext('2d')!
+    let seed = 7
+    const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
+
+    ctx.fillStyle = '#6B4226'
+    ctx.fillRect(0, 0, S, S)
+
+    const patchShades = ['#5d3a20', '#7a4d2b', '#63401f', '#54331b', '#7d5533']
+    for (let i = 0; i < 46; i++) {
+      ctx.fillStyle = patchShades[Math.floor(rng() * patchShades.length)]
+      ctx.globalAlpha = 0.15 + rng() * 0.15
+      ctx.beginPath()
+      ctx.ellipse(rng() * S, rng() * S, 16 + rng() * 44, 10 + rng() * 30, rng() * Math.PI, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    ctx.globalAlpha = 0.09
+    for (let i = 0; i < 7; i++) {
+      ctx.fillStyle = i % 2 ? '#4a2c16' : '#835832'
+      ctx.fillRect(0, rng() * S, S, 3 + rng() * 9)
+    }
+
+    const gritShades = ['#8a7a68', '#9c8c78', '#55402c', '#3f2a18', '#a3937f']
+    for (let i = 0; i < 400; i++) {
+      ctx.fillStyle = gritShades[Math.floor(rng() * gritShades.length)]
+      ctx.globalAlpha = 0.3 + rng() * 0.45
+      ctx.beginPath()
+      ctx.arc(rng() * S, rng() * S, 0.6 + rng() * 2.4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+
+    const tex = new THREE.CanvasTexture(cv)
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+    tex.repeat.set(0.22, 0.22)
+    return tex
+  }, [])
 
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
@@ -201,6 +248,33 @@ function GrassFloor() {
     }
   }, [])
 
+  // Rocks half-buried in the dirt wall around the rim — denser near the top
+  // where the wall is most visible, thinning out below
+  useEffect(() => {
+    const mesh = rocksRef.current
+    if (!mesh) return
+    const dummy = new THREE.Object3D()
+    const color = new THREE.Color()
+    let seed = 12345
+    const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
+    for (let i = 0; i < N_ROCKS; i++) {
+      const th   = rng() * Math.PI * 2
+      const y    = -(0.3 + Math.pow(rng(), 1.7) * 9.5)
+      const size = 0.18 + rng() * 0.55
+      const rOut = plazaEdgeRadius(th) - size * 0.35
+      dummy.position.set(Math.cos(th) * rOut, y, Math.sin(th) * rOut)
+      dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI)
+      dummy.scale.set(size, size * (0.7 + rng() * 0.5), size)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(i, dummy.matrix)
+      const shade = 0.42 + rng() * 0.34
+      color.setRGB(shade, shade * (0.9 + rng() * 0.1), shade * 0.82)
+      mesh.setColorAt(i, color)
+    }
+    mesh.instanceMatrix.needsUpdate = true
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+  }, [])
+
   useFrame((_, delta) => {
     for (const u of timeUniforms.current) u.value += delta
   })
@@ -217,8 +291,13 @@ function GrassFloor() {
       <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
       {/* Dirt base — the plaza outline extruded deep below any camera angle */}
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-        <meshStandardMaterial color="#6B4226" roughness={0.95} />
+        <meshStandardMaterial map={dirtTex} roughness={0.95} />
       </mesh>
+      {/* Rocks poking out of the dirt wall */}
+      <instancedMesh ref={rocksRef} args={[undefined, undefined, N_ROCKS]}>
+        <dodecahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial roughness={0.9} flatShading />
+      </instancedMesh>
     </group>
   )
 }
