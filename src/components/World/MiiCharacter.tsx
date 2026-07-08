@@ -390,7 +390,7 @@ export default function MiiCharacter({
       const dRz = group.rotation.z - prevBodyRot.current.z
       prevBodyRot.current.x = group.rotation.x
       prevBodyRot.current.z = group.rotation.z
-      const lag = dragMode === 'flying' ? 1.6 : 0.8
+      const lag = dragMode === 'flying' ? 1.9 : 1.4
       rd.laX.v -= dRx * lag * 1.2
       rd.raX.v -= dRx * lag
       rd.laZ.v -= dRz * lag
@@ -400,12 +400,16 @@ export default function MiiCharacter({
       rd.llZ.v -= dRz * lag * 0.5
       rd.rlZ.v -= dRz * lag * 0.6
 
+      // Limp rest: limbs just hang loosely from the shoulders/hips (a hair of
+      // outward droop keeps arms clear of the torso). Very low stiffness, so
+      // the body's tumble drives the motion — nothing settles to a posed shape.
+      const rest = { laX: 0, laZ: -0.12, raX: 0, raZ: 0.12, lX: 0, lZ: 0 }
       if (dragMode === 'flying') {
-        // Loose springs in the air — limbs float and flail
-        stepRagdoll(dt, { laX: 0, laZ: -0.3, raX: 0, raZ: 0.3, lX: 0.1, lZ: 0.1 }, RD_K * 0.55, RD_D * 0.6, RD_DL * 0.6)
+        // Airborne — springs barely pull; limbs float and trail the tumble
+        stepRagdoll(dt, rest, RD_K * 0.35, RD_D * 0.5, RD_DL * 0.5)
       } else {
-        // On the ground: heavier damping, arms splay out as the body skids
-        stepRagdoll(dt, { laX: 0.45, laZ: -0.85, raX: 0.45, raZ: 0.85, lX: 0.15, lZ: 0.1 }, RD_K, RD_D * 2.2, RD_DL * 2)
+        // Skidding — more damping so limbs drag and settle as the body stops
+        stepRagdoll(dt, rest, RD_K * 0.45, RD_D * 1.4, RD_DL * 1.4)
       }
       return
     }

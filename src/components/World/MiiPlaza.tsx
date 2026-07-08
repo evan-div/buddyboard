@@ -1038,8 +1038,6 @@ interface PhysState {
   gentleDrop: boolean
   bounceCount: number
   pendingMode?: 'dazed' | 'mad'
-  dazedRx: number
-  dazedRz: number
   wakeRx: number
 }
 
@@ -1191,24 +1189,38 @@ function PhysicsUpdater({
 
         group.position.copy(phys.pos)
       } else if (phys.mode === 'sliding') {
-        // Decelerate lateral velocity with ground friction
-        const friction = Math.pow(0.04, delta)  // reaches near-zero in ~0.5s
+        // Resting orientation: a hard hit (dazed) tips the body face-down onto
+        // the grass; a medium hit (mad) skids upright. rz always eases to 0,
+        // monotonically, so the character never flops to the side it wasn't
+        // already leaning.
+        const restRx = phys.pendingMode === 'dazed' ? 1.5 : 0
+
+        // First slide frame: unwrap the free-tumble rotation to its principal
+        // value so the settle takes the short way round, and shed the spin.
+        if (phys.modeTimer === 0) {
+          let rx = group.rotation.x % (Math.PI * 2)
+          if (rx >  Math.PI) rx -= Math.PI * 2
+          if (rx < -Math.PI) rx += Math.PI * 2
+          group.rotation.x = rx
+          phys.angVel.multiplyScalar(0.3)
+        }
+        phys.modeTimer += delta
+
+        // Ground friction on the skid
+        const friction = Math.pow(0.04, delta)  // near-zero in ~0.5s
         phys.vel.x *= friction
         phys.vel.z *= friction
         phys.vel.y  = 0
 
-        // Apply any residual angular velocity, then kill it quickly
+        // Residual tumble bleeds off fast while a settling torque tips the body
+        // toward its resting pose — no clamp, so nothing locks at a fixed lean.
         group.rotation.x += phys.angVel.x * delta
         group.rotation.z += phys.angVel.z * delta
-        phys.angVel.multiplyScalar(Math.pow(0.06, delta))
+        phys.angVel.multiplyScalar(Math.pow(0.015, delta))
+        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, restRx, Math.min(1, delta * 4))
+        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,      Math.min(1, delta * 4))
 
-        // Clamp tumble to a forward-lean range: character skids with at most 90°
-        // forward tilt, never flips fully over.  This keeps pos.y accurate and
-        // the dazed tip-over short (max 18° to reach 1.25 rad).
-        group.rotation.x = THREE.MathUtils.clamp(group.rotation.x, 0, Math.PI * 0.5)
-        group.rotation.z = THREE.MathUtils.clamp(group.rotation.z, -Math.PI * 0.25, Math.PI * 0.25)
-
-        // Keep Y exactly at the floor for the current tumble orientation
+        // Rest exactly on the ground at the current tilt
         phys.pos.y = capsuleFloorY(group.rotation)
 
         // Slide position
@@ -1217,37 +1229,19 @@ function PhysicsUpdater({
         clampToPlazaEdge(phys.pos)
         group.position.copy(phys.pos)
 
-        // Once lateral speed and tumble are both negligible, trigger pending animation
-        const lateralSq = phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z
-        const angSq     = phys.angVel.x * phys.angVel.x + phys.angVel.z * phys.angVel.z
-        if (lateralSq < 0.04 && angSq < 0.04) {
-          if (phys.pendingMode === 'dazed') {
-            // Store target angles: face-down, essentially flat on the ground
-            const dazedRx = 1.42 + Math.random() * 0.15
-            const dazedRz = (Math.random() - 0.5) * 0.16
-            setCharMode(uid, 'dazed')
-            const dp = physicsMap.current.get(uid)
-            if (dp) { dp.dazedRx = dazedRx; dp.dazedRz = dazedRz }
-          } else if (phys.pendingMode === 'mad') {
-            // Angular velocity is near zero — snap to upright imperceptibly
-            group.rotation.x = 0
-            group.rotation.z = 0
-            setCharMode(uid, 'mad')
-          } else {
-            group.rotation.x = 0
-            group.rotation.z = 0
-            setCharMode(uid, null)
-          }
+        // Hand off once the skid has stopped AND the body has reached its
+        // resting pose — no further rotation change downstream, so no flop.
+        const lateralSq  = phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z
+        const settledRot = Math.abs(group.rotation.x - restRx) < 0.14 && Math.abs(group.rotation.z) < 0.1
+        if (lateralSq < 0.05 && settledRot) {
+          setCharMode(uid, phys.pendingMode ?? null)
         }
       } else if (phys.mode === 'dazed') {
+        // Knocked out: the slide already settled the body face-down, so just
+        // lie still (limbs go limp in MiiCharacter) before getting up.
         phys.modeTimer += delta
-        if (phys.modeTimer < 0.8) {
-          // Lerp into fallen pose — rate is gentle so it reads as a deliberate tip-over
-          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, phys.dazedRx, Math.min(1, delta * 5))
-          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, phys.dazedRz, Math.min(1, delta * 5))
-          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, capsuleFloorY(group.rotation), Math.min(1, delta * 5))
-          group.position.copy(phys.pos)
-        }
+        phys.pos.y = capsuleFloorY(group.rotation)
+        group.position.copy(phys.pos)
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
@@ -1513,8 +1507,6 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
-        dazedRx: 1.25,
-        dazedRz: 0,
         wakeRx: 0,
       })
       setDragModeMap(prev => {
@@ -1558,8 +1550,6 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
-        dazedRx: 1.25,
-        dazedRz: 0,
         wakeRx: 0,
       })
       draggingUid.current = pickup.uid
