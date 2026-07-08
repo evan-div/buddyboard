@@ -875,13 +875,14 @@ export default function GroupPage() {
                       { key: 'court',       label: 'Court',  badge: activeCaseCount  },
                       { key: 'wall',        label: 'Wall',   badge: 0               },
                     ] as const
-                  ).map(({ key, label, badge }) => (
+                  ).map(({ key, label, badge }, navIdx) => (
                     <button
                       key={key}
                       onClick={() => { switchTab(key); setShowNav(false) }}
+                      className="nav-cascade"
                       style={{
                         position: 'relative',
-                        alignSelf: 'flex-start',
+                        animationDelay: `${navIdx * 45}ms`,
                         padding: '10px 18px',
                         borderRadius: 9999,
                         background: activeTab === key ? '#42b842' : 'rgba(255,255,255,0.9)',
@@ -918,8 +919,9 @@ export default function GroupPage() {
                   {/* INFO button */}
                   <button
                     onClick={() => { setShowGroupInfo(true); setShowNav(false) }}
+                    className="nav-cascade"
                     style={{
-                      alignSelf: 'flex-start',
+                      animationDelay: '225ms',
                       padding: '10px 18px',
                       borderRadius: 9999,
                       background: 'rgba(255,255,255,0.9)',
@@ -950,8 +952,9 @@ export default function GroupPage() {
                       const userData = await getUser(user.uid)
                       setAppearanceUnlocked(userData?.unlockedItems ?? [])
                     }}
+                    className="nav-cascade"
                     style={{
-                      alignSelf: 'flex-start',
+                      animationDelay: '270ms',
                       padding: '10px 18px',
                       borderRadius: 9999,
                       background: 'rgba(255,255,255,0.9)',
