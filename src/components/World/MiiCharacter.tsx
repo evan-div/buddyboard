@@ -89,6 +89,11 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
 
 export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad' | 'fallen'
 
+// Get-up choreography timing, shared with the plaza physics: a knocked-out
+// character stays prone while the arms plant (HOLD), then pushes upright (RISE)
+export const WAKE_HOLD = 0.55
+export const WAKE_RISE = 0.95
+
 // ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
 
 const RD_K  = 9.0
@@ -162,6 +167,9 @@ export default function MiiCharacter({
   // Seeded lazily (first frame / mount effect) so render stays pure and we
   // don't allocate a new Vector3 + call Math.random on every re-render
   const targetPos = useRef<THREE.Vector3 | null>(null)
+  const prevDragMode = useRef<DragMode | null>(null)
+  const prevBodyRot  = useRef({ x: 0, z: 0 })
+  const wakeProne    = useRef(false)
 
   const dims      = useBeanDims(member.avatar)
   const skinColor = SKIN_TONES[member.avatar.skinTone]
@@ -213,7 +221,35 @@ export default function MiiCharacter({
   }, [isSelected])
 
   useEffect(() => {
+    const prev = prevDragMode.current
+    prevDragMode.current = dragMode
     dragTimer.current = 0
+
+    // The throw→land→get-up chain keeps ragdoll continuity: limbs are never
+    // snapped to neutral mid-sequence, only jolted by the impacts.
+    if (dragMode === 'flying') {
+      ragdoll.current.ready = false   // fresh throw (or respawn drop): reseed
+      prevBodyRot.current.x = groupRef.current?.rotation.x ?? 0
+      prevBodyRot.current.z = groupRef.current?.rotation.z ?? 0
+      return
+    }
+    if (dragMode === 'sliding') {
+      kickRagdoll(prev === 'flying' ? 9 : 5)   // ground impact jolt
+      prevBodyRot.current.x = groupRef.current?.rotation.x ?? 0
+      prevBodyRot.current.z = groupRef.current?.rotation.z ?? 0
+      return
+    }
+    if (dragMode === 'dazed') {
+      kickRagdoll(4)
+      return
+    }
+    if (dragMode === 'waking') {
+      wakeProne.current = Math.abs(groupRef.current?.rotation.x ?? 0) > 0.7
+      return
+    }
+    if (dragMode === 'fallen') return
+
+    // held / mad / null: these animate limbs from a clean neutral pose
     ragdoll.current.ready = false
     if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0; leftArmRef.current.rotation.z  = 0 }
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
@@ -231,6 +267,73 @@ export default function MiiCharacter({
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seed every ragdoll spring from the limbs' current pose with random impulses
+  function seedRagdoll(sMin: number, sMax: number) {
+    const s  = sMin + Math.random() * (sMax - sMin)
+    const rd = ragdoll.current
+    rd.laX = { r: leftArmRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s }
+    rd.laZ = { r: leftArmRef.current?.rotation.z  ?? 0, v: -(0.4 + Math.random() * 0.7) * s }
+    rd.raX = { r: rightArmRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s }
+    rd.raZ = { r: rightArmRef.current?.rotation.z ?? 0, v:  (0.4 + Math.random() * 0.7) * s }
+    rd.llX = { r: leftLegRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
+    rd.llZ = { r: leftLegRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
+    rd.rlX = { r: rightLegRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
+    rd.rlZ = { r: rightLegRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
+    rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v: (Math.random() - 0.5) * s * 0.5 }
+    rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v: (Math.random() - 0.5) * s * 0.5 }
+    rd.ready = true
+  }
+
+  // Jolt the springs without losing the current pose (impacts, bounces)
+  function kickRagdoll(s: number) {
+    const rd = ragdoll.current
+    if (!rd.ready) { seedRagdoll(s * 0.8, s * 1.2); return }
+    for (const b of [rd.laX, rd.laZ, rd.raX, rd.raZ]) b.v += (Math.random() - 0.5) * 2 * s
+    for (const b of [rd.llX, rd.llZ, rd.rlX, rd.rlZ]) b.v += (Math.random() - 0.5) * 1.2 * s
+    rd.byX.v += (Math.random() - 0.5) * 0.8 * s
+    rd.byZ.v += (Math.random() - 0.5) * 0.8 * s
+  }
+
+  // Advance all limb springs toward the given rest pose and apply to the rig
+  function stepRagdoll(
+    dt: number,
+    rest: { laX: number; laZ: number; raX: number; raZ: number; lX: number; lZ: number },
+    K: number, D: number, DL: number,
+  ) {
+    const rd = ragdoll.current
+    let r: number, v: number
+
+    ;[r, v] = rdSpring(rd.laX.r, rd.laX.v, rest.laX, K, D, dt)
+    ;[rd.laX.r, rd.laX.v] = rdClamp(r, v, -2.6, 2.6)
+    ;[r, v] = rdSpring(rd.laZ.r, rd.laZ.v, rest.laZ, K, D, dt)
+    ;[rd.laZ.r, rd.laZ.v] = rdClamp(r, v, -1.6, 0.55)
+    if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rd.laX.r; leftArmRef.current.rotation.z  = rd.laZ.r }
+
+    ;[r, v] = rdSpring(rd.raX.r, rd.raX.v, rest.raX, K, D, dt)
+    ;[rd.raX.r, rd.raX.v] = rdClamp(r, v, -2.6, 2.6)
+    ;[r, v] = rdSpring(rd.raZ.r, rd.raZ.v, rest.raZ, K, D, dt)
+    ;[rd.raZ.r, rd.raZ.v] = rdClamp(r, v, -0.55, 1.6)
+    if (rightArmRef.current) { rightArmRef.current.rotation.x = rd.raX.r; rightArmRef.current.rotation.z = rd.raZ.r }
+
+    ;[r, v] = rdSpring(rd.llX.r, rd.llX.v, rest.lX, K, DL, dt)
+    ;[rd.llX.r, rd.llX.v] = rdClamp(r, v, -0.6, 1.0)
+    ;[r, v] = rdSpring(rd.llZ.r, rd.llZ.v, -rest.lZ, K, DL, dt)
+    ;[rd.llZ.r, rd.llZ.v] = rdClamp(r, v, -0.65, 0.25)
+    if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rd.llX.r; leftLegRef.current.rotation.z  = rd.llZ.r }
+
+    ;[r, v] = rdSpring(rd.rlX.r, rd.rlX.v, rest.lX, K, DL, dt)
+    ;[rd.rlX.r, rd.rlX.v] = rdClamp(r, v, -0.6, 1.0)
+    ;[r, v] = rdSpring(rd.rlZ.r, rd.rlZ.v, rest.lZ, K, DL, dt)
+    ;[rd.rlZ.r, rd.rlZ.v] = rdClamp(r, v, -0.25, 0.65)
+    if (rightLegRef.current) { rightLegRef.current.rotation.x = rd.rlX.r; rightLegRef.current.rotation.z = rd.rlZ.r }
+
+    ;[r, v] = rdSpring(rd.byX.r, rd.byX.v, 0, K * 0.5, DL, dt)
+    ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.45, 0.45)
+    ;[r, v] = rdSpring(rd.byZ.r, rd.byZ.v, 0, K * 0.5, DL, dt)
+    ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.45, 0.45)
+    if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
+  }
+
   function pickNewTarget() {
     animState.current = 'walking'
     const angle  = Math.random() * Math.PI * 2
@@ -239,7 +342,9 @@ export default function MiiCharacter({
     targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
   }
 
-  useFrame((_, delta) => {
+  useFrame((_, rawDelta) => {
+    // Clamp the timestep so animation timers don't skip phases after a stall
+    const delta = Math.min(rawDelta, 0.1)
     const group = groupRef.current
     if (!group) return
 
@@ -273,27 +378,34 @@ export default function MiiCharacter({
       return
     }
 
-    // ── flying / sliding ─────────────────────────────────────────────────────
+    // ── flying / sliding: limp ragdoll limbs ─────────────────────────────────
     if (dragMode === 'flying' || dragMode === 'sliding') {
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -0.25, 0.12)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -1.4,  0.12)
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -0.25, 0.12)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,   1.4, 0.12)
-      }
-      if (leftLegRef.current) {
-        leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  -0.3, 0.12)
-        leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z,  -0.4, 0.12)
-      }
-      if (rightLegRef.current) {
-        rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, -0.3, 0.12)
-        rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z,   0.4, 0.12)
-      }
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.1)
-        bodyGroupRef.current.rotation.z = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.z, 0, 0.1)
+      const dt = Math.min(delta, 1 / 30)
+      const rd = ragdoll.current
+      if (!rd.ready) seedRagdoll(5, 9)
+
+      // Limbs lag behind the body's tumble: inject the frame's rotation delta
+      // as opposing spring velocity so arms and legs trail limply
+      const dRx = group.rotation.x - prevBodyRot.current.x
+      const dRz = group.rotation.z - prevBodyRot.current.z
+      prevBodyRot.current.x = group.rotation.x
+      prevBodyRot.current.z = group.rotation.z
+      const lag = dragMode === 'flying' ? 1.6 : 0.8
+      rd.laX.v -= dRx * lag * 1.2
+      rd.raX.v -= dRx * lag
+      rd.laZ.v -= dRz * lag
+      rd.raZ.v -= dRz * lag * 1.2
+      rd.llX.v -= dRx * lag * 0.8
+      rd.rlX.v -= dRx * lag * 0.7
+      rd.llZ.v -= dRz * lag * 0.5
+      rd.rlZ.v -= dRz * lag * 0.6
+
+      if (dragMode === 'flying') {
+        // Loose springs in the air — limbs float and flail
+        stepRagdoll(dt, { laX: 0, laZ: -0.3, raX: 0, raZ: 0.3, lX: 0.1, lZ: 0.1 }, RD_K * 0.55, RD_D * 0.6, RD_DL * 0.6)
+      } else {
+        // On the ground: heavier damping, arms splay out as the body skids
+        stepRagdoll(dt, { laX: 0.45, laZ: -0.85, raX: 0.45, raZ: 0.85, lX: 0.15, lZ: 0.1 }, RD_K, RD_D * 2.2, RD_DL * 2)
       }
       return
     }
@@ -302,78 +414,68 @@ export default function MiiCharacter({
     if (dragMode === 'dazed') {
       dragTimer.current += delta
       const dt = Math.min(delta, 1 / 30)
-
-      if (!ragdoll.current.ready) {
-        const s  = 7 + Math.random() * 9
-        const rd = ragdoll.current
-        rd.laX = { r: leftArmRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s }
-        rd.laZ = { r: leftArmRef.current?.rotation.z  ?? 0, v: -(0.4 + Math.random() * 0.7) * s }
-        rd.raX = { r: rightArmRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s }
-        rd.raZ = { r: rightArmRef.current?.rotation.z ?? 0, v:  (0.4 + Math.random() * 0.7) * s }
-        rd.llX = { r: leftLegRef.current?.rotation.x  ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
-        rd.llZ = { r: leftLegRef.current?.rotation.z  ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
-        rd.rlX = { r: rightLegRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.7 }
-        rd.rlZ = { r: rightLegRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.4 }
-        rd.byX = { r: bodyGroupRef.current?.rotation.x ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
-        rd.byZ = { r: bodyGroupRef.current?.rotation.z ?? 0, v:  (Math.random() - 0.5) * s * 0.5 }
-        rd.ready = true
-      }
-
-      const rd = ragdoll.current
-      let r: number, v: number
-
-      ;[r, v] = rdSpring(rd.laX.r, rd.laX.v, 0.28, RD_K, RD_D, dt)
-      ;[rd.laX.r, rd.laX.v] = rdClamp(r, v, -2.6, 2.6)
-      ;[r, v] = rdSpring(rd.laZ.r, rd.laZ.v, -0.22, RD_K, RD_D, dt)
-      ;[rd.laZ.r, rd.laZ.v] = rdClamp(r, v, -1.6, 0.55)
-      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = rd.laX.r; leftArmRef.current.rotation.z  = rd.laZ.r }
-
-      ;[r, v] = rdSpring(rd.raX.r, rd.raX.v, 0.28, RD_K, RD_D, dt)
-      ;[rd.raX.r, rd.raX.v] = rdClamp(r, v, -2.6, 2.6)
-      ;[r, v] = rdSpring(rd.raZ.r, rd.raZ.v,  0.22, RD_K, RD_D, dt)
-      ;[rd.raZ.r, rd.raZ.v] = rdClamp(r, v, -0.55, 1.6)
-      if (rightArmRef.current) { rightArmRef.current.rotation.x = rd.raX.r; rightArmRef.current.rotation.z = rd.raZ.r }
-
-      ;[r, v] = rdSpring(rd.llX.r, rd.llX.v, 0.04, RD_K, RD_DL, dt)
-      ;[rd.llX.r, rd.llX.v] = rdClamp(r, v, -0.6, 1.0)
-      ;[r, v] = rdSpring(rd.llZ.r, rd.llZ.v, -0.04, RD_K, RD_DL, dt)
-      ;[rd.llZ.r, rd.llZ.v] = rdClamp(r, v, -0.65, 0.25)
-      if (leftLegRef.current)  { leftLegRef.current.rotation.x  = rd.llX.r; leftLegRef.current.rotation.z  = rd.llZ.r }
-
-      ;[r, v] = rdSpring(rd.rlX.r, rd.rlX.v, 0.04, RD_K, RD_DL, dt)
-      ;[rd.rlX.r, rd.rlX.v] = rdClamp(r, v, -0.6, 1.0)
-      ;[r, v] = rdSpring(rd.rlZ.r, rd.rlZ.v,  0.04, RD_K, RD_DL, dt)
-      ;[rd.rlZ.r, rd.rlZ.v] = rdClamp(r, v, -0.25, 0.65)
-      if (rightLegRef.current) { rightLegRef.current.rotation.x = rd.rlX.r; rightLegRef.current.rotation.z = rd.rlZ.r }
-
-      ;[r, v] = rdSpring(rd.byX.r, rd.byX.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byX.r, rd.byX.v] = rdClamp(r, v, -0.45, 0.45)
-      ;[r, v] = rdSpring(rd.byZ.r, rd.byZ.v, 0, RD_K * 0.5, RD_DL, dt)
-      ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.45, 0.45)
-      if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
-
+      if (!ragdoll.current.ready) seedRagdoll(7, 16)
+      // Knocked out face-down: limbs sprawl outward and settle limp
+      stepRagdoll(dt, { laX: 0.28, laZ: -0.22, raX: 0.28, raZ: 0.22, lX: 0.04, lZ: 0.04 }, RD_K, RD_D, RD_DL)
       return
     }
 
-    // ── waking ───────────────────────────────────────────────────────────────
+    // ── waking: plant arms, push off the ground, rise ────────────────────────
     if (dragMode === 'waking') {
       dragTimer.current += delta
       const t = dragTimer.current
-      if (bodyGroupRef.current) {
-        bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
-        const damp = Math.max(0, 1 - t / 1.5)
-        bodyGroupRef.current.rotation.z = Math.sin(t * 18) * 0.18 * damp
+      if (wakeProne.current) {
+        if (t < WAKE_HOLD) {
+          // Plant the hands in a push-up pose while the body is still prone
+          const k = Math.min(1, delta * 9)
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -1.65, k)
+            leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -0.35, k)
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -1.65, k)
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.35, k)
+          }
+          // A small effortful shudder while gathering strength
+          if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 24) * 0.03
+        } else {
+          // Push: arms extend through the rise, then relax; legs tuck under
+          const rise = Math.min(1, (t - WAKE_HOLD) / WAKE_RISE)
+          const k = Math.min(1, delta * (2 + rise * 4))
+          if (leftArmRef.current) {
+            leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -1.65 * (1 - rise), k)
+            leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  -0.35 * (1 - rise), k)
+          }
+          if (rightArmRef.current) {
+            rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -1.65 * (1 - rise), k)
+            rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.35 * (1 - rise), k)
+          }
+          const tuck = Math.sin(rise * Math.PI) * 0.75
+          if (leftLegRef.current)  { leftLegRef.current.rotation.x  = -tuck;       leftLegRef.current.rotation.z  = THREE.MathUtils.lerp(leftLegRef.current.rotation.z, 0, k) }
+          if (rightLegRef.current) { rightLegRef.current.rotation.x = -tuck * 0.8; rightLegRef.current.rotation.z = THREE.MathUtils.lerp(rightLegRef.current.rotation.z, 0, k) }
+          if (bodyGroupRef.current) {
+            bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, k)
+            bodyGroupRef.current.rotation.z = Math.sin(t * 14) * 0.05 * (1 - rise)
+          }
+        }
+      } else {
+        // Barely tilted: just steady the limbs back to neutral with a wobble
+        if (bodyGroupRef.current) {
+          bodyGroupRef.current.rotation.x = THREE.MathUtils.lerp(bodyGroupRef.current.rotation.x, 0, 0.03)
+          const damp = Math.max(0, 1 - t / 1.2)
+          bodyGroupRef.current.rotation.z = Math.sin(t * 18) * 0.18 * damp
+        }
+        if (leftArmRef.current) {
+          leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0, 0.04)
+          leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  0, 0.04)
+        }
+        if (rightArmRef.current) {
+          rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0, 0.04)
+          rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.04)
+        }
+        if (leftLegRef.current)  leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
+        if (rightLegRef.current) rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
       }
-      if (leftArmRef.current) {
-        leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  0, 0.04)
-        leftArmRef.current.rotation.z  = THREE.MathUtils.lerp(leftArmRef.current.rotation.z,  0, 0.04)
-      }
-      if (rightArmRef.current) {
-        rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, 0, 0.04)
-        rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z, 0, 0.04)
-      }
-      if (leftLegRef.current)  leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, 0.04)
-      if (rightLegRef.current) rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, 0.04)
       return
     }
 

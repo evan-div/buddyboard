@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import MiiCharacter, { type DragMode } from './MiiCharacter'
+import MiiCharacter, { WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -1019,6 +1019,16 @@ const GROUND_Y_APPROX  = 0.65   // body center height above group root
 const CAP_HALF_APPROX  = 0.225  // capsule half-length (capLen/2)
 const RADIUS_APPROX    = 0.29   // capsule radius
 
+// Ground height for the group origin so the body capsule rests on (never in)
+// the floor, exact for any compound rotation: project the body's local up-axis
+// into world space and support the capsule's lowest point. Replaces per-mode
+// single-axis approximations that let tumbling bodies clip through the grass.
+const CAPSULE_UP = new THREE.Vector3()
+function capsuleFloorY(rotation: THREE.Euler): number {
+  const uY = CAPSULE_UP.set(0, 1, 0).applyEuler(rotation).y
+  return Math.max(0, RADIUS_APPROX + CAP_HALF_APPROX * Math.abs(uY) - GROUND_Y_APPROX * uY)
+}
+
 interface PhysState {
   mode: DragMode
   pos: THREE.Vector3
@@ -1030,6 +1040,7 @@ interface PhysState {
   pendingMode?: 'dazed' | 'mad'
   dazedRx: number
   dazedRz: number
+  wakeRx: number
 }
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
@@ -1055,7 +1066,12 @@ function PhysicsUpdater({
   const prevCursor = useRef(new THREE.Vector3())
   const hitPoint   = useMemo(() => new THREE.Vector3(), [])
 
-  useFrame((_, delta) => {
+  useFrame((_, rawDelta) => {
+    // Clamp the timestep: after a stall (backgrounded tab, long GC pause) the
+    // next frame's delta can be seconds — integrating that teleports flying
+    // characters across (or off) the island.
+    const delta = Math.min(rawDelta, 0.1)
+
     // Update orbit enabled state
     if (orbitRef.current) {
       orbitRef.current.enabled = !draggingUid.current && !cameraLocked
@@ -1123,12 +1139,10 @@ function PhysicsUpdater({
           return
         }
 
-        // Ground collision — only while over the island.
-        // effectiveFloor raises the trigger point when the character is tumbling so that
-        // the rotated bean body never visually dips below the ground plane.
-        const cosRx = Math.cos(group.rotation.x)
-        const sinRx = Math.abs(Math.sin(group.rotation.x))
-        const effectiveFloor = Math.max(0, cosRx * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRx * RADIUS_APPROX)
+        // Ground collision — only while over the island. The floor height
+        // accounts for the body's full tumble orientation so the rotated bean
+        // never dips below the ground plane.
+        const effectiveFloor = capsuleFloorY(group.rotation)
 
         if (phys.pos.y <= effectiveFloor) {
           phys.pos.y = effectiveFloor
@@ -1194,10 +1208,8 @@ function PhysicsUpdater({
         group.rotation.x = THREE.MathUtils.clamp(group.rotation.x, 0, Math.PI * 0.5)
         group.rotation.z = THREE.MathUtils.clamp(group.rotation.z, -Math.PI * 0.25, Math.PI * 0.25)
 
-        // Keep Y at effective floor (formula exact for |rx| < π/2; acceptable for larger angles)
-        const cosRxS = Math.cos(group.rotation.x)
-        const sinRxS = Math.abs(Math.sin(group.rotation.x))
-        phys.pos.y = Math.max(0, cosRxS * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxS * RADIUS_APPROX)
+        // Keep Y exactly at the floor for the current tumble orientation
+        phys.pos.y = capsuleFloorY(group.rotation)
 
         // Slide position
         phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
@@ -1210,9 +1222,9 @@ function PhysicsUpdater({
         const angSq     = phys.angVel.x * phys.angVel.x + phys.angVel.z * phys.angVel.z
         if (lateralSq < 0.04 && angSq < 0.04) {
           if (phys.pendingMode === 'dazed') {
-            // Store random target angles; dazed handler lerps to them smoothly
-            const dazedRx = 1.25 + (Math.random() - 0.5) * 0.15
-            const dazedRz = (Math.random() - 0.5) * 0.3
+            // Store target angles: face-down, essentially flat on the ground
+            const dazedRx = 1.42 + Math.random() * 0.15
+            const dazedRz = (Math.random() - 0.5) * 0.16
             setCharMode(uid, 'dazed')
             const dp = physicsMap.current.get(uid)
             if (dp) { dp.dazedRx = dazedRx; dp.dazedRz = dazedRz }
@@ -1233,26 +1245,30 @@ function PhysicsUpdater({
           // Lerp into fallen pose — rate is gentle so it reads as a deliberate tip-over
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, phys.dazedRx, Math.min(1, delta * 5))
           group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, phys.dazedRz, Math.min(1, delta * 5))
-          // Use the correct formula so the body bottom stays at y=0 for any rotation angle
-          const cosD  = Math.cos(group.rotation.x)
-          const floorD = Math.max(0, RADIUS_APPROX - GROUND_Y_APPROX * cosD + CAP_HALF_APPROX * Math.abs(cosD))
-          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorD, Math.min(1, delta * 5))
+          phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, capsuleFloorY(group.rotation), Math.min(1, delta * 5))
           group.position.copy(phys.pos)
         }
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
       } else if (phys.mode === 'waking') {
+        // Getting up: a knocked-out (prone) character holds still while the
+        // arms plant (WAKE_HOLD, animated in MiiCharacter), then pushes off
+        // the ground with an eased rise. A barely-tilted character skips the
+        // hold and simply steadies itself.
+        if (phys.modeTimer === 0) phys.wakeRx = group.rotation.x
         phys.modeTimer += delta
-        // Lerp back to upright as they recover
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 1.8))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 2.5))
-        // Also lower Y to ground as rotation straightens (effectiveFloor → 0)
-        const cosRxW = Math.cos(group.rotation.x)
-        const floorW = Math.max(0, RADIUS_APPROX - GROUND_Y_APPROX * cosRxW + CAP_HALF_APPROX * Math.abs(cosRxW))
-        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorW, Math.min(1, delta * 3))
+        const prone = Math.abs(phys.wakeRx) > 0.7
+        const hold  = prone ? WAKE_HOLD : 0.1
+        if (phys.modeTimer > hold) {
+          const t = Math.min(1, (phys.modeTimer - hold) / WAKE_RISE)
+          const f = 1 - Math.pow(1 - t, 3)
+          group.rotation.x = phys.wakeRx * (1 - f)
+          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 4))
+        }
+        phys.pos.y = capsuleFloorY(group.rotation)
         group.position.copy(phys.pos)
-        if (phys.modeTimer >= 1.5) {
+        if (phys.modeTimer >= hold + WAKE_RISE + 0.15) {
           setCharMode(uid, null)
         }
       } else if (phys.mode === 'mad') {
@@ -1261,10 +1277,7 @@ function PhysicsUpdater({
         group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 5))
         group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 5))
         // Lower Y to ground as rotation straightens
-        const cosRxM = Math.cos(group.rotation.x)
-        const sinRxM = Math.abs(Math.sin(group.rotation.x))
-        const floorM = Math.max(0, cosRxM * (CAP_HALF_APPROX - GROUND_Y_APPROX) + sinRxM * RADIUS_APPROX)
-        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, floorM, Math.min(1, delta * 5))
+        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, capsuleFloorY(group.rotation), Math.min(1, delta * 5))
         group.position.copy(phys.pos)
         if (phys.modeTimer >= 2.5) {
           setCharMode(uid, null)
@@ -1502,6 +1515,7 @@ function Scene({
         bounceCount: 0,
         dazedRx: 1.25,
         dazedRz: 0,
+        wakeRx: 0,
       })
       setDragModeMap(prev => {
         const next = new Map(prev)
@@ -1546,6 +1560,7 @@ function Scene({
         bounceCount: 0,
         dazedRx: 1.25,
         dazedRz: 0,
+        wakeRx: 0,
       })
       draggingUid.current = pickup.uid
 
