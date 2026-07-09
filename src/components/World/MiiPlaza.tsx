@@ -5,7 +5,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import MiiCharacter, { WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
+import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -1020,13 +1020,47 @@ const CAP_HALF_APPROX  = 0.225  // capsule half-length (capLen/2)
 const RADIUS_APPROX    = 0.29   // capsule radius
 
 // Ground height for the group origin so the body capsule rests on (never in)
-// the floor, exact for any compound rotation: project the body's local up-axis
-// into world space and support the capsule's lowest point. Replaces per-mode
+// the floor, exact for any orientation: project the body's local up-axis into
+// world space and support the capsule's lowest point. Replaces per-mode
 // single-axis approximations that let tumbling bodies clip through the grass.
 const CAPSULE_UP = new THREE.Vector3()
-function capsuleFloorY(rotation: THREE.Euler): number {
-  const uY = CAPSULE_UP.set(0, 1, 0).applyEuler(rotation).y
+function capsuleFloorY(q: THREE.Quaternion): number {
+  const uY = CAPSULE_UP.set(0, 1, 0).applyQuaternion(q).y
   return Math.max(0, RADIUS_APPROX + CAP_HALF_APPROX * Math.abs(uY) - GROUND_Y_APPROX * uY)
+}
+
+// ─── Lying-down orientation (quaternions) ─────────────────────────────────────
+// A knocked-out bean lies with its long (local Y) axis horizontal. Two params
+// describe the pose: `heading` (which way the head points, cosmetic) and `roll`
+// about the long axis — 0 = face-down (prone), ±π/2 = on a side, π = on its back.
+// Euler angles can't express "roll about the long axis" cleanly once the body is
+// tipped over, so the grounded states use quaternions.
+
+const AXIS_X = new THREE.Vector3(1, 0, 0)
+const AXIS_Y = new THREE.Vector3(0, 1, 0)
+const _qa = new THREE.Quaternion()
+const _qb = new THREE.Quaternion()
+const _qc = new THREE.Quaternion()
+const _vlong = new THREE.Vector3()
+
+// Build the lying pose: roll about the long axis, tip 90° forward, then head.
+function lyingQuat(out: THREE.Quaternion, heading: number, roll: number): THREE.Quaternion {
+  out.setFromAxisAngle(AXIS_Y, heading)
+  out.multiply(_qa.setFromAxisAngle(AXIS_X, Math.PI / 2))
+  out.multiply(_qb.setFromAxisAngle(AXIS_Y, roll))
+  return out
+}
+
+// Read the (heading, roll) that best describe how a body is currently lying.
+function readLyingPose(q: THREE.Quaternion): { heading: number; roll: number } {
+  const L = _vlong.set(0, 1, 0).applyQuaternion(q)          // long axis in world
+  const heading = Math.atan2(L.x, L.z)
+  // Strip heading and the 90° tip; the residual is the roll about the long axis
+  _qa.setFromAxisAngle(AXIS_X, -Math.PI / 2)
+  _qb.setFromAxisAngle(AXIS_Y, -heading)
+  _qc.copy(_qa).multiply(_qb).multiply(q)
+  const roll = 2 * Math.atan2(_qc.y, _qc.w)
+  return { heading, roll }
 }
 
 interface PhysState {
@@ -1038,7 +1072,9 @@ interface PhysState {
   gentleDrop: boolean
   bounceCount: number
   pendingMode?: 'dazed' | 'mad'
-  wakeRx: number
+  heading: number   // grounded pose: head direction
+  landRoll: number  // grounded pose: roll about long axis (0 = face-down)
+  prone: boolean    // knocked flat (vs. only lightly tilted) — full get-up
 }
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
@@ -1140,7 +1176,7 @@ function PhysicsUpdater({
         // Ground collision — only while over the island. The floor height
         // accounts for the body's full tumble orientation so the rotated bean
         // never dips below the ground plane.
-        const effectiveFloor = capsuleFloorY(group.rotation)
+        const effectiveFloor = capsuleFloorY(group.quaternion)
 
         if (phys.pos.y <= effectiveFloor) {
           phys.pos.y = effectiveFloor
@@ -1189,19 +1225,19 @@ function PhysicsUpdater({
 
         group.position.copy(phys.pos)
       } else if (phys.mode === 'sliding') {
-        // Resting orientation: a hard hit (dazed) tips the body face-down onto
-        // the grass; a medium hit (mad) skids upright. rz always eases to 0,
-        // monotonically, so the character never flops to the side it wasn't
-        // already leaning.
-        const restRx = phys.pendingMode === 'dazed' ? 1.5 : 0
-
-        // First slide frame: unwrap the free-tumble rotation to its principal
-        // value so the settle takes the short way round, and shed the spin.
+        // On the first slide frame, read how the body is tumbling and lock in
+        // the pose it will settle into: a hard hit (dazed) lies flat however it
+        // fell — face-down, on a side, or on its back; a medium hit (mad) skids
+        // to a stop upright.
         if (phys.modeTimer === 0) {
-          let rx = group.rotation.x % (Math.PI * 2)
-          if (rx >  Math.PI) rx -= Math.PI * 2
-          if (rx < -Math.PI) rx += Math.PI * 2
-          group.rotation.x = rx
+          if (phys.pendingMode === 'dazed') {
+            const pose = readLyingPose(group.quaternion)
+            phys.heading  = pose.heading
+            phys.landRoll = pose.roll
+          } else {
+            phys.heading  = group.rotation.y
+            phys.landRoll = 0
+          }
           phys.angVel.multiplyScalar(0.3)
         }
         phys.modeTimer += delta
@@ -1212,16 +1248,14 @@ function PhysicsUpdater({
         phys.vel.z *= friction
         phys.vel.y  = 0
 
-        // Residual tumble bleeds off fast while a settling torque tips the body
-        // toward its resting pose — no clamp, so nothing locks at a fixed lean.
-        group.rotation.x += phys.angVel.x * delta
-        group.rotation.z += phys.angVel.z * delta
-        phys.angVel.multiplyScalar(Math.pow(0.015, delta))
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, restRx, Math.min(1, delta * 4))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0,      Math.min(1, delta * 4))
+        // Settle toward the resting orientation (no clamp, so nothing locks at a
+        // fixed lean; slerp takes the short way so it never flops to the far side)
+        if (phys.pendingMode === 'dazed') lyingQuat(_qc, phys.heading, phys.landRoll)
+        else                              _qc.setFromAxisAngle(AXIS_Y, phys.heading)
+        group.quaternion.slerp(_qc, Math.min(1, delta * 5))
 
         // Rest exactly on the ground at the current tilt
-        phys.pos.y = capsuleFloorY(group.rotation)
+        phys.pos.y = capsuleFloorY(group.quaternion)
 
         // Slide position
         phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
@@ -1229,49 +1263,71 @@ function PhysicsUpdater({
         clampToPlazaEdge(phys.pos)
         group.position.copy(phys.pos)
 
-        // Hand off once the skid has stopped AND the body has reached its
-        // resting pose — no further rotation change downstream, so no flop.
-        const lateralSq  = phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z
-        const settledRot = Math.abs(group.rotation.x - restRx) < 0.14 && Math.abs(group.rotation.z) < 0.1
-        if (lateralSq < 0.05 && settledRot) {
+        // Hand off once the skid has stopped AND the body has settled
+        const lateralSq = phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z
+        if (lateralSq < 0.05 && group.quaternion.angleTo(_qc) < 0.12) {
           setCharMode(uid, phys.pendingMode ?? null)
         }
       } else if (phys.mode === 'dazed') {
-        // Knocked out: the slide already settled the body face-down, so just
-        // lie still (limbs go limp in MiiCharacter) before getting up.
+        // Knocked out: lie still (limbs go limp in MiiCharacter) before getting up
         phys.modeTimer += delta
-        phys.pos.y = capsuleFloorY(group.rotation)
+        phys.pos.y = capsuleFloorY(group.quaternion)
         group.position.copy(phys.pos)
         if (phys.modeTimer >= 3.0) {
           setCharMode(uid, 'waking')
         }
       } else if (phys.mode === 'waking') {
-        // Getting up: a knocked-out (prone) character holds still while the
-        // arms plant (WAKE_HOLD, animated in MiiCharacter), then pushes off
-        // the ground with an eased rise. A barely-tilted character skips the
-        // hold and simply steadies itself.
-        if (phys.modeTimer === 0) phys.wakeRx = group.rotation.x
+        // Getting up. On entry, read the resting pose. If knocked flat, the
+        // character first ROLLS onto its stomach (roll → 0 about the long axis),
+        // then plants its arms (WAKE_HOLD, animated in MiiCharacter) and pushes
+        // off the ground with an eased rise. A lightly-tilted body just steadies.
+        if (phys.modeTimer === 0) {
+          phys.prone = CAPSULE_UP.set(0, 1, 0).applyQuaternion(group.quaternion).y < 0.6
+          if (phys.prone) {
+            const pose = readLyingPose(group.quaternion)
+            phys.heading  = pose.heading
+            phys.landRoll = pose.roll
+          } else {
+            // Near-upright: the long axis is ~vertical so its heading is
+            // unreliable; keep the current yaw.
+            phys.heading  = group.rotation.y
+            phys.landRoll = 0
+          }
+        }
         phys.modeTimer += delta
-        const prone = Math.abs(phys.wakeRx) > 0.7
-        const hold  = prone ? WAKE_HOLD : 0.1
-        if (phys.modeTimer > hold) {
-          const t = Math.min(1, (phys.modeTimer - hold) / WAKE_RISE)
-          const f = 1 - Math.pow(1 - t, 3)
-          group.rotation.x = phys.wakeRx * (1 - f)
-          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 4))
+
+        if (!phys.prone) {
+          // Lightly tilted: steady back upright quickly
+          _qc.setFromAxisAngle(AXIS_Y, phys.heading)
+          group.quaternion.slerp(_qc, Math.min(1, delta * 6))
+          if (phys.modeTimer >= 0.4) setCharMode(uid, null)
+        } else if (phys.modeTimer < WAKE_ROLL) {
+          // Roll onto the stomach
+          const f = phys.modeTimer / WAKE_ROLL
+          const e = f * f * (3 - 2 * f)   // smoothstep
+          group.quaternion.copy(lyingQuat(_qc, phys.heading, phys.landRoll * (1 - e)))
+        } else if (phys.modeTimer < WAKE_ROLL + WAKE_HOLD) {
+          // Prone, planting the hands (arms animate in MiiCharacter)
+          group.quaternion.copy(lyingQuat(_qc, phys.heading, 0))
+        } else {
+          // Push off: ease the whole body from prone up to standing
+          const rise = Math.min(1, (phys.modeTimer - WAKE_ROLL - WAKE_HOLD) / WAKE_RISE)
+          const f = 1 - Math.pow(1 - rise, 3)
+          lyingQuat(_qa, phys.heading, 0)
+          _qb.setFromAxisAngle(AXIS_Y, phys.heading)
+          group.quaternion.copy(_qa).slerp(_qb, f)
+          if (phys.modeTimer >= WAKE_ROLL + WAKE_HOLD + WAKE_RISE + 0.1) {
+            setCharMode(uid, null)
+          }
         }
-        phys.pos.y = capsuleFloorY(group.rotation)
+        phys.pos.y = capsuleFloorY(group.quaternion)
         group.position.copy(phys.pos)
-        if (phys.modeTimer >= hold + WAKE_RISE + 0.15) {
-          setCharMode(uid, null)
-        }
       } else if (phys.mode === 'mad') {
         phys.modeTimer += delta
-        // Lerp rotation back to upright instead of snapping
-        group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, Math.min(1, delta * 5))
-        group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, Math.min(1, delta * 5))
-        // Lower Y to ground as rotation straightens
-        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, capsuleFloorY(group.rotation), Math.min(1, delta * 5))
+        // Settle upright (heading preserved)
+        _qc.setFromAxisAngle(AXIS_Y, phys.heading)
+        group.quaternion.slerp(_qc, Math.min(1, delta * 5))
+        phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, capsuleFloorY(group.quaternion), Math.min(1, delta * 5))
         group.position.copy(phys.pos)
         if (phys.modeTimer >= 2.5) {
           setCharMode(uid, null)
@@ -1507,7 +1563,9 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
-        wakeRx: 0,
+        heading: 0,
+        landRoll: 0,
+        prone: false,
       })
       setDragModeMap(prev => {
         const next = new Map(prev)
@@ -1550,7 +1608,9 @@ function Scene({
         modeTimer: 0,
         gentleDrop: false,
         bounceCount: 0,
-        wakeRx: 0,
+        heading: 0,
+        landRoll: 0,
+        prone: false,
       })
       draggingUid.current = pickup.uid
 

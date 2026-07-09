@@ -90,9 +90,11 @@ function CelebrationParticles({ bodyTop }: { bodyTop: number }) {
 export type DragMode = 'held' | 'flying' | 'sliding' | 'dazed' | 'waking' | 'mad' | 'fallen'
 
 // Get-up choreography timing, shared with the plaza physics: a knocked-out
-// character stays prone while the arms plant (HOLD), then pushes upright (RISE)
-export const WAKE_HOLD = 0.55
-export const WAKE_RISE = 0.95
+// character rolls onto its stomach (ROLL), plants its arms (HOLD), then pushes
+// upright (RISE).
+export const WAKE_ROLL = 0.5
+export const WAKE_HOLD = 0.5
+export const WAKE_RISE = 0.9
 
 // ─── Ragdoll Spring Physics ───────────────────────────────────────────────────
 
@@ -129,6 +131,10 @@ function makeRagdoll(): RagdollRef {
     ready: false,
   }
 }
+
+// Scratch objects for the prone-detection up-axis test (module-level, reused)
+const _wakeUp = new THREE.Vector3()
+const _identQuat = new THREE.Quaternion()
 
 // ─── Main Character ───────────────────────────────────────────────────────────
 
@@ -244,7 +250,9 @@ export default function MiiCharacter({
       return
     }
     if (dragMode === 'waking') {
-      wakeProne.current = Math.abs(groupRef.current?.rotation.x ?? 0) > 0.7
+      // Knocked flat if the body's up-axis isn't pointing skyward
+      const up = _wakeUp.set(0, 1, 0).applyQuaternion(groupRef.current?.quaternion ?? _identQuat)
+      wakeProne.current = up.y < 0.6
       return
     }
     if (dragMode === 'fallen') return
@@ -424,13 +432,19 @@ export default function MiiCharacter({
       return
     }
 
-    // ── waking: plant arms, push off the ground, rise ────────────────────────
+    // ── waking: roll onto stomach, plant arms, push off, rise ────────────────
     if (dragMode === 'waking') {
       dragTimer.current += delta
       const t = dragTimer.current
       if (wakeProne.current) {
-        if (t < WAKE_HOLD) {
-          // Plant the hands in a push-up pose while the body is still prone
+        if (t < WAKE_ROLL) {
+          // Rolling onto the stomach (body turn handled by physics): limbs stay
+          // limp, flopping with the roll
+          const dt = Math.min(delta, 1 / 30)
+          if (!ragdoll.current.ready) seedRagdoll(2, 4)
+          stepRagdoll(dt, { laX: 0.2, laZ: -0.2, raX: 0.2, raZ: 0.2, lX: 0.05, lZ: 0.05 }, RD_K * 0.7, RD_D, RD_DL)
+        } else if (t < WAKE_ROLL + WAKE_HOLD) {
+          // Plant the hands in a push-up pose while the body is prone
           const k = Math.min(1, delta * 9)
           if (leftArmRef.current) {
             leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -1.65, k)
@@ -440,11 +454,13 @@ export default function MiiCharacter({
             rightArmRef.current.rotation.x = THREE.MathUtils.lerp(rightArmRef.current.rotation.x, -1.65, k)
             rightArmRef.current.rotation.z = THREE.MathUtils.lerp(rightArmRef.current.rotation.z,  0.35, k)
           }
+          if (leftLegRef.current)  leftLegRef.current.rotation.x  = THREE.MathUtils.lerp(leftLegRef.current.rotation.x,  0, k)
+          if (rightLegRef.current) rightLegRef.current.rotation.x = THREE.MathUtils.lerp(rightLegRef.current.rotation.x, 0, k)
           // A small effortful shudder while gathering strength
           if (bodyGroupRef.current) bodyGroupRef.current.rotation.z = Math.sin(t * 24) * 0.03
         } else {
           // Push: arms extend through the rise, then relax; legs tuck under
-          const rise = Math.min(1, (t - WAKE_HOLD) / WAKE_RISE)
+          const rise = Math.min(1, (t - WAKE_ROLL - WAKE_HOLD) / WAKE_RISE)
           const k = Math.min(1, delta * (2 + rise * 4))
           if (leftArmRef.current) {
             leftArmRef.current.rotation.x  = THREE.MathUtils.lerp(leftArmRef.current.rotation.x,  -1.65 * (1 - rise), k)
