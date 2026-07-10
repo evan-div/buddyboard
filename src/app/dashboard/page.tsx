@@ -389,6 +389,9 @@ export default function DashboardPage() {
             <button onClick={() => router.push('/profile')} style={whiteBtnStyle}>
               SETTINGS
             </button>
+            <button onClick={() => router.push('/skins')} style={whiteBtnStyle}>
+              GOLF SKINS
+            </button>
           </div>
         ) : (
           <div
