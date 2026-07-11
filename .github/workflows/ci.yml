@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      # The client Firebase SDK initializes lazily, so dummy values are enough
+      # to build and render public pages. No real secrets in CI.
+      - name: Write dummy Firebase env
+        run: |
+          cat > .env.local <<'ENV'
+          NEXT_PUBLIC_FIREBASE_API_KEY=ci-dummy-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=ci-dummy.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=ci-dummy
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=ci-dummy.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000000000
+          NEXT_PUBLIC_FIREBASE_APP_ID=1:000000000000:web:0000000000000000
+          ENV
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test (landing page)
+        run: node scripts/smoke.mjs

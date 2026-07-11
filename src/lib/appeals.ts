@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { awardCourtWinBadge } from './firestore'
+import { effectiveChiefUid, tallyVotes } from './voteTally'
 import type { GroupNotification, CourtCase, CaseStatus } from './types'
 
 function fromTs(ts: Timestamp | Date | undefined): Date {
@@ -313,41 +314,16 @@ export async function castVote(
     if (c.status !== 'in_court') throw new Error('Voting is closed')
     if (c.votes?.[voterUid]) throw new Error('You have already voted')
 
-    // Chief gets 2 votes unless they're a party to the case
-    const effectiveChief =
-      chiefUid && chiefUid !== c.defendantUid && chiefUid !== c.accuserUid
-        ? chiefUid
-        : null
-
-    const voterWeight = (uid: string) => (uid === effectiveChief ? 2 : 1)
-    const totalWeight = memberUids.reduce((s, uid) => s + voterWeight(uid), 0)
-
+    const effectiveChief = effectiveChiefUid(chiefUid, c.defendantUid, c.accuserUid)
     const newVotes: Record<string, string> = { ...(c.votes ?? {}), [voterUid]: vote }
-    const innocentWeight = Object.entries(newVotes)
-      .filter(([, v]) => v === 'innocent')
-      .reduce((s, [uid]) => s + voterWeight(uid), 0)
-    const guiltyWeight = Object.entries(newVotes)
-      .filter(([, v]) => v === 'guilty')
-      .reduce((s, [uid]) => s + voterWeight(uid), 0)
-    const majority = Math.floor(totalWeight / 2) + 1
-
-    let newStatus: CaseStatus = 'in_court'
-    let resolved = false
-    if (innocentWeight >= majority) { newStatus = 'resolved_innocent'; resolved = true }
-    else if (guiltyWeight >= majority) { newStatus = 'resolved_guilty'; resolved = true }
-
-    // Auto-resolve when every eligible voter has cast a vote (ties go to defendant / innocent)
-    // Uses server-side memberCount so a stale client list can't trigger premature resolution
-    if (!resolved) {
-      const eligibleCount = Math.max(0, memberCount - 2) // all members minus the two parties
-      const nonPartyVotes = Object.keys(newVotes).filter(
-        uid => uid !== c.accuserUid && uid !== c.defendantUid
-      ).length
-      if (eligibleCount > 0 && nonPartyVotes >= eligibleCount) {
-        newStatus = innocentWeight >= guiltyWeight ? 'resolved_innocent' : 'resolved_guilty'
-        resolved = true
-      }
-    }
+    const { status: newStatus, resolved } = tallyVotes({
+      votes: newVotes,
+      memberUids,
+      memberCount,
+      accuserUid: c.accuserUid,
+      defendantUid: c.defendantUid,
+      effectiveChief,
+    })
 
     const voteUpdate: Record<string, unknown> = { [`votes.${voterUid}`]: vote }
     if (voterUid === effectiveChief) voteUpdate.chiefVoterUid = voterUid
