@@ -23,11 +23,13 @@ import {
   subscribeToWallComments,
   updateUserAvatar,
   updateMemberAvatar,
+  ensureInviteDoc,
+  touchPresence,
 } from '@/lib/firestore'
 import type { WallPost, WallComment } from '@/lib/types'
 import type { Group, GroupMember, Transaction, GroupNotification } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
-import { timeAgo } from '@/lib/utils'
+import { timeAgo, dayKey } from '@/lib/utils'
 import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
@@ -627,13 +629,39 @@ export default function GroupPage() {
   const loading = group === undefined || membersData === null
   const members = useMemo(() => membersData ?? [], [membersData])
 
+  // Legacy groups predate the invites/{code} lookup collection; the mayor's
+  // client backfills it so invite codes keep working under the new rules.
+  const inviteBackfilled = useRef(false)
+  useEffect(() => {
+    if (!group || !currentUid || group.createdBy !== currentUid) return
+    if (inviteBackfilled.current) return
+    inviteBackfilled.current = true
+    ensureInviteDoc(group)
+  }, [group, currentUid])
+
+  // Presence heartbeat: mark this member as active while the plaza is open so
+  // other clients can show inactive members as asleep.
+  useEffect(() => {
+    if (!currentUid || !groupId) return
+    const beat = () => {
+      if (document.visibilityState === 'visible') touchPresence(groupId, currentUid)
+    }
+    beat()
+    const interval = setInterval(beat, 60_000)
+    document.addEventListener('visibilitychange', beat)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', beat)
+    }
+  }, [currentUid, groupId])
+
   // Remaining daily budgets derived from the live member/group data
   const dailyStats = useMemo(() => {
     const giveLimit = group?.dailyGiveLimit ?? 100
     const takeLimit = group?.dailyTakeLimit ?? 20
     const me = members.find((m) => m.uid === currentUid)
     // Today's date only detects stale daily counters; drift until the next snapshot is harmless
-    const today = new Date().toISOString().split('T')[0]
+    const today = dayKey(group?.timezone)
     const given = me && me.lastResetDate === today ? me.dailyPointsGiven : 0
     const taken = me && me.lastResetDate === today ? me.dailyPointsTaken : 0
     return {
