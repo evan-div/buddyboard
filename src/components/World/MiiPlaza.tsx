@@ -6,6 +6,8 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
+import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
+import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -43,7 +45,6 @@ const DEFAULT_PRESETS: PlazaPreset[] = [
 
 // ─── Grass Floor ─────────────────────────────────────────────────────────────
 
-const FSIZE      = 26
 const PATCH_GRID = 10                               // 10×10 checker squares
 const PATCH_W    = FSIZE / PATCH_GRID               // 2.6 per patch
 // Blades are decorative texture on top of the solid checkerboard base, so a
@@ -58,19 +59,7 @@ const LIGHT_COLOR = '#6dc957'
 const DARK_COLOR  = '#246b24'
 
 // ─── Plaza outline ────────────────────────────────────────────────────────────
-// A superellipse ("squircle") with a gentle sinusoidal wobble: the plaza keeps
-// its square footprint but the corners are rounded and the edge reads organic.
-// The floor, dirt base, grass blades, and physics bounds all follow this line.
-
-const EDGE_EXP = 4
-
-function plazaEdgeRadius(theta: number): number {
-  const c = Math.abs(Math.cos(theta))
-  const s = Math.abs(Math.sin(theta))
-  const base = (FSIZE / 2) / Math.pow(c ** EDGE_EXP + s ** EDGE_EXP, 1 / EDGE_EXP)
-  const wobble = 1 + 0.025 * Math.sin(theta * 5 + 1.7) + 0.015 * Math.sin(theta * 9 + 0.4)
-  return base * wobble
-}
+// Edge math lives in plazaMath.ts (unit-tested); this file renders it.
 
 function makePlazaShape(): THREE.Shape {
   const pts: THREE.Vector2[] = []
@@ -81,18 +70,6 @@ function makePlazaShape(): THREE.Shape {
     pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
   }
   return new THREE.Shape(pts)
-}
-
-// Pull a position back inside the rounded edge; returns true if it was outside
-function clampToPlazaEdge(pos: THREE.Vector3, margin = 0.45): boolean {
-  const r = Math.hypot(pos.x, pos.z)
-  if (r === 0) return false
-  const maxR = plazaEdgeRadius(Math.atan2(pos.z, pos.x)) - margin
-  if (r <= maxR) return false
-  const scale = maxR / r
-  pos.x *= scale
-  pos.z *= scale
-  return true
 }
 
 // Registers each compiled shader's uTime uniform into the passed ref so the
@@ -1013,55 +990,14 @@ const IMPACT_MAD  = 4
 const FALL_DEPTH     = -30   // y below which a fallen character despawns
 const RESPAWN_DELAY  = 1.6   // seconds hidden before dropping back in
 const RESPAWN_HEIGHT = 9     // drop-in height above the island center
-// Approximate bean geometry constants for effective ground-floor calculation.
-// These match the default dims from useBeanDims (bodyWidth=0.5, bodyHeight=0.5).
-const GROUND_Y_APPROX  = 0.65   // body center height above group root
-const CAP_HALF_APPROX  = 0.225  // capsule half-length (capLen/2)
-const RADIUS_APPROX    = 0.29   // capsule radius
+// ─── Lying-down orientation ───────────────────────────────────────────────────
+// lyingQuat/readLyingPose live in plazaMath.ts (unit-tested). These scratch
+// quaternions are for slerp targets in the physics loop below.
 
-// Ground height for the group origin so the body capsule rests on (never in)
-// the floor, exact for any orientation: project the body's local up-axis into
-// world space and support the capsule's lowest point. Replaces per-mode
-// single-axis approximations that let tumbling bodies clip through the grass.
-const CAPSULE_UP = new THREE.Vector3()
-function capsuleFloorY(q: THREE.Quaternion): number {
-  const uY = CAPSULE_UP.set(0, 1, 0).applyQuaternion(q).y
-  return Math.max(0, RADIUS_APPROX + CAP_HALF_APPROX * Math.abs(uY) - GROUND_Y_APPROX * uY)
-}
-
-// ─── Lying-down orientation (quaternions) ─────────────────────────────────────
-// A knocked-out bean lies with its long (local Y) axis horizontal. Two params
-// describe the pose: `heading` (which way the head points, cosmetic) and `roll`
-// about the long axis — 0 = face-down (prone), ±π/2 = on a side, π = on its back.
-// Euler angles can't express "roll about the long axis" cleanly once the body is
-// tipped over, so the grounded states use quaternions.
-
-const AXIS_X = new THREE.Vector3(1, 0, 0)
-const AXIS_Y = new THREE.Vector3(0, 1, 0)
 const _qa = new THREE.Quaternion()
 const _qb = new THREE.Quaternion()
 const _qc = new THREE.Quaternion()
-const _vlong = new THREE.Vector3()
-
-// Build the lying pose: roll about the long axis, tip 90° forward, then head.
-function lyingQuat(out: THREE.Quaternion, heading: number, roll: number): THREE.Quaternion {
-  out.setFromAxisAngle(AXIS_Y, heading)
-  out.multiply(_qa.setFromAxisAngle(AXIS_X, Math.PI / 2))
-  out.multiply(_qb.setFromAxisAngle(AXIS_Y, roll))
-  return out
-}
-
-// Read the (heading, roll) that best describe how a body is currently lying.
-function readLyingPose(q: THREE.Quaternion): { heading: number; roll: number } {
-  const L = _vlong.set(0, 1, 0).applyQuaternion(q)          // long axis in world
-  const heading = Math.atan2(L.x, L.z)
-  // Strip heading and the 90° tip; the residual is the roll about the long axis
-  _qa.setFromAxisAngle(AXIS_X, -Math.PI / 2)
-  _qb.setFromAxisAngle(AXIS_Y, -heading)
-  _qc.copy(_qa).multiply(_qb).multiply(q)
-  const roll = 2 * Math.atan2(_qc.y, _qc.w)
-  return { heading, roll }
-}
+const _upVec = new THREE.Vector3()
 
 interface PhysState {
   mode: DragMode
@@ -1192,11 +1128,14 @@ function PhysicsUpdater({
             phys.vel.z *= 0.65
             phys.angVel.multiplyScalar(0.45)
             phys.bounceCount += 1
+            playThud(Math.min(1, impactVY / 16) * 0.6)
             // Stay in flying mode — group.position.copy(phys.pos) at end of block applies
           } else {
             // Final landing
             phys.vel.y = 0  // kill vertical; keep lateral so sliding can decelerate it
             phys.bounceCount = 0
+            playThud(Math.min(1, totalSpeed / 12))
+            if (totalSpeed >= IMPACT_MAD) buzz(totalSpeed >= IMPACT_DAZE ? 45 : 25)
 
             if (totalSpeed >= IMPACT_DAZE) {
               // Hard impact: slide to a stop, then snap to fallen pose
@@ -1282,7 +1221,7 @@ function PhysicsUpdater({
         // then plants its arms (WAKE_HOLD, animated in MiiCharacter) and pushes
         // off the ground with an eased rise. A lightly-tilted body just steadies.
         if (phys.modeTimer === 0) {
-          phys.prone = CAPSULE_UP.set(0, 1, 0).applyQuaternion(group.quaternion).y < 0.6
+          phys.prone = _upVec.set(0, 1, 0).applyQuaternion(group.quaternion).y < 0.6
           if (phys.prone) {
             const pose = readLyingPose(group.quaternion)
             phys.heading  = pose.heading
@@ -1493,9 +1432,12 @@ function Clouds() {
 
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
-// Members are shown asleep when their presence heartbeat (60s while the plaza
-// is open) has gone quiet for a while.
+// A member is "online" when their presence heartbeat (60s while the plaza is
+// open) is recent. Shown in the presence tab, not on the characters.
 const PRESENCE_TIMEOUT_MS = 150_000
+// The plaza dozes by default; a throw wakes everyone, and the characters
+// drift back to sleep after this long without further commotion.
+const WAKE_WINDOW_MS = 60_000
 
 // Compact a vector for a plaza-event doc
 function plazaVec(v: THREE.Vector3): PlazaVec {
@@ -1558,6 +1500,17 @@ function Scene({
     }
     return map
   }, [members])
+
+  // The whole plaza dozes until somebody gets thrown — then everyone wakes
+  // up and wanders, drifting back to sleep after a quiet spell.
+  const [sleeping, setSleeping] = useState(true)
+  const sleepTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wakeAll = useCallback(() => {
+    setSleeping(false)
+    if (sleepTimer.current) clearTimeout(sleepTimer.current)
+    sleepTimer.current = setTimeout(() => setSleeping(true), WAKE_WINDOW_MS)
+  }, [])
+  useEffect(() => () => { if (sleepTimer.current) clearTimeout(sleepTimer.current) }, [])
 
   const setCharMode = useCallback((uid: string, mode: DragMode | null) => {
     const existing = physicsMap.current.get(uid)
@@ -1637,6 +1590,9 @@ function Scene({
         return next
       })
 
+      playPickup()
+      buzz(10)
+
       sendPlazaEvent(groupId, {
         type: 'pickup', uid: pickup.uid, by: currentUid,
         pos: plazaVec(startPos),
@@ -1684,6 +1640,9 @@ function Scene({
             next.set(uid, 'flying')
             return next
           })
+          playWhoosh(speed)
+          buzz(18)
+          wakeAll()
           sendPlazaEvent(groupId, {
             type: 'throw', uid, by: currentUid,
             pos: plazaVec(phys.pos), vel: plazaVec(phys.vel), angVel: plazaVec(phys.angVel),
@@ -1711,7 +1670,7 @@ function Scene({
 
       draggingUid.current = null
     }
-  }, [onSelect, groupId, currentUid])
+  }, [onSelect, groupId, currentUid, wakeAll])
 
   // Register pointerup and touch events on canvas domElement
   useEffect(() => {
@@ -1815,9 +1774,12 @@ function Scene({
       phys.pos.set(ev.pos.x, ev.pos.y, ev.pos.z)
       if (ev.type === 'pickup') {
         phys.pos.y = HOLD_HEIGHT - HEAD_HEIGHT
+        playPickup()
       } else if (ev.type === 'throw') {
         phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? 0, ev.vel?.z ?? 0)
         phys.angVel.set(ev.angVel?.x ?? 0, ev.angVel?.y ?? 0, ev.angVel?.z ?? 0)
+        playWhoosh(phys.vel.length())
+        wakeAll()
       } else {
         phys.gentleDrop = true
         phys.vel.set(0, -2, 0)
@@ -1827,25 +1789,7 @@ function Scene({
       group.position.copy(phys.pos)
     })
     return unsub
-  }, [groupId, currentUid, setCharMode])
-
-  // Presence: members without a recent heartbeat are shown asleep. A ticking
-  // clock re-evaluates between snapshots so characters doze off on their own.
-  const [presenceNow, setPresenceNow] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setPresenceNow(Date.now()), 30_000)
-    return () => clearInterval(t)
-  }, [])
-  const asleepMap = useMemo(() => {
-    const map = new Map<string, boolean>()
-    for (const m of members) {
-      const awake =
-        m.uid === currentUid ||
-        (m.lastSeen !== undefined && presenceNow - m.lastSeen.getTime() < PRESENCE_TIMEOUT_MS)
-      map.set(m.uid, !awake)
-    }
-    return map
-  }, [members, currentUid, presenceNow])
+  }, [groupId, currentUid, setCharMode, wakeAll])
 
   return (
     <>
@@ -1867,7 +1811,7 @@ function Scene({
           isSelected={selectedUid === member.uid}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
-          asleep={asleepMap.get(member.uid) ?? false}
+          asleep={sleeping}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -1898,6 +1842,101 @@ function Scene({
         makeDefault
       />
     </>
+  )
+}
+
+// ─── Presence tab ─────────────────────────────────────────────────────────────
+
+// Slim tab on the left edge showing who's in the plaza right now. Presence is
+// informational only — sleeping/waking of the 3D characters is driven by
+// throws, not by who's online.
+function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentUid: string }) {
+  const [open, setOpen] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const isOnline = (m: GroupMember) =>
+    m.uid === currentUid ||
+    (m.lastSeen !== undefined && now - m.lastSeen.getTime() < PRESENCE_TIMEOUT_MS)
+
+  const sorted = [...members].sort(
+    (a, b) => Number(isOnline(b)) - Number(isOnline(a)) || a.displayName.localeCompare(b.displayName)
+  )
+  const onlineCount = members.reduce((n, m) => n + (isOnline(m) ? 1 : 0), 0)
+
+  const glass: React.CSSProperties = {
+    background: 'rgba(15,15,25,0.78)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    color: '#fff',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.25)',
+  }
+
+  return (
+    <div style={{ position: 'absolute', left: 0, top: '38%', zIndex: 10 }}>
+      {open ? (
+        <div style={{ ...glass, borderRadius: '0 14px 14px 0', padding: '8px 12px 10px 10px', maxWidth: 190 }}>
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Hide who's online"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+              background: 'none', border: 'none', color: '#fff', cursor: 'pointer',
+              font: 'inherit', fontSize: 12, fontWeight: 800, letterSpacing: 0.4,
+              textTransform: 'uppercase', opacity: 0.85, padding: '2px 0 6px',
+            }}
+          >
+            Online {onlineCount}/{members.length}
+            <span aria-hidden style={{ marginLeft: 'auto', fontSize: 13 }}>‹</span>
+          </button>
+          {sorted.map((m) => {
+            const online = isOnline(m)
+            return (
+              <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0', fontSize: 13 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: online ? '#34d399' : '#6b7280',
+                    boxShadow: online ? '0 0 6px rgba(52,211,153,0.8)' : 'none',
+                  }}
+                />
+                <span style={{
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  opacity: online ? 1 : 0.55,
+                }}>
+                  {m.displayName}{m.uid === currentUid ? ' (you)' : ''}
+                </span>
+                {!online && <span aria-label="offline" style={{ fontSize: 11, flexShrink: 0 }}>💤</span>}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label={`Show who's online (${onlineCount} of ${members.length})`}
+          style={{
+            ...glass,
+            display: 'flex', alignItems: 'center', gap: 6,
+            border: 'none', borderRadius: '0 12px 12px 0', cursor: 'pointer',
+            padding: '8px 10px 8px 8px', font: 'inherit', fontSize: 13, fontWeight: 700,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: '#34d399', boxShadow: '0 0 6px rgba(52,211,153,0.8)',
+            }}
+          />
+          {onlineCount}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -1998,6 +2037,7 @@ export default function MiiPlaza({
     >
       <Canvas
         camera={{ position: [8, 6, 8], fov: 60 }}
+        dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
@@ -2019,6 +2059,8 @@ export default function MiiPlaza({
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
+
+      <PresenceTab members={members} currentUid={currentUid} />
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
