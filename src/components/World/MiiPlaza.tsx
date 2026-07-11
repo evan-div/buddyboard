@@ -6,10 +6,10 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec } from '@/lib/types'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -1493,8 +1493,23 @@ function Clouds() {
 
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
+// Members are shown asleep when their presence heartbeat (60s while the plaza
+// is open) has gone quiet for a while.
+const PRESENCE_TIMEOUT_MS = 150_000
+
+// Compact a vector for a plaza-event doc
+function plazaVec(v: THREE.Vector3): PlazaVec {
+  return {
+    x: Math.round(v.x * 1000) / 1000,
+    y: Math.round(v.y * 1000) / 1000,
+    z: Math.round(v.z * 1000) / 1000,
+  }
+}
+
 function Scene({
   members,
+  groupId,
+  currentUid,
   selectedUid,
   focusPos,
   cameraLocked,
@@ -1505,6 +1520,8 @@ function Scene({
   mobile,
 }: {
   members: GroupMember[]
+  groupId: string
+  currentUid: string
   selectedUid: string | null
   focusPos: [number, number, number] | null
   cameraLocked: boolean
@@ -1619,8 +1636,13 @@ function Scene({
         next.set(pickup.uid, 'held')
         return next
       })
+
+      sendPlazaEvent(groupId, {
+        type: 'pickup', uid: pickup.uid, by: currentUid,
+        pos: plazaVec(startPos),
+      })
     }, 250)
-  }, [cameraLocked])
+  }, [cameraLocked, groupId, currentUid])
 
   const handlePointerUp = useCallback(() => {
     // Clear pending hold timer
@@ -1662,6 +1684,10 @@ function Scene({
             next.set(uid, 'flying')
             return next
           })
+          sendPlazaEvent(groupId, {
+            type: 'throw', uid, by: currentUid,
+            pos: plazaVec(phys.pos), vel: plazaVec(phys.vel), angVel: plazaVec(phys.angVel),
+          })
         }
       } else {
         // Gentle drop — return to normal
@@ -1676,12 +1702,16 @@ function Scene({
             next.set(uid, 'flying')
             return next
           })
+          sendPlazaEvent(groupId, {
+            type: 'drop', uid, by: currentUid,
+            pos: plazaVec(phys.pos),
+          })
         }
       }
 
       draggingUid.current = null
     }
-  }, [onSelect])
+  }, [onSelect, groupId, currentUid])
 
   // Register pointerup and touch events on canvas domElement
   useEffect(() => {
@@ -1764,6 +1794,59 @@ function Scene({
     }
   }, [gl.domElement, handlePointerUp])
 
+  // Apply other members' pickup/throw/drop broadcasts so every open plaza
+  // shows the same manhandling. Our own events echo back and are skipped.
+  const seenEventIds = useRef(new Set<string>())
+  useEffect(() => {
+    if (!groupId || !currentUid) return
+    const unsub = subscribeToPlazaEvents(groupId, (ev) => {
+      if (ev.by === currentUid) return                 // our own broadcast
+      if (draggingUid.current === ev.uid) return       // we're holding them locally
+      if (seenEventIds.current.has(ev.id)) return
+      seenEventIds.current.add(ev.id)
+
+      const group = charGroups.current.get(ev.uid)
+      if (!group) return
+
+      setCharMode(ev.uid, ev.type === 'pickup' ? 'held' : 'flying')
+      const phys = physicsMap.current.get(ev.uid)
+      if (!phys) return
+
+      phys.pos.set(ev.pos.x, ev.pos.y, ev.pos.z)
+      if (ev.type === 'pickup') {
+        phys.pos.y = HOLD_HEIGHT - HEAD_HEIGHT
+      } else if (ev.type === 'throw') {
+        phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? 0, ev.vel?.z ?? 0)
+        phys.angVel.set(ev.angVel?.x ?? 0, ev.angVel?.y ?? 0, ev.angVel?.z ?? 0)
+      } else {
+        phys.gentleDrop = true
+        phys.vel.set(0, -2, 0)
+        phys.angVel.set(0, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 1.5)
+      }
+      group.visible = true
+      group.position.copy(phys.pos)
+    })
+    return unsub
+  }, [groupId, currentUid, setCharMode])
+
+  // Presence: members without a recent heartbeat are shown asleep. A ticking
+  // clock re-evaluates between snapshots so characters doze off on their own.
+  const [presenceNow, setPresenceNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setPresenceNow(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const asleepMap = useMemo(() => {
+    const map = new Map<string, boolean>()
+    for (const m of members) {
+      const awake =
+        m.uid === currentUid ||
+        (m.lastSeen !== undefined && presenceNow - m.lastSeen.getTime() < PRESENCE_TIMEOUT_MS)
+      map.set(m.uid, !awake)
+    }
+    return map
+  }, [members, currentUid, presenceNow])
+
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
@@ -1784,6 +1867,7 @@ function Scene({
           isSelected={selectedUid === member.uid}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
+          asleep={asleepMap.get(member.uid) ?? false}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -1921,6 +2005,8 @@ export default function MiiPlaza({
         <Suspense fallback={null}>
           <Scene
             members={members}
+            groupId={groupId}
+            currentUid={currentUid}
             selectedUid={selectedMember?.uid ?? null}
             focusPos={focusPos}
             cameraLocked={cameraLocked}

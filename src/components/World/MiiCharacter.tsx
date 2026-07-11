@@ -147,6 +147,7 @@ export interface MiiCharacterProps {
   isSelected: boolean
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
+  asleep?: boolean
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -154,7 +155,7 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, onPickupStart, onGroupMount,
+  dragMode = null, asleep = false, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -215,6 +216,15 @@ export default function MiiCharacter({
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
     if (rightLegRef.current) rightLegRef.current.rotation.x = 0
   }, [celebrationType])
+
+  // Clear the sleeping slump when the member comes back online
+  useEffect(() => {
+    if (!asleep && bodyGroupRef.current) {
+      bodyGroupRef.current.rotation.x = 0
+      bodyGroupRef.current.rotation.z = 0
+      bodyGroupRef.current.position.y = 0
+    }
+  }, [asleep])
 
   useEffect(() => {
     selectedTimer.current = 0
@@ -545,6 +555,26 @@ export default function MiiCharacter({
       return
     }
 
+    // ── asleep ────────────────────────────────────────────────────────────────
+    // Member has no live plaza session: stand in place and snooze. The physics
+    // modes above still run first, so a sleeping character can be picked up
+    // and thrown like anyone else — it just never wanders on its own.
+    if (asleep) {
+      phase.current += delta
+      const t    = phase.current
+      const body = bodyGroupRef.current
+      if (body) {
+        body.position.y = Math.sin(t * 1.4) * 0.02   // slow breathing
+        body.rotation.x = 0.07                        // slight slump
+        body.rotation.z = Math.sin(t * 0.7) * 0.02
+      }
+      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0.12; leftArmRef.current.rotation.z  = 0 }
+      if (rightArmRef.current) { rightArmRef.current.rotation.x = 0.12; rightArmRef.current.rotation.z = 0 }
+      if (leftLegRef.current)  leftLegRef.current.rotation.x  = 0
+      if (rightLegRef.current) rightLegRef.current.rotation.x = 0
+      return
+    }
+
     // ── selected ──────────────────────────────────────────────────────────────
     if (isSelected) {
       selectedTimer.current += delta
@@ -658,6 +688,12 @@ export default function MiiCharacter({
         </Html>
       )}
 
+      {asleep && !dragMode && !celebrationType && (
+        <Html position={[0, overlayY + 0.22, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{ fontSize: 18, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))' }}>💤</div>
+        </Html>
+      )}
+
       {dragMode === 'dazed' && (
         <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>💫</div>
@@ -719,7 +755,7 @@ export default function MiiCharacter({
         <BeanBody dims={dims} color={bodyColor} gradientMap={gradientMap} />
 
         <BeanFace
-          eyeStyle={member.avatar.eyeStyle ?? 'normal'}
+          eyeStyle={asleep ? 'sleepy' : (member.avatar.eyeStyle ?? 'normal')}
           mouthStyle={member.avatar.mouthStyle ?? 'smile'}
           eyeSize={member.avatar.eyeSize}
           eyeSpacing={member.avatar.eyeSpacing}
