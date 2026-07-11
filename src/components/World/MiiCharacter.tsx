@@ -148,6 +148,7 @@ export interface MiiCharacterProps {
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   asleep?: boolean
+  heldBy?: string | null   // display name of whoever is carrying this character
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -155,7 +156,7 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, asleep = false, onPickupStart, onGroupMount,
+  dragMode = null, asleep = false, heldBy = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -691,6 +692,20 @@ export default function MiiCharacter({
       {asleep && !dragMode && !celebrationType && (
         <Html position={[0, overlayY + 0.22, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 18, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))' }}>💤</div>
+        </Html>
+      )}
+
+      {dragMode === 'held' && heldBy && (
+        <Html position={[0, overlayY + 0.25, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <div style={{
+            background: 'rgba(15,15,25,0.78)', color: '#fff',
+            borderRadius: 999, padding: '3px 10px',
+            fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+            display: 'flex', alignItems: 'center', gap: 4,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+          }}>
+            ✋ {heldBy}
+          </div>
         </Html>
       )}
 

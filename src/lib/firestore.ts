@@ -3,6 +3,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   collection,
   query,
   where,
@@ -20,7 +21,7 @@ import {
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { dayKey } from './utils'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, WallPost, WallComment } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -960,6 +961,39 @@ export function subscribeToPlazaEvents(
         angVel: data.angVel,
         at: fromTimestamp(data.at),
       })
+    })
+  })
+}
+
+// Live drag position for a held character: streamed (throttled) by the
+// member doing the holding into one doc per character, deleted on release.
+// Other clients lerp the character toward it, so drags are visible live.
+export function updatePlazaHold(groupId: string, uid: string, by: string, pos: PlazaVec): void {
+  setDoc(doc(db, 'groups', groupId, 'plazaHolds', uid), { by, pos, at: serverTimestamp() }).catch(() => {})
+}
+
+export function clearPlazaHold(groupId: string, uid: string): void {
+  deleteDoc(doc(db, 'groups', groupId, 'plazaHolds', uid)).catch(() => {})
+}
+
+export type PlazaHoldChange =
+  | { uid: string; removed: true }
+  | { uid: string; removed?: false; by: string; pos: PlazaVec }
+
+export function subscribeToPlazaHolds(
+  groupId: string,
+  callback: (change: PlazaHoldChange) => void,
+): () => void {
+  const ref = collection(db, 'groups', groupId, 'plazaHolds')
+  return onSnapshot(ref, (snap) => {
+    snap.docChanges().forEach((change) => {
+      if (change.type === 'removed') {
+        callback({ uid: change.doc.id, removed: true })
+        return
+      }
+      if (change.doc.metadata.hasPendingWrites) return // local echo
+      const data = change.doc.data()
+      callback({ uid: change.doc.id, by: data.by, pos: data.pos })
     })
   })
 }

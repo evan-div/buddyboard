@@ -8,7 +8,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
 import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec } from '@/lib/types'
@@ -1015,20 +1015,30 @@ interface PhysState {
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
 
+// Live position target for a character held by another member's client
+export interface RemoteHold {
+  target: THREE.Vector3
+  lastAt: number   // local receipt time, for stale-hold cleanup
+}
+
 interface PhysicsUpdaterProps {
   draggingUid:    React.RefObject<string | null>
   dragCursor:     React.RefObject<THREE.Vector3>
   dragCursorVel:  React.RefObject<THREE.Vector3>
   charGroups:     React.RefObject<Map<string, THREE.Group>>
   physicsMap:     React.RefObject<Map<string, PhysState>>
+  remoteHolds:    React.RefObject<Map<string, RemoteHold>>
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
+  onHeldMove:     (pos: THREE.Vector3) => void
+  onHoldStale:    (uid: string) => void
 }
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, orbitRef, cameraLocked, setCharMode,
+  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, setCharMode,
+  onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1072,6 +1082,8 @@ function PhysicsUpdater({
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
           group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, -dragCursorVel.current.x * 0.022, 0.12)
+          // Stream the position so other members watch the drag live
+          onHeldMove(phys.pos)
         }
       }
     }
@@ -1081,7 +1093,31 @@ function PhysicsUpdater({
       const group = charGroups.current.get(uid)
       if (!group) return
 
-      if (phys.mode === 'flying') {
+      if (phys.mode === 'held' && draggingUid.current !== uid) {
+        // Held by another member: glide toward their streamed drag position.
+        // If the stream goes quiet (dragger crashed or lost connection),
+        // let go so the character doesn't dangle forever.
+        const hold = remoteHolds.current.get(uid)
+        if (hold) {
+          if (Date.now() - hold.lastAt > 10_000) {
+            remoteHolds.current.delete(uid)
+            onHoldStale(uid)
+            phys.vel.set(0, -2, 0)
+            phys.angVel.set(0, 0, 0)
+            setCharMode(uid, 'flying')
+            const sp = physicsMap.current.get(uid)
+            if (sp) sp.gentleDrop = true
+            return
+          }
+          const k = Math.min(1, delta * 9)
+          phys.pos.lerp(hold.target, k)
+          clampToPlazaEdge(phys.pos)
+          group.position.copy(phys.pos)
+          // Same hauled-weight tilt the dragger sees, from the glide velocity
+          group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  (hold.target.z - phys.pos.z) * 0.35, 0.12)
+          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, -(hold.target.x - phys.pos.x) * 0.35, 0.12)
+        }
+      } else if (phys.mode === 'flying') {
         // Ballistic integration
         phys.vel.y -= GRAVITY * delta
         phys.pos.addScaledVector(phys.vel, delta)
@@ -1501,6 +1537,28 @@ function Scene({
     return map
   }, [members])
 
+  // Live drag streaming: who is holding whom (for the ✋ pill) and where
+  // remote-held characters should glide to. Local sends are throttled.
+  const remoteHolds = useRef<Map<string, RemoteHold>>(new Map())
+  const [heldByMap, setHeldByMap] = useState<Map<string, string>>(new Map())
+  const holdSentAt = useRef(0)
+  const setHeldBy = useCallback((uid: string, by: string | null) => {
+    setHeldByMap(prev => {
+      const next = new Map(prev)
+      if (by === null) next.delete(uid)
+      else next.set(uid, by)
+      return next
+    })
+  }, [])
+  const onHeldMove = useCallback((pos: THREE.Vector3) => {
+    const uid = draggingUid.current
+    if (!uid) return
+    const now = Date.now()
+    if (now - holdSentAt.current < 150) return
+    holdSentAt.current = now
+    updatePlazaHold(groupId, uid, currentUid, plazaVec(pos))
+  }, [groupId, currentUid])
+
   // The whole plaza dozes until somebody gets thrown — then everyone wakes
   // up and wanders, drifting back to sleep after a quiet spell.
   const [sleeping, setSleeping] = useState(true)
@@ -1592,13 +1650,16 @@ function Scene({
 
       playPickup()
       buzz(10)
+      setHeldBy(pickup.uid, currentUid)
 
+      updatePlazaHold(groupId, pickup.uid, currentUid, plazaVec(startPos))
+      holdSentAt.current = Date.now()
       sendPlazaEvent(groupId, {
         type: 'pickup', uid: pickup.uid, by: currentUid,
         pos: plazaVec(startPos),
       })
     }, 250)
-  }, [cameraLocked, groupId, currentUid])
+  }, [cameraLocked, groupId, currentUid, setHeldBy])
 
   const handlePointerUp = useCallback(() => {
     // Clear pending hold timer
@@ -1643,6 +1704,7 @@ function Scene({
           playWhoosh(speed)
           buzz(18)
           wakeAll()
+          clearPlazaHold(groupId, uid)
           sendPlazaEvent(groupId, {
             type: 'throw', uid, by: currentUid,
             pos: plazaVec(phys.pos), vel: plazaVec(phys.vel), angVel: plazaVec(phys.angVel),
@@ -1661,6 +1723,7 @@ function Scene({
             next.set(uid, 'flying')
             return next
           })
+          clearPlazaHold(groupId, uid)
           sendPlazaEvent(groupId, {
             type: 'drop', uid, by: currentUid,
             pos: plazaVec(phys.pos),
@@ -1668,9 +1731,10 @@ function Scene({
         }
       }
 
+      setHeldBy(draggingUid.current, null)
       draggingUid.current = null
     }
-  }, [onSelect, groupId, currentUid, wakeAll])
+  }, [onSelect, groupId, currentUid, wakeAll, setHeldBy])
 
   // Register pointerup and touch events on canvas domElement
   useEffect(() => {
@@ -1775,21 +1839,81 @@ function Scene({
       if (ev.type === 'pickup') {
         phys.pos.y = HOLD_HEIGHT - HEAD_HEIGHT
         playPickup()
+        setHeldBy(ev.uid, ev.by)
       } else if (ev.type === 'throw') {
         phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? 0, ev.vel?.z ?? 0)
         phys.angVel.set(ev.angVel?.x ?? 0, ev.angVel?.y ?? 0, ev.angVel?.z ?? 0)
         playWhoosh(phys.vel.length())
         wakeAll()
+        remoteHolds.current.delete(ev.uid)
+        setHeldBy(ev.uid, null)
       } else {
         phys.gentleDrop = true
         phys.vel.set(0, -2, 0)
         phys.angVel.set(0, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 1.5)
+        remoteHolds.current.delete(ev.uid)
+        setHeldBy(ev.uid, null)
       }
       group.visible = true
       group.position.copy(phys.pos)
     })
     return unsub
-  }, [groupId, currentUid, setCharMode, wakeAll])
+  }, [groupId, currentUid, setCharMode, wakeAll, setHeldBy])
+
+  // Live drag positions: other members' holds stream through plazaHolds docs.
+  // The initial snapshot is applied too, so opening the plaza mid-drag shows
+  // the character already in the holder's hand.
+  useEffect(() => {
+    if (!groupId || !currentUid) return
+    const unsub = subscribeToPlazaHolds(groupId, (change) => {
+      if (change.removed) {
+        remoteHolds.current.delete(change.uid)
+        // The matching throw/drop event usually handles the release; if it
+        // hasn't arrived shortly after, let the character down gently.
+        setTimeout(() => {
+          const p = physicsMap.current.get(change.uid)
+          if (p && p.mode === 'held' && draggingUid.current !== change.uid) {
+            p.gentleDrop = true
+            p.vel.set(0, -2, 0)
+            p.angVel.set(0, 0, 0)
+            setCharMode(change.uid, 'flying')
+            const sp = physicsMap.current.get(change.uid)
+            if (sp) sp.gentleDrop = true
+            setHeldBy(change.uid, null)
+          }
+        }, 400)
+        return
+      }
+
+      if (change.by === currentUid) return             // our own stream
+      if (draggingUid.current === change.uid) return   // we're holding them locally
+
+      const phys = physicsMap.current.get(change.uid)
+      if (!phys || phys.mode !== 'held') {
+        setCharMode(change.uid, 'held')
+        const p = physicsMap.current.get(change.uid)
+        if (p) p.pos.set(change.pos.x, change.pos.y, change.pos.z)
+      }
+      let hold = remoteHolds.current.get(change.uid)
+      if (!hold) {
+        hold = { target: new THREE.Vector3(), lastAt: 0 }
+        remoteHolds.current.set(change.uid, hold)
+      }
+      hold.target.set(change.pos.x, change.pos.y, change.pos.z)
+      hold.lastAt = Date.now()
+      setHeldBy(change.uid, change.by)
+    })
+    return unsub
+  }, [groupId, currentUid, setCharMode, setHeldBy])
+
+  // Resolve holder uids to display names for the ✋ pill
+  const heldByNames = useMemo(() => {
+    const map = new Map<string, string>()
+    heldByMap.forEach((byUid, uid) => {
+      map.set(uid, byUid === currentUid ? 'You' : (members.find((m) => m.uid === byUid)?.displayName ?? '…'))
+    })
+    return map
+  }, [heldByMap, members, currentUid])
 
   return (
     <>
@@ -1812,6 +1936,7 @@ function Scene({
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
           asleep={sleeping}
+          heldBy={heldByNames.get(member.uid) ?? null}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -1825,9 +1950,12 @@ function Scene({
         dragCursorVel={dragCursorVel}
         charGroups={charGroups}
         physicsMap={physicsMap}
+        remoteHolds={remoteHolds}
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
+        onHeldMove={onHeldMove}
+        onHoldStale={(uid) => setHeldBy(uid, null)}
       />
       <OrbitControls
         ref={orbitRef}

@@ -130,6 +130,16 @@ service cloud.firestore {
         allow create: if isMember(gid) && request.resource.data.by == request.auth.uid;
         allow update, delete: if false;
       }
+
+      // Live drag position: one doc per held character, streamed by the
+      // member doing the holding and deleted on release. Any member may
+      // delete (cleanup of holds abandoned by a crashed client).
+      match /plazaHolds/{heldUid} {
+        allow read: if isMember(gid);
+        allow create, update: if isMember(gid)
+          && request.resource.data.by == request.auth.uid;
+        allow delete: if isMember(gid);
+      }
     }
   }
 }
