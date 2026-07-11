@@ -20,6 +20,29 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Security
+
+Firestore access is governed by `firestore.rules` (with composite indexes in
+`firestore.indexes.json`). Deploy them with the Firebase CLI whenever they
+change:
+
+```bash
+firebase deploy --only firestore:rules
+firebase deploy --only firestore:indexes
+```
+
+Notes on the current security posture:
+
+- Group documents can only be fetched by ID; list queries are denied, and
+  invite codes resolve through the `invites/{code}` lookup collection, so
+  groups and codes can't be enumerated.
+- `/api/notify` requires a Firebase ID token and looks up the recipient's FCM
+  tokens server-side, so clients never see other users' push tokens.
+- The rules enforce membership and identity (who can read/write what), but
+  gameplay-value validation (point amounts, daily limits, streaks) still
+  happens client-side. Fully trustless enforcement of those would require
+  Cloud Functions.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -66,6 +66,7 @@ export type GroupMember = {
   longestStreak?: number
   lastActiveDate?: string
   badges?: string[]
+  lastSeen?: Date   // presence heartbeat while the plaza is open
 }
 
 export type Transaction = {
@@ -137,6 +138,20 @@ export type WallComment = {
   avatarConfig?: AvatarConfig
   text: string
   createdAt: Date
+}
+
+// Ephemeral plaza physics events broadcast to other members' clients
+export type PlazaVec = { x: number; y: number; z: number }
+
+export type PlazaEvent = {
+  id: string
+  type: 'pickup' | 'drop' | 'throw'
+  uid: string        // the character being manhandled
+  by: string         // the member doing it
+  pos: PlazaVec
+  vel?: PlazaVec
+  angVel?: PlazaVec
+  at: Date
 }
 
 export type CaseStatus =

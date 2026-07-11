@@ -9,7 +9,6 @@ import {
   orderBy,
   limit,
   getDocs,
-  documentId,
   onSnapshot,
   runTransaction,
   Timestamp,
@@ -19,13 +18,9 @@ import {
   increment,
   serverTimestamp,
 } from 'firebase/firestore'
-import { db } from './firebase'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, WallPost, WallComment } from './types'
-
-// Helper to get today's date string YYYY-MM-DD
-function todayString(): string {
-  return new Date().toISOString().split('T')[0]
-}
+import { auth, db } from './firebase'
+import { dayKey } from './utils'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, WallPost, WallComment } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -100,12 +95,16 @@ export async function createGroup(
   if (!creator) throw new Error('Creator user not found')
 
   const inviteCode = generateInviteCode()
-  const today = todayString()
+  const today = dayKey(options?.timezone)
 
   const groupRef = doc(collection(db, 'groups'))
   const groupId = groupRef.id
 
   const batch = writeBatch(db)
+
+  // Invite-code lookup doc: joining resolves the code with a direct get, so
+  // security rules can forbid listing/enumerating groups
+  batch.set(doc(db, 'invites', inviteCode), { groupId, createdAt: serverTimestamp() })
 
   batch.set(groupRef, {
     id: groupId,
@@ -144,16 +143,33 @@ export async function createGroup(
 }
 
 export async function joinGroup(inviteCode: string, user: User): Promise<string> {
-  // Find group by inviteCode
-  const groupsRef = collection(db, 'groups')
-  const q = query(groupsRef, where('inviteCode', '==', inviteCode.toUpperCase()), limit(1))
-  const snap = await getDocs(q)
+  const code = inviteCode.toUpperCase()
 
-  if (snap.empty) throw new Error('Invalid invite code')
+  // Resolve the code via the invites lookup doc (a direct get — security rules
+  // forbid listing groups, so codes can't be harvested by enumeration)
+  let groupId: string | null = null
+  const inviteSnap = await getDoc(doc(db, 'invites', code)).catch(() => null)
+  if (inviteSnap?.exists()) {
+    groupId = inviteSnap.data().groupId as string
+  } else {
+    // Legacy fallback for groups created before the invites collection; this
+    // query is denied once the security rules are deployed, at which point the
+    // mayor opening the group backfills its invite doc (ensureInviteDoc).
+    try {
+      const q = query(collection(db, 'groups'), where('inviteCode', '==', code), limit(1))
+      const snap = await getDocs(q)
+      if (!snap.empty) groupId = snap.docs[0].id
+    } catch {
+      groupId = null
+    }
+  }
+  if (!groupId) throw new Error('Invalid invite code')
 
-  const groupDoc = snap.docs[0]
-  const groupData = groupDoc.data() as Group & { memberCount: number }
-  const groupId = groupDoc.id
+  const groupSnap = await getDoc(doc(db, 'groups', groupId))
+  if (!groupSnap.exists() || groupSnap.data().inviteCode !== code) {
+    throw new Error('Invalid invite code')
+  }
+  const groupData = groupSnap.data() as Group & { memberCount: number }
 
   if (groupData.memberCount >= 20) {
     throw new Error('This group is full (max 20 members)')
@@ -170,7 +186,7 @@ export async function joinGroup(inviteCode: string, user: User): Promise<string>
   const existingMembersSnap = await getDocs(collection(db, 'groups', groupId, 'members'))
   const existingMemberUids = existingMembersSnap.docs.map((d) => d.id).filter((uid) => uid !== user.uid)
 
-  const today = todayString()
+  const today = dayKey(groupData.timezone)
   const batch = writeBatch(db)
 
   // Create member doc
@@ -232,6 +248,21 @@ function mapGroupDoc(id: string, data: Record<string, unknown>): Group {
   } as Group
 }
 
+// Backfill the invite lookup doc for groups created before the invites
+// collection existed. Rules only allow creation (by the group's mayor), so
+// check existence first. Fire-and-forget.
+export async function ensureInviteDoc(group: Group): Promise<void> {
+  try {
+    const ref = doc(db, 'invites', group.inviteCode)
+    const snap = await getDoc(ref)
+    if (!snap.exists()) {
+      await setDoc(ref, { groupId: group.id, createdAt: serverTimestamp() })
+    }
+  } catch {
+    // Best-effort — retried on next load
+  }
+}
+
 export async function getGroup(groupId: string): Promise<Group | null> {
   try {
     const groupRef = doc(db, 'groups', groupId)
@@ -252,13 +283,14 @@ function mapMemberDoc(data: Record<string, unknown>): GroupMember {
     totalPoints: data.totalPoints ?? 0,
     dailyPointsGiven: data.dailyPointsGiven ?? 0,
     dailyPointsTaken: data.dailyPointsTaken ?? 0,
-    lastResetDate: data.lastResetDate ?? todayString(),
+    lastResetDate: data.lastResetDate ?? dayKey(),
     joinedAt: fromTimestamp(data.joinedAt as Timestamp | Date | undefined),
     isAdmin: data.isAdmin ?? false,
     currentStreak: data.currentStreak,
     longestStreak: data.longestStreak,
     lastActiveDate: data.lastActiveDate,
     badges: data.badges ?? [],
+    lastSeen: data.lastSeen ? fromTimestamp(data.lastSeen as Timestamp) : undefined,
   } as GroupMember
 }
 
@@ -312,38 +344,63 @@ export function subscribeToUserGroups(
   callback: (groups: Group[]) => void,
   onError?: (error: Error) => void,
 ): () => void {
-  let groupsUnsub: (() => void) | null = null
+  // One listener per group doc (direct gets) rather than a documentId() 'in'
+  // query: security rules allow getting a group by id but forbid list queries,
+  // which would otherwise permit enumerating every group.
+  let groupUnsubs = new Map<string, () => void>()
+  let results = new Map<string, Group | null>()
+  let currentIds: string[] = []
+
+  function emitIfComplete() {
+    if (!currentIds.every((id) => results.has(id))) return
+    callback(currentIds.map((id) => results.get(id)).filter((g): g is Group => !!g))
+  }
 
   const userUnsub = onSnapshot(
     doc(db, 'users', uid),
     (userSnap) => {
-      const groupIds: string[] = userSnap.data()?.groups ?? []
-      groupsUnsub?.()
-      groupsUnsub = null
+      currentIds = (userSnap.data()?.groups ?? []) as string[]
 
-      if (groupIds.length === 0) {
+      // Drop listeners for groups the user left; keep the rest
+      for (const [id, unsub] of groupUnsubs) {
+        if (!currentIds.includes(id)) {
+          unsub()
+          groupUnsubs.delete(id)
+          results.delete(id)
+        }
+      }
+
+      if (currentIds.length === 0) {
         callback([])
         return
       }
 
-      // documentId() 'in' queries accept at most 30 ids — far above the
-      // realistic number of groups per user
-      const q = query(collection(db, 'groups'), where(documentId(), 'in', groupIds.slice(0, 30)))
-      groupsUnsub = onSnapshot(
-        q,
-        (snap) => {
-          const byId = new Map(snap.docs.map((d) => [d.id, mapGroupDoc(d.id, d.data())]))
-          // Preserve the order of the user's groups array
-          callback(groupIds.map((id) => byId.get(id)).filter((g): g is Group => !!g))
-        },
-        (error) => onError?.(error),
-      )
+      for (const id of currentIds) {
+        if (groupUnsubs.has(id)) continue
+        const unsub = onSnapshot(
+          doc(db, 'groups', id),
+          (snap) => {
+            results.set(id, snap.exists() ? mapGroupDoc(snap.id, snap.data()) : null)
+            emitIfComplete()
+          },
+          (error) => {
+            // Treat an unreadable group as absent rather than failing the list
+            console.error('Error loading group', id, error)
+            results.set(id, null)
+            emitIfComplete()
+          },
+        )
+        groupUnsubs.set(id, unsub)
+      }
+      emitIfComplete()
     },
     (error) => onError?.(error),
   )
 
   return () => {
-    groupsUnsub?.()
+    groupUnsubs.forEach((unsub) => unsub())
+    groupUnsubs = new Map()
+    results = new Map()
     userUnsub()
   }
 }
@@ -424,16 +481,16 @@ export async function giveOrTakePoints(
     }
   }
 
-  const today = todayString()
-
   await runTransaction(db, async (transaction) => {
-    // Read group for configured limits
+    // Read group for configured limits and timezone
     const groupRef = doc(db, 'groups', groupId)
     const groupSnap = await transaction.get(groupRef)
     const groupData = groupSnap.data()
     const baseGiveLimit: number = groupData?.dailyGiveLimit ?? 100
     const takeLimit: number = groupData?.dailyTakeLimit ?? 20
     const giveLimit = baseGiveLimit + (isChief ? 25 : 0)
+    // Daily limits reset at midnight in the group's timezone
+    const today = dayKey(groupData?.timezone)
 
     const giverRef = doc(db, 'groups', groupId, 'members', fromUid)
     const giverSnap = await transaction.get(giverRef)
@@ -529,9 +586,7 @@ export async function giveOrTakePoints(
 
     // Update giver's daily counters, reset date, and streak
     const lastActive: string | undefined = giverData.lastActiveDate
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toISOString().split('T')[0]
+    const yesterdayStr = dayKey(groupData?.timezone, -1)
     let currentStreak: number = giverData.currentStreak ?? 0
     let longestStreak: number = giverData.longestStreak ?? 0
     if (lastActive === yesterdayStr) {
@@ -619,46 +674,6 @@ export function subscribeToFeed(
   })
 
   return unsubscribe
-}
-
-export async function getGroupDailyStats(
-  groupId: string,
-  uid: string
-): Promise<{
-  dailyPointsGiven: number
-  dailyPointsTaken: number
-  remainingGive: number
-  remainingTake: number
-}> {
-  const today = todayString()
-  const memberRef = doc(db, 'groups', groupId, 'members', uid)
-  const groupRef = doc(db, 'groups', groupId)
-  const [snap, groupSnap] = await Promise.all([getDoc(memberRef), getDoc(groupRef)])
-
-  const giveLimit: number = groupSnap.data()?.dailyGiveLimit ?? 100
-  const takeLimit: number = groupSnap.data()?.dailyTakeLimit ?? 20
-
-  const data = snap.exists() ? snap.data() : null
-
-  // Counters reset each day; a stale lastResetDate means nothing spent yet today
-  if (!data || data.lastResetDate !== today) {
-    return {
-      dailyPointsGiven: 0,
-      dailyPointsTaken: 0,
-      remainingGive: giveLimit,
-      remainingTake: takeLimit,
-    }
-  }
-
-  const given: number = data.dailyPointsGiven ?? 0
-  const taken: number = data.dailyPointsTaken ?? 0
-
-  return {
-    dailyPointsGiven: given,
-    dailyPointsTaken: taken,
-    remainingGive: Math.max(0, giveLimit - given),
-    remainingTake: Math.max(0, takeLimit - taken),
-  }
 }
 
 // ============ ADMIN OPERATIONS ============
@@ -823,14 +838,14 @@ export async function sendPushToUser(
   body: string,
   url?: string
 ): Promise<void> {
-  const userSnap = await getDoc(doc(db, 'users', recipientUid))
-  if (!userSnap.exists()) return
-  const tokens: string[] = userSnap.data()?.fcmTokens ?? []
-  if (tokens.length === 0) return
+  // The API verifies this ID token and looks up the recipient's push tokens
+  // server-side — clients can't read (or spoof pushes to) other users' tokens
+  const idToken = await auth.currentUser?.getIdToken().catch(() => null)
+  if (!idToken) return
   await fetch('/api/notify', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tokens, title, body, url }),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ toUid: recipientUid, title, body, url }),
   }).catch(() => {})
 }
 
@@ -908,6 +923,51 @@ export function subscribeToWallComments(
   const ref = collection(db, 'groups', groupId, 'wall', postId, 'comments')
   const q = query(ref, orderBy('createdAt', 'asc'))
   return onSnapshot(q, (snap) => callback(snap.docs.map(mapWallComment)))
+}
+
+// ============ PLAZA EVENTS & PRESENCE ============
+
+// Broadcast a physics interaction (pickup / drop / throw) so other members'
+// plazas act it out too. Fire-and-forget.
+export function sendPlazaEvent(groupId: string, event: Omit<PlazaEvent, 'id' | 'at'>): void {
+  const ref = doc(collection(db, 'groups', groupId, 'plazaEvents'))
+  setDoc(ref, { ...event, at: serverTimestamp() }).catch(() => {})
+}
+
+export function subscribeToPlazaEvents(
+  groupId: string,
+  callback: (event: PlazaEvent) => void,
+): () => void {
+  const q = query(collection(db, 'groups', groupId, 'plazaEvents'), orderBy('at', 'desc'), limit(12))
+  let initial = true
+  return onSnapshot(q, (snap) => {
+    if (initial) {
+      // Don't replay history on mount
+      initial = false
+      return
+    }
+    snap.docChanges().forEach((change) => {
+      if (change.type !== 'added') return
+      if (change.doc.metadata.hasPendingWrites) return // local echo
+      const data = change.doc.data()
+      callback({
+        id: change.doc.id,
+        type: data.type,
+        uid: data.uid,
+        by: data.by,
+        pos: data.pos,
+        vel: data.vel,
+        angVel: data.angVel,
+        at: fromTimestamp(data.at),
+      })
+    })
+  })
+}
+
+// Presence heartbeat: stamps lastSeen on the member doc while the group screen
+// is open. Members subscriptions pick it up; "online" = seen recently.
+export function touchPresence(groupId: string, uid: string): void {
+  updateDoc(doc(db, 'groups', groupId, 'members', uid), { lastSeen: serverTimestamp() }).catch(() => {})
 }
 
 // ============ SHOP ============

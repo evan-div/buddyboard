@@ -1,0 +1,135 @@
+rules_version = '2';
+
+// BuddyBoard Firestore security rules.
+// Deploy with: firebase deploy --only firestore:rules
+//
+// Scope: keeps non-members out of group data, prevents group enumeration and
+// invite-code harvesting, keeps notifications and profiles private to their
+// owner, and limits cross-user writes to the few narrow mutations the app
+// performs. In-group gameplay writes (point totals, votes, badges) are still
+// validated client-side only — enforcing those server-side requires moving
+// them into Cloud Functions.
+
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Current member of the group (reads and updates of existing data)
+    function isMember(gid) {
+      return signedIn()
+        && exists(/databases/$(db)/documents/groups/$(gid)/members/$(request.auth.uid));
+    }
+
+    // Member once this write commits — covers the join batch, which creates
+    // the membership and writes notifications in the same atomic batch
+    function isMemberAfter(gid) {
+      return signedIn()
+        && existsAfter(/databases/$(db)/documents/groups/$(gid)/members/$(request.auth.uid));
+    }
+
+    function isMayor(gid) {
+      return signedIn()
+        && get(/databases/$(db)/documents/groups/$(gid)).data.createdBy == request.auth.uid;
+    }
+
+    function affectedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    match /users/{uid} {
+      // Profiles are only readable by their owner. Push tokens live here; the
+      // /api/notify route reads recipients server-side with admin credentials.
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if signedIn() && request.auth.uid == uid;
+      // Owner: anything. Others: only the two narrow cross-user mutations the
+      // app performs — awarding badge coins (increase-only) and removing a
+      // group from the list when its mayor banishes the user (removal-only).
+      allow update: if signedIn() && (
+        request.auth.uid == uid
+        || (affectedOnly(['coins'])
+            && request.resource.data.coins is number
+            && request.resource.data.coins > resource.data.get('coins', 0))
+        || (affectedOnly(['groups'])
+            && resource.data.groups.hasAll(request.resource.data.groups)
+            && request.resource.data.groups.size() < resource.data.groups.size())
+      );
+      allow delete: if false;
+    }
+
+    // Invite-code lookup: one doc per code, resolved with a direct get when
+    // joining. Groups themselves are not listable, so codes can't be harvested.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.groupId is string
+        && getAfter(/databases/$(db)/documents/groups/$(request.resource.data.groupId)).data.inviteCode == code
+        && getAfter(/databases/$(db)/documents/groups/$(request.resource.data.groupId)).data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /groups/{gid} {
+      // Direct gets only (dashboard tiles, join preview); listing would expose
+      // every group and its invite code
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      // The mayor manages settings; join/leave flows may only bump memberCount
+      allow update: if isMayor(gid) || (signedIn() && affectedOnly(['memberCount']));
+      allow delete: if false;
+
+      match /members/{mid} {
+        allow read: if isMember(gid);
+        allow create: if signedIn() && request.auth.uid == mid;
+        // Gameplay writes points/badges onto other members' docs; limits are
+        // client-enforced (see header note)
+        allow update: if isMember(gid);
+        allow delete: if signedIn() && (request.auth.uid == mid || isMayor(gid));
+      }
+
+      match /transactions/{tid} {
+        allow read: if isMember(gid);
+        allow create, update: if isMemberAfter(gid);
+        allow delete: if false;
+      }
+
+      match /notifications/{nid} {
+        // Notifications are private to their recipient
+        allow get, list: if signedIn() && resource.data.forUid == request.auth.uid;
+        allow create: if isMemberAfter(gid);
+        allow update: if signedIn() && resource.data.forUid == request.auth.uid;
+        allow delete: if false;
+      }
+
+      match /wall/{pid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.uid == request.auth.uid;
+        allow update: if isMember(gid);   // reactions, commentCount
+        allow delete: if false;
+
+        match /comments/{cid} {
+          allow read: if isMember(gid);
+          allow create: if isMember(gid) && request.resource.data.uid == request.auth.uid;
+          allow update, delete: if false;
+        }
+      }
+
+      match /cases/{cid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.defendantUid == request.auth.uid;
+        allow update: if isMember(gid);   // review, votes, resolution, dismissal
+        allow delete: if false;
+      }
+
+      match /plazaEvents/{eid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+  }
+}
