@@ -16,9 +16,13 @@ function fail(msg) {
   process.exitCode = 1
 }
 
+// detached → own process group, so we can kill npx AND the next-server it
+// spawns; a stray grandchild would otherwise hold our stdio pipes open and
+// hang CI forever after the test finishes.
 const server = spawn('npx', ['next', 'start', '-p', PORT], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: process.env,
+  detached: true,
 })
 let serverLog = ''
 server.stdout.on('data', (d) => { serverLog += d })
@@ -82,5 +86,12 @@ try {
   fail(e.message)
 } finally {
   await browser?.close().catch(() => {})
-  server.kill('SIGTERM')
+  try {
+    process.kill(-server.pid, 'SIGTERM')  // whole process group
+  } catch {
+    server.kill('SIGTERM')
+  }
 }
+
+// Exit explicitly: lingering child pipes must not keep the process alive
+process.exit(process.exitCode ?? 0)
