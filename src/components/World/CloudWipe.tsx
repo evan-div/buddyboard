@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { wipeActive } from '@/lib/wipeState'
 
 export type WipePhase = 'idle' | 'entering' | 'covered' | 'exiting' | 'done'
 
@@ -85,7 +84,6 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
     }
 
     if (phase === 'entering') {
-      wipeActive.current = true
       setPtrBlock(true)
       promote()
       sweepIn(true)
@@ -93,7 +91,6 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
       ts.push(setTimeout(() => cbCovered.current?.(), 1300))
 
     } else if (phase === 'covered') {
-      wipeActive.current = true
       setPtrBlock(true)
       promote()
       sweepIn(false)
@@ -105,8 +102,7 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
           sweepOut()
           setWhiteIn(false)
           ts.push(setTimeout(() => {
-            wipeActive.current = false
-            demote()
+                  demote()
             setPtrBlock(false)
             cbDone.current?.()
           }, EXIT_DUR + 100))
@@ -114,7 +110,6 @@ export default function CloudWipe({ phase, onCovered, onDone }: Props) {
       })
 
     } else {
-      wipeActive.current = false
       demote()
       setPtrBlock(false)
       setWhiteIn(false)

@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import dynamic from 'next/dynamic'
 import { useAuth } from '@/contexts/AuthContext'
 
-const CloudScene = dynamic(() => import('@/components/World/CloudScene'), { ssr: false })
+import CloudBackdrop from '@/components/World/CloudBackdrop'
 
 type FormMode = 'signin' | 'signup'
 
@@ -124,7 +123,7 @@ export default function LandingPage() {
     <div style={{ position: 'fixed', inset: 0 }}>
       {/* Background */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
-        <CloudScene />
+        <CloudBackdrop />
       </div>
 
       {/* Card */}

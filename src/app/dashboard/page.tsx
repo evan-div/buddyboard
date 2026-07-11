@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import CloudScene from '@/components/World/CloudScene'
+import CloudBackdrop from '@/components/World/CloudBackdrop'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
 import { subscribeToUserGroups, joinGroup, getGroup, getGroupMembers } from '@/lib/firestore'
@@ -356,7 +356,7 @@ export default function DashboardPage() {
 
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
-      <CloudScene />
+      <CloudBackdrop />
 
       {/* Centered floating content */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>

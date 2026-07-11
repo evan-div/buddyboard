@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import dynamic from 'next/dynamic'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarBuilder from '@/components/Avatar/AvatarBuilder'
 import Avatar3D from '@/components/Avatar/Avatar3D'
@@ -11,7 +10,7 @@ import { SHOP_ITEMS, SHOP_ITEM_MAP } from '@/lib/shopItems'
 import type { AvatarConfig } from '@/lib/types'
 import type { ShopCategory } from '@/lib/shopItems'
 
-const CloudScene = dynamic(() => import('@/components/World/CloudScene'), { ssr: false })
+import CloudBackdrop from '@/components/World/CloudBackdrop'
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -129,7 +128,7 @@ export default function ProfilePage() {
     <div style={{ position: 'fixed', inset: 0, overflowY: 'auto' }}>
       {/* Background */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
-        <CloudScene />
+        <CloudBackdrop />
       </div>
 
       {/* Content */}
