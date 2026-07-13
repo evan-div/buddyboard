@@ -1015,6 +1015,75 @@ interface PhysState {
 
 // ─── Physics Updater ──────────────────────────────────────────────────────────
 
+// ─── Blob contact shadows ─────────────────────────────────────────────────────
+// One soft dark ellipse per character, pinned to the ground under them. It
+// grows and fades as the character gains height, which is what visually sells
+// throws — the body and its shadow separate. Independent of body rotation, so
+// tumbling never tilts the shadow.
+
+// Three stacked translucent discs fake a radial falloff without any texture
+// (plain transparent materials render reliably everywhere).
+const SHADOW_RINGS = [
+  { r: 0.42, o: 0.20 },
+  { r: 0.30, o: 0.22 },
+  { r: 0.18, o: 0.24 },
+]
+
+function BlobShadows({ members, charGroups }: {
+  members: GroupMember[]
+  charGroups: React.RefObject<Map<string, THREE.Group>>
+}) {
+  const shadowMap = useRef<Map<string, THREE.Group>>(new Map())
+
+  useFrame(() => {
+    for (const member of members) {
+      const shadow = shadowMap.current.get(member.uid)
+      const g = charGroups.current.get(member.uid)
+      if (!shadow) continue
+      if (!g || !g.visible) { shadow.visible = false; continue }
+      // No shadow once the character sails past the island edge
+      const overIsland =
+        Math.hypot(g.position.x, g.position.z) <=
+        plazaEdgeRadius(Math.atan2(g.position.z, g.position.x))
+      shadow.visible = overIsland
+      if (!overIsland) continue
+
+      const h = Math.max(0, g.position.y)
+      // Sit just above the grass-blade tops — the lawn IS the visible ground,
+      // so a shadow at the true floor would be buried under the blades.
+      shadow.position.set(g.position.x, BLADE_H + 0.015, g.position.z)
+      shadow.scale.setScalar(1 + h * 0.12)
+      const fade = 1 / (1 + h * 0.8)
+      shadow.children.forEach((child, i) => {
+        const mat = (child as THREE.Mesh).material as THREE.MeshBasicMaterial
+        mat.opacity = SHADOW_RINGS[i].o * fade
+      })
+    }
+  })
+
+  return (
+    <>
+      {members.map((member) => (
+        <group
+          key={member.uid}
+          ref={(grp) => {
+            if (grp) shadowMap.current.set(member.uid, grp)
+            else shadowMap.current.delete(member.uid)
+          }}
+          position={[0, BLADE_H + 0.015, 0]}
+        >
+          {SHADOW_RINGS.map((ring, i) => (
+            <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, i * 0.002, 0]}>
+              <circleGeometry args={[ring.r, 20]} />
+              <meshBasicMaterial color="#000" transparent opacity={ring.o} depthWrite={false} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </>
+  )
+}
+
 // Live position target for a character held by another member's client
 export interface RemoteHold {
   target: THREE.Vector3
@@ -1926,6 +1995,7 @@ function Scene({
         <Clouds />
       </Suspense>
       <GrassFloor />
+      <BlobShadows members={members} charGroups={charGroups} />
       {members.map((member) => (
         <MiiCharacter
           key={member.uid}

@@ -8,7 +8,7 @@ import { SKIN_TONES } from '@/lib/avatarDefaults'
 import { useBeanDims } from '@/lib/beanDims'
 import type { GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
-import { BeanFace } from '@/components/Avatar/BeanFace'
+import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
 import { BeanBody, BeanHair, BeanAccessory } from '@/components/Avatar/BeanParts'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
@@ -178,6 +178,11 @@ export default function MiiCharacter({
   const prevDragMode = useRef<DragMode | null>(null)
   const prevBodyRot  = useRef({ x: 0, z: 0 })
   const wakeProne    = useRef(false)
+  // Squash & stretch spring on the body scale (s → 1); v is kicked by events
+  const squash       = useRef({ s: 1, v: 0 })
+  // Blink state: countdown to the next blink, and progress through one
+  const eyesGroupRef = useRef<THREE.Group>(null)
+  const blink        = useRef({ next: 1.5 + Math.random() * 4, t: -1 })
 
   const dims      = useBeanDims(member.avatar)
   const skinColor = SKIN_TONES[member.avatar.skinTone]
@@ -196,6 +201,14 @@ export default function MiiCharacter({
   const mouthY    = dims.faceCenterY - dims.faceZ * 0.38
   const mouthZ    = dims.faceZ
   const overlayY  = dims.bodyTop + 0.3
+
+  // Situational face: what's happening to the body overrides the chosen look
+  const expression: FaceExpression | undefined =
+    dragMode === 'mad' ? 'mad'
+    : dragMode === 'flying' || dragMode === 'sliding' ? 'scared'
+    : dragMode === 'dazed' ? 'dazed'
+    : asleep && !dragMode ? 'sleeping'
+    : undefined
 
   useEffect(() => {
     if (groupRef.current) {
@@ -241,6 +254,14 @@ export default function MiiCharacter({
     const prev = prevDragMode.current
     prevDragMode.current = dragMode
     dragTimer.current = 0
+
+    // Squash & stretch: stretch on launch, squash on impact — the spring in
+    // useFrame relaxes the scale back to 1 with a little overshoot.
+    if (dragMode === 'flying' && prev === 'held') squash.current.v = 2.2          // launched
+    else if (prev === 'flying' && (dragMode === 'sliding' || dragMode === 'dazed' || dragMode === 'mad'))
+      squash.current.v = -4.0                                                     // splat
+    else if (prev === 'flying' && (dragMode === 'waking' || dragMode === null))
+      squash.current.v = -2.2                                                     // soft landing
 
     // The throw→land→get-up chain keeps ragdoll continuity: limbs are never
     // snapped to neutral mid-sequence, only jolted by the impacts.
@@ -366,6 +387,42 @@ export default function MiiCharacter({
     const delta = Math.min(rawDelta, 0.1)
     const group = groupRef.current
     if (!group) return
+
+    // ── squash & stretch spring (runs in every mode) ─────────────────────────
+    // Volume-preserving: y scales by s, x/z by 1/√s, pivot at the feet.
+    {
+      const sq = squash.current
+      sq.v += (1 - sq.s) * 90 * delta
+      sq.v *= Math.exp(-11 * delta)
+      sq.s = Math.min(1.35, Math.max(0.55, sq.s + sq.v * delta))
+      const body = bodyGroupRef.current
+      if (body) {
+        const inv = 1 / Math.sqrt(sq.s)
+        body.scale.set(inv, sq.s, inv)
+      }
+    }
+
+    // ── blinking (skipped when lids are already doing something) ────────────
+    {
+      const b = blink.current
+      const lidsBusy = asleep || dragMode === 'dazed'
+      if (b.t < 0) {
+        b.next -= delta
+        if (b.next <= 0 && !lidsBusy) {
+          b.t = 0
+          b.next = 2.5 + Math.random() * 4
+        }
+      } else {
+        b.t += delta
+        if (b.t > 0.16) b.t = -1
+      }
+      const eyes = eyesGroupRef.current
+      if (eyes) {
+        eyes.scale.y = b.t >= 0 && !lidsBusy
+          ? 1 - Math.sin(Math.PI * Math.min(1, b.t / 0.16)) * 0.92
+          : 1
+      }
+    }
 
     // ── fallen (off the island, hidden until respawn) ────────────────────────
     if (dragMode === 'fallen') return
@@ -631,6 +688,7 @@ export default function MiiCharacter({
       if (dist < 0.15) {
         animState.current = Math.random() < 0.5 ? 'idle_bob' : 'idle_sway'
         idleTimer.current = 2 + Math.random() * 3.5
+        if (body) body.position.y = 0
         if (leftArmRef.current)  leftArmRef.current.rotation.x  = 0
         if (rightArmRef.current) rightArmRef.current.rotation.x = 0
         if (leftLegRef.current)  leftLegRef.current.rotation.x  = 0
@@ -645,6 +703,8 @@ export default function MiiCharacter({
         if (rightArmRef.current) rightArmRef.current.rotation.x = -sw
         if (leftLegRef.current)  leftLegRef.current.rotation.x  = -sw
         if (rightLegRef.current) rightLegRef.current.rotation.x  =  sw
+        // Springy little hop on each step
+        if (body) body.position.y = Math.abs(Math.sin(t * 5.5)) * 0.045
       }
     } else if (animState.current === 'idle_bob') {
       idleTimer.current -= delta
@@ -728,11 +788,8 @@ export default function MiiCharacter({
       )}
 
       <group ref={bodyGroupRef}>
-        {/* Ground shadow */}
-        <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[dims.radius * 0.8, 16]} />
-          <meshBasicMaterial color="#000" transparent opacity={0.08} />
-        </mesh>
+        {/* Ground contact shadow lives in MiiPlaza's BlobShadows — a shadow
+            here would tumble with the body during throws */}
 
         {/* Left leg */}
         <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
@@ -770,7 +827,7 @@ export default function MiiCharacter({
         <BeanBody dims={dims} color={bodyColor} gradientMap={gradientMap} />
 
         <BeanFace
-          eyeStyle={asleep ? 'sleepy' : (member.avatar.eyeStyle ?? 'normal')}
+          eyeStyle={member.avatar.eyeStyle ?? 'normal'}
           mouthStyle={member.avatar.mouthStyle ?? 'smile'}
           eyeSize={member.avatar.eyeSize}
           eyeSpacing={member.avatar.eyeSpacing}
@@ -778,6 +835,8 @@ export default function MiiCharacter({
           eyeZ={eyeZ}
           mouthY={mouthY}
           mouthZ={mouthZ}
+          expression={expression}
+          eyesRef={eyesGroupRef}
         />
 
         {/* Left arm — rotated outward (-Z) so it angles away from body */}
