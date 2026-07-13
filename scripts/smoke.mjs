@@ -63,16 +63,21 @@ try {
   const title = await page.title()
   if (!/buddyboard/i.test(title)) fail(`unexpected title: "${title}"`)
 
-  const hasLogin = await page
+  // The login form only appears after client-side hydration and the Firebase
+  // auth state resolving, which can outlast networkidle on a slow CI runner —
+  // so wait for it rather than checking instantaneous visibility.
+  await page
     .locator('input[type="email"], input[type="password"]')
     .first()
-    .isVisible()
-    .catch(() => false)
-  if (!hasLogin) fail('login form not visible')
+    .waitFor({ state: 'visible', timeout: 20000 })
+    .catch(() => fail('login form not visible'))
 
   // The landing background is the pure-CSS cloud backdrop
-  const clouds = await page.locator('.cloud-sprite').count()
-  if (clouds === 0) fail('cloud backdrop did not render')
+  await page
+    .locator('.cloud-sprite')
+    .first()
+    .waitFor({ state: 'attached', timeout: 20000 })
+    .catch(() => fail('cloud backdrop did not render'))
 
   // Firestore/auth network failures are expected with dummy env; real page
   // errors are not.
