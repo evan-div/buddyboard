@@ -34,8 +34,8 @@ function BeanEye({ style, x, y, z, baseR, pupilR }: EyeProps) {
     return (
       <group position={[x, y, z]}>
         <mesh><sphereGeometry args={[baseR, 8, 8]} /><meshBasicMaterial color="white" /></mesh>
-        <mesh position={[0, 0, baseR * 0.4]}><sphereGeometry args={[pupilR, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
-        <EyeHighlight pupilR={pupilR} z={baseR * 0.4} />
+        <mesh position={[0, 0, baseR * 0.3]}><sphereGeometry args={[pupilR, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
+        <EyeHighlight pupilR={pupilR} z={baseR * 0.3} />
       </group>
     )
   }
@@ -43,8 +43,8 @@ function BeanEye({ style, x, y, z, baseR, pupilR }: EyeProps) {
     return (
       <group position={[x, y, z]} scale={[1, 0.52, 1]}>
         <mesh><sphereGeometry args={[baseR, 8, 8]} /><meshBasicMaterial color="white" /></mesh>
-        <mesh position={[0, baseR * 0.25, baseR * 0.4]}><sphereGeometry args={[pupilR * 0.8, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
-        <EyeHighlight pupilR={pupilR * 0.8} z={baseR * 0.4} />
+        <mesh position={[0, baseR * 0.25, baseR * 0.3]}><sphereGeometry args={[pupilR * 0.8, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
+        <EyeHighlight pupilR={pupilR * 0.8} z={baseR * 0.3} />
       </group>
     )
   }
@@ -53,7 +53,7 @@ function BeanEye({ style, x, y, z, baseR, pupilR }: EyeProps) {
       <group position={[x, y, z]}>
         <mesh scale={[1, 0.62, 1]}><sphereGeometry args={[baseR, 8, 8]} /><meshBasicMaterial color="white" /></mesh>
         <mesh position={[0, 0, baseR * 0.3]}>
-          <boxGeometry args={[baseR * 1.8, baseR * 0.22, baseR * 0.2]} />
+          <boxGeometry args={[baseR * 1.6, baseR * 0.22, baseR * 0.2]} />
           <meshBasicMaterial color="#1a1a1a" />
         </mesh>
       </group>
@@ -63,7 +63,7 @@ function BeanEye({ style, x, y, z, baseR, pupilR }: EyeProps) {
     return (
       <group position={[x, y, z]} scale={[1, 0.38, 1]}>
         <mesh><sphereGeometry args={[baseR, 8, 8]} /><meshBasicMaterial color="white" /></mesh>
-        <mesh position={[0, -baseR * 0.1, baseR * 0.4]}><sphereGeometry args={[pupilR, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
+        <mesh position={[0, -baseR * 0.1, baseR * 0.3]}><sphereGeometry args={[pupilR, 6, 6]} /><meshBasicMaterial color="#1a1a1a" /></mesh>
       </group>
     )
   }

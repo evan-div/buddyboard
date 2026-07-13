@@ -7,6 +7,12 @@ import type { AvatarConfig } from '@/lib/types'
 // Shared 3D pieces of the bean avatar, used by the plaza characters
 // (MiiCharacter) and the cached 2D headshots (Avatar3D).
 
+// Outline tinted to a deep shade of the part's own color — reads softer and
+// more "toon-shaded" than a pure black coloring-book line.
+export function outlineShade(color: string): string {
+  return `#${new THREE.Color(color).multiplyScalar(0.32).getHexString()}`
+}
+
 // ─── Shape-specific body geometry ─────────────────────────────────────────────
 
 export function BeanBody({ dims, color, gradientMap }: {
@@ -20,7 +26,7 @@ export function BeanBody({ dims, color, gradientMap }: {
   const shape = dims.shape ?? 'bean'
 
   const fillMat    = <meshToonMaterial color={color} gradientMap={gradientMap} />
-  const outlineMat = <meshBasicMaterial color="black" side={THREE.BackSide} />
+  const outlineMat = <meshBasicMaterial color={outlineShade(color)} side={THREE.BackSide} />
 
   if (shape === 'peanut') {
     const botR   = r

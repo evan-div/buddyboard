@@ -8,6 +8,7 @@ import { useBeanDims } from '@/lib/beanDims'
 import type { BeanDims } from '@/lib/beanDims'
 import type { AvatarConfig } from '@/lib/types'
 import { BeanFace } from './BeanFace'
+import { outlineShade } from './BeanParts'
 
 function BeanBody({ dims, color, gradient }: {
   dims: BeanDims
@@ -20,7 +21,7 @@ function BeanBody({ dims, color, gradient }: {
   const shape = dims.shape ?? 'bean'
 
   const fillMat    = <meshToonMaterial color={color} gradientMap={gradient} />
-  const outlineMat = <meshBasicMaterial color="black" side={THREE.BackSide} />
+  const outlineMat = <meshBasicMaterial color={outlineShade(color)} side={THREE.BackSide} />
 
   if (shape === 'peanut') {
     const botR   = r
@@ -435,7 +436,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       <group position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
-          <meshBasicMaterial color="black" side={THREE.BackSide} />
+          <meshBasicMaterial color={outlineShade(config.pantsColor)} side={THREE.BackSide} />
         </mesh>
         <mesh position={[0, -dims.legLen / 2, 0]}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
@@ -451,7 +452,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       <group position={[dims.radius * 0.4, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
-          <meshBasicMaterial color="black" side={THREE.BackSide} />
+          <meshBasicMaterial color={outlineShade(config.pantsColor)} side={THREE.BackSide} />
         </mesh>
         <mesh position={[0, -dims.legLen / 2, 0]}>
           <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
@@ -481,7 +482,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       <group position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-          <meshBasicMaterial color="black" side={THREE.BackSide} />
+          <meshBasicMaterial color={outlineShade(bodyColor)} side={THREE.BackSide} />
         </mesh>
         <mesh position={[0, -dims.armLen / 2, 0]}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
@@ -497,7 +498,7 @@ function BeanScene({ config }: { config: AvatarConfig }) {
       <group position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
         <mesh position={[0, -dims.armLen / 2, 0]} scale={1.1}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-          <meshBasicMaterial color="black" side={THREE.BackSide} />
+          <meshBasicMaterial color={outlineShade(bodyColor)} side={THREE.BackSide} />
         </mesh>
         <mesh position={[0, -dims.armLen / 2, 0]}>
           <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />

@@ -9,7 +9,7 @@ import { useBeanDims } from '@/lib/beanDims'
 import type { GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
 import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
-import { BeanBody, BeanHair, BeanAccessory } from '@/components/Avatar/BeanParts'
+import { BeanBody, BeanHair, BeanAccessory, outlineShade } from '@/components/Avatar/BeanParts'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
@@ -795,7 +795,7 @@ export default function MiiCharacter({
         <group ref={leftLegRef} position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
           <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
+            <meshBasicMaterial color={outlineShade(member.avatar.pantsColor ?? '#1e293b')} side={THREE.BackSide} />
           </mesh>
           <mesh position={[0, -dims.legLen / 2, 0]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
@@ -811,7 +811,7 @@ export default function MiiCharacter({
         <group ref={rightLegRef} position={[dims.radius * 0.4, dims.legAttachY, 0]}>
           <mesh position={[0, -dims.legLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
+            <meshBasicMaterial color={outlineShade(member.avatar.pantsColor ?? '#1e293b')} side={THREE.BackSide} />
           </mesh>
           <mesh position={[0, -dims.legLen / 2, 0]}>
             <cylinderGeometry args={[0.055, 0.048, dims.legLen, 8]} />
@@ -843,7 +843,7 @@ export default function MiiCharacter({
         <group ref={leftArmRef} position={[-dims.armX, dims.armAttachY, 0]} rotation={[0, 0, -Math.PI * 0.15]}>
           <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
+            <meshBasicMaterial color={outlineShade(bodyColor)} side={THREE.BackSide} />
           </mesh>
           <mesh position={[0, -dims.armLen / 2, 0]}>
             <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
@@ -859,7 +859,7 @@ export default function MiiCharacter({
         <group ref={rightArmRef} position={[dims.armX, dims.armAttachY, 0]} rotation={[0, 0, Math.PI * 0.15]}>
           <mesh position={[0, -dims.armLen / 2, 0]} scale={[1.1, 1.06, 1.1]}>
             <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
-            <meshBasicMaterial color="black" side={THREE.BackSide} />
+            <meshBasicMaterial color={outlineShade(bodyColor)} side={THREE.BackSide} />
           </mesh>
           <mesh position={[0, -dims.armLen / 2, 0]}>
             <cylinderGeometry args={[0.04, 0.035, dims.armLen, 8]} />
