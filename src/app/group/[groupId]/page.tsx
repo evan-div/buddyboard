@@ -37,6 +37,43 @@ const AvatarBuilder = dynamic(() => import('@/components/Avatar/AvatarBuilder'),
 
 // ─── Group Page ───────────────────────────────────────────────────────────────
 
+// Share a plaza's invite via the native share sheet (mobile) or clipboard.
+// The link deep-links into the join sheet: /dashboard?join=CODE
+function InviteShareButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  async function share() {
+    const url = `${window.location.origin}/dashboard?join=${code}`
+    const data = { title: 'Join my BuddyBoard plaza', text: `Join my plaza with code ${code}`, url }
+    if (navigator.share) {
+      try { await navigator.share(data) } catch { /* cancelled or unsupported — no-op */ }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch { /* clipboard blocked — nothing to do */ }
+  }
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+        Invite friends
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, background: '#f3f4f6', border: '1px dashed #d1d5db', borderRadius: 12, padding: '10px 14px', textAlign: 'center' }}>
+          <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: 3, color: '#111', fontFamily: 'monospace' }}>{code}</span>
+        </div>
+        <button
+          onClick={share}
+          style={{ flexShrink: 0, padding: '11px 16px', background: '#6366f1', color: '#fff', fontWeight: 700, fontSize: 14, borderRadius: 12, border: 'none', cursor: 'pointer' }}
+        >
+          {copied ? '✓ Copied' : '📤 Share'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function GroupPage() {
   const router = useRouter()
   const params = useParams()
@@ -619,6 +656,8 @@ export default function GroupPage() {
                   ))}
                 </div>
               </div>
+
+              <InviteShareButton code={group.inviteCode} />
 
               <button
                 onClick={() => setShowGroupInfo(false)}

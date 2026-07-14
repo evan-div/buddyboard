@@ -19,10 +19,11 @@ type JoinGroupModalProps = {
   onClose: () => void
   onJoined: (groupId: string) => void
   user: { uid: string; displayName: string; avatar: import('@/lib/types').AvatarConfig; email: string; createdAt: Date; groups: string[] }
+  initialCode?: string
 }
 
-function JoinGroupModal({ onClose, onJoined, user }: JoinGroupModalProps) {
-  const [code, setCode] = useState('')
+function JoinGroupModal({ onClose, onJoined, user, initialCode = '' }: JoinGroupModalProps) {
+  const [code, setCode] = useState(initialCode)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [welcome, setWelcome] = useState<WelcomeData | null>(null)
@@ -280,12 +281,28 @@ export default function DashboardPage() {
   const [groupsReloadKey, setGroupsReloadKey] = useState(0)
   const [showCreate, setShowCreate] = useState(false)
   const [showJoin, setShowJoin] = useState(false)
+  const [joinCode, setJoinCode] = useState('')
   const [wipePhase, setWipePhase] = useState<WipePhase>('idle')
   const [pendingGroupId, setPendingGroupId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/')
   }, [user, authLoading, router])
+
+  // A shared invite link (…/dashboard?join=CODE) opens the join sheet
+  // pre-filled. Strip the param afterward so a refresh doesn't reopen it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('join')?.trim().toUpperCase()
+    if (code && code.length === 6) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of the invite deep-link on mount
+      setJoinCode(code)
+      setShowJoin(true)
+      params.delete('join')
+      const qs = params.toString()
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+    }
+  }, [])
 
   // Live subscription while the groups view is open (re-armed by Retry).
   // Emits from the local cache immediately when available, then updates from
@@ -522,9 +539,10 @@ export default function DashboardPage() {
       )}
       {showJoin && userProfile && (
         <JoinGroupModal
-          onClose={() => setShowJoin(false)}
+          onClose={() => { setShowJoin(false); setJoinCode('') }}
           onJoined={handleGroupJoined}
           user={userProfile}
+          initialCode={joinCode}
         />
       )}
     </div>
