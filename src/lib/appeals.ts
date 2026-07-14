@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { awardCourtWinBadge } from './firestore'
-import { effectiveChiefUid, tallyVotes } from './voteTally'
+import { tallyVotes } from './voteTally'
 import type { GroupNotification, CourtCase, CaseStatus } from './types'
 
 function fromTs(ts: Timestamp | Date | undefined): Date {
@@ -297,7 +297,6 @@ export async function castVote(
   voterUid: string,
   vote: 'innocent' | 'guilty',
   memberUids: string[],
-  chiefUid?: string  // Chief (not a party) gets 2 votes
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
   const groupRef = doc(db, 'groups', groupId)
@@ -314,7 +313,6 @@ export async function castVote(
     if (c.status !== 'in_court') throw new Error('Voting is closed')
     if (c.votes?.[voterUid]) throw new Error('You have already voted')
 
-    const effectiveChief = effectiveChiefUid(chiefUid, c.defendantUid, c.accuserUid)
     const newVotes: Record<string, string> = { ...(c.votes ?? {}), [voterUid]: vote }
     const { status: newStatus, resolved } = tallyVotes({
       votes: newVotes,
@@ -322,11 +320,9 @@ export async function castVote(
       memberCount,
       accuserUid: c.accuserUid,
       defendantUid: c.defendantUid,
-      effectiveChief,
     })
 
     const voteUpdate: Record<string, unknown> = { [`votes.${voterUid}`]: vote }
-    if (voterUid === effectiveChief) voteUpdate.chiefVoterUid = voterUid
     if (resolved) {
       voteUpdate.status = newStatus
       voteUpdate.resolvedAt = serverTimestamp()

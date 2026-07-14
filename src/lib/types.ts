@@ -177,6 +177,5 @@ export type CourtCase = {
   createdAt: Date
   courtDeadline?: Date
   votes: Record<string, 'innocent' | 'guilty'>
-  chiefVoterUid?: string
   resolvedAt?: Date
 }

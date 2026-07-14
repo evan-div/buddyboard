@@ -257,7 +257,6 @@ export default function GroupPage() {
     ? members.reduce((best, m) => m.totalPoints > best.totalPoints ? m : best)
     : null
   const chiefUid: string | null = chiefMember && chiefMember.totalPoints > 0 ? chiefMember.uid : null
-  const isCurrentUserChief = !!(user && chiefUid === user.uid)
   const isMayor = !!(user && group && group.createdBy === user.uid)
 
   return (
@@ -503,7 +502,6 @@ export default function GroupPage() {
               inviteCode={group.inviteCode}
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
-              isChief={isCurrentUserChief}
               presets={group.presets}
               onReady={handlePlazaReady}
             />
@@ -521,7 +519,6 @@ export default function GroupPage() {
                   groupId={groupId}
                   currentUid={user.uid}
                   memberUids={members.map((m) => m.uid)}
-                  chiefUid={chiefUid}
                   members={members}
                 />
               )}

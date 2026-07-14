@@ -470,7 +470,6 @@ export async function giveOrTakePoints(
   groupId: string,
   fromUid: string,
   allocations: PointsAllocation[],
-  isChief = false
 ): Promise<void> {
   if (!allocations || allocations.length === 0) {
     throw new Error('No allocations provided')
@@ -487,9 +486,8 @@ export async function giveOrTakePoints(
     const groupRef = doc(db, 'groups', groupId)
     const groupSnap = await transaction.get(groupRef)
     const groupData = groupSnap.data()
-    const baseGiveLimit: number = groupData?.dailyGiveLimit ?? 100
+    const giveLimit: number = groupData?.dailyGiveLimit ?? 100
     const takeLimit: number = groupData?.dailyTakeLimit ?? 20
-    const giveLimit = baseGiveLimit + (isChief ? 25 : 0)
     // Daily limits reset at midnight in the group's timezone
     const today = dayKey(groupData?.timezone)
 

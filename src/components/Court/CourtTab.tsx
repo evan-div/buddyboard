@@ -12,7 +12,6 @@ type Props = {
   groupId: string
   currentUid: string
   memberUids: string[]
-  chiefUid?: string | null
   members: GroupMember[]
 }
 
@@ -42,7 +41,6 @@ function CaseCard({
   currentUid,
   memberUids,
   groupId,
-  chiefUid,
   members,
 }: {
   c: CourtCase
@@ -50,7 +48,6 @@ function CaseCard({
   currentUid: string
   memberUids: string[]
   groupId: string
-  chiefUid?: string | null
   members: GroupMember[]
 }) {
   const [voting, setVoting] = useState(false)
@@ -122,7 +119,7 @@ function CaseCard({
   async function vote(v: 'innocent' | 'guilty') {
     setVoting(true)
     try {
-      await castVote(groupId, c.id, currentUid, v, memberUids, chiefUid ?? undefined)
+      await castVote(groupId, c.id, currentUid, v, memberUids)
     } catch (e) {
       console.error(e)
     } finally {
@@ -305,7 +302,7 @@ function CaseCard({
   )
 }
 
-export default function CourtTab({ groupId, currentUid, memberUids, chiefUid, members }: Props) {
+export default function CourtTab({ groupId, currentUid, memberUids, members }: Props) {
   const [cases, setCases] = useState<CourtCase[]>([])
   // Inject CSS for countdown pulse animation
   useEffect(() => {
@@ -349,7 +346,6 @@ export default function CourtTab({ groupId, currentUid, memberUids, chiefUid, me
             currentUid={currentUid}
             memberUids={memberUids}
             groupId={groupId}
-            chiefUid={chiefUid}
             members={members}
           />
         ))}

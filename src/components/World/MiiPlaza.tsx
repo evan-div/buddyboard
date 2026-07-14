@@ -355,7 +355,6 @@ interface CardProps {
   groupId: string
   remainingGive: number
   remainingTake: number
-  isChief?: boolean
   presets?: PlazaPreset[]
   mobile?: boolean
   onClose: () => void
@@ -2162,7 +2161,6 @@ interface Props {
   inviteCode?: string
   remainingGive: number
   remainingTake: number
-  isChief?: boolean
   presets?: PlazaPreset[]
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
@@ -2170,7 +2168,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, isChief, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2289,7 +2287,6 @@ export default function MiiPlaza({
               groupId={groupId}
               remainingGive={remainingGive}
               remainingTake={remainingTake}
-              isChief={isChief}
               presets={presets}
               mobile={isMobile}
               onClose={handleClose}
