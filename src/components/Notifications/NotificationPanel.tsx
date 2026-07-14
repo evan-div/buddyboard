@@ -7,6 +7,7 @@ import {
   markNotificationRead,
   saveComment,
   reviewAppeal,
+  sendThanks,
 } from '@/lib/appeals'
 import { giveOrTakePoints } from '@/lib/firestore'
 import type { GroupNotification } from '@/lib/types'
@@ -31,6 +32,7 @@ const TYPE_ICON: Record<string, string> = {
   wall_comment: '💬',
   member_joined: '👋',
   feed_reaction: '😂',
+  thanks_received: '🙏',
 }
 
 function NotifItem({
@@ -54,6 +56,8 @@ function NotifItem({
   const [reviewing, setReviewing] = useState(false)
   const [welcoming, setWelcoming] = useState(false)
   const [welcomed, setWelcomed] = useState(false)
+  const [thanked, setThanked] = useState(notif.thanked ?? false)
+  const [thanking, setThanking] = useState(false)
 
   const pts = Math.abs(notif.points)
   const isNeg = notif.points < 0
@@ -72,6 +76,7 @@ function NotifItem({
       case 'wall_comment':    return `${notif.fromName} commented on your post`
       case 'member_joined':   return `${notif.fromName} joined the plaza! 👋`
       case 'feed_reaction':   return `${notif.fromName} reacted ${notif.reason} to your transaction`
+      case 'thanks_received': return `${notif.fromName} said thanks 🙏`
       default: return 'Notification'
     }
   }
@@ -95,6 +100,18 @@ function NotifItem({
   async function handleClear() {
     await clearNotification(groupId, notif.id)
     onCleared()
+  }
+
+  async function handleThanks() {
+    if (thanked || thanking) return
+    setThanking(true)
+    try {
+      // For a points_received notif, toName is the recipient — i.e. the thanker
+      await sendThanks(groupId, notif, notif.toName)
+      setThanked(true)
+    } finally {
+      setThanking(false)
+    }
   }
 
   async function handleSaveComment() {
@@ -212,6 +229,25 @@ function NotifItem({
       {/* Action row for points_taken and points_received */}
       {(notif.type === 'points_taken' || notif.type === 'points_received') && (
         <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          {notif.type === 'points_received' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleThanks() }}
+              disabled={thanked || thanking}
+              style={{
+                flex: 1,
+                background: thanked ? '#14532d' : '#166534',
+                border: `1px solid ${thanked ? '#166534' : '#22c55e'}`,
+                borderRadius: '8px',
+                color: thanked ? '#86efac' : '#dcfce7',
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '6px',
+                cursor: thanked || thanking ? 'default' : 'pointer',
+              }}
+            >
+              {thanked ? '🙏 Thanked' : thanking ? '…' : '🙏 Say thanks'}
+            </button>
+          )}
           <button
             onClick={() => setCommenting((v) => !v)}
             style={{

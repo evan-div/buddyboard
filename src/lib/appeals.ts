@@ -2,6 +2,7 @@ import {
   doc,
   collection,
   getDocs,
+  setDoc,
   updateDoc,
   writeBatch,
   onSnapshot,
@@ -16,7 +17,7 @@ import {
   DocumentData,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { awardCourtWinBadge } from './firestore'
+import { awardCourtWinBadge, sendPushToUser } from './firestore'
 import { tallyVotes } from './voteTally'
 import type { GroupNotification, CourtCase, CaseStatus } from './types'
 
@@ -43,6 +44,7 @@ function fromNotifDoc(id: string, data: DocumentData): GroupNotification {
     outcome: data.outcome,
     read: data.read ?? false,
     cleared: data.cleared ?? false,
+    thanked: data.thanked ?? false,
     createdAt: fromTs(data.createdAt),
   }
 }
@@ -106,6 +108,35 @@ export async function saveComment(
     userComment: comment,
     read: true,
   })
+}
+
+// One-tap "thank you" the recipient of positive points can send back to the
+// giver — closes the emotional loop that raw scoring leaves open. Marks the
+// original notification thanked (so the button doesn't reappear) and drops a
+// lightweight thanks notification + push on the giver.
+export async function sendThanks(
+  groupId: string,
+  notif: GroupNotification,
+  thankerName: string
+): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId, 'notifications', notif.id), { thanked: true })
+
+  const ref = doc(collection(db, 'groups', groupId, 'notifications'))
+  await setDoc(ref, {
+    id: ref.id,
+    forUid: notif.fromUid,          // the original giver
+    type: 'thanks_received',
+    transactionId: notif.transactionId,
+    fromUid: notif.forUid,          // the recipient who is thanking
+    fromName: thankerName,
+    toName: notif.fromName,
+    points: notif.points,
+    read: false,
+    cleared: false,
+    createdAt: serverTimestamp(),
+  })
+
+  sendPushToUser(notif.fromUid, '🙏 Thanks!', `${thankerName} said thanks for the ${Math.abs(notif.points)} pts`, `/group/${groupId}`).catch(() => {})
 }
 
 // ─── Appeal filing ────────────────────────────────────────────────────────────

@@ -100,6 +100,7 @@ export type NotificationType =
   | 'wall_comment'
   | 'member_joined'
   | 'feed_reaction'
+  | 'thanks_received'
 
 export type GroupNotification = {
   id: string
@@ -117,6 +118,7 @@ export type GroupNotification = {
   outcome?: 'innocent' | 'guilty'
   read: boolean
   cleared: boolean
+  thanked?: boolean   // recipient tapped "Say thanks" on a points_received notif
   createdAt: Date
 }
 
