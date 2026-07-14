@@ -171,6 +171,39 @@ async function getRecipientTokens(
     .filter((t): t is string => typeof t === 'string' && t.length > 0)
 }
 
+// Overwrite the recipient's fcmTokens array (used to drop dead tokens). We
+// rewrite the whole array via a field-masked PATCH — arrayRemove isn't
+// available over the plain REST document API.
+async function replaceRecipientTokens(
+  sa: ServiceAccount,
+  accessToken: string,
+  uid: string,
+  tokens: string[]
+): Promise<void> {
+  const docUrl =
+    `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/users/${encodeURIComponent(uid)}` +
+    `?updateMask.fieldPaths=fcmTokens`
+  await fetch(docUrl, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: {
+        fcmTokens: { arrayValue: { values: tokens.map((t) => ({ stringValue: t })) } },
+      },
+    }),
+  }).catch(() => {})
+}
+
+// FCM reports a permanently dead token (app uninstalled, token rotated) with
+// these codes — anything else (throttling, transient) we leave in place.
+function isDeadTokenError(status: number, errorCode?: string): boolean {
+  if (errorCode === 'UNREGISTERED' || errorCode === 'INVALID_ARGUMENT') return true
+  return status === 404
+}
+
 export async function POST(req: NextRequest) {
   const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT
   if (!saRaw) {
@@ -209,9 +242,10 @@ export async function POST(req: NextRequest) {
 
   const endpoint = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`
 
+  const deadTokens = new Set<string>()
   const results = await Promise.allSettled(
-    tokens.map((token) =>
-      fetch(endpoint, {
+    tokens.map(async (token) => {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -228,9 +262,20 @@ export async function POST(req: NextRequest) {
           },
         }),
       })
-    )
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null) as { error?: { status?: string } } | null
+        if (isDeadTokenError(res.status, errBody?.error?.status)) deadTokens.add(token)
+        throw new Error(`FCM ${res.status}`)
+      }
+    })
   )
 
+  // Prune tokens FCM says are permanently dead so we stop paying to retry them
+  if (deadTokens.size > 0) {
+    const surviving = tokens.filter((t) => !deadTokens.has(t))
+    await replaceRecipientTokens(sa, accessToken, toUid, surviving)
+  }
+
   const failed = results.filter((r) => r.status === 'rejected').length
-  return NextResponse.json({ sent: tokens.length - failed, failed })
+  return NextResponse.json({ sent: tokens.length - failed, failed, pruned: deadTokens.size })
 }
