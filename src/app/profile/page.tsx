@@ -5,12 +5,35 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import AvatarBuilder from '@/components/Avatar/AvatarBuilder'
 import Avatar3D from '@/components/Avatar/Avatar3D'
-import { updateUserAvatar, updateMemberAvatar, updateUserDisplayName, purchaseItem } from '@/lib/firestore'
+import { updateUserAvatar, updateMemberAvatar, updateUserDisplayName, purchaseItem, updateNotifPrefs } from '@/lib/firestore'
 import { SHOP_ITEMS, SHOP_ITEM_MAP } from '@/lib/shopItems'
-import type { AvatarConfig } from '@/lib/types'
+import type { AvatarConfig, NotifPrefs } from '@/lib/types'
 import type { ShopCategory } from '@/lib/shopItems'
 
 import CloudBackdrop from '@/components/World/CloudBackdrop'
+
+function NotifToggle({ label, desc, checked, disabled, onChange }: {
+  label: string; desc: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', opacity: disabled ? 0.45 : 1 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{label}</div>
+        <div style={{ fontSize: 12, color: '#6b7280' }}>{desc}</div>
+      </div>
+      <button
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        style={{ flexShrink: 0, width: 46, height: 28, borderRadius: 14, border: 'none', cursor: disabled ? 'default' : 'pointer', background: checked ? '#42b842' : '#c4c4c4', position: 'relative', transition: 'background 0.15s' }}
+      >
+        <span style={{ position: 'absolute', top: 3, left: checked ? 21 : 3, width: 22, height: 22, borderRadius: '50%', background: '#fff', transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+      </button>
+    </div>
+  )
+}
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -29,6 +52,8 @@ export default function ProfilePage() {
   const [shopTab, setShopTab] = useState<ShopCategory>('hair')
   const [buying, setBuying] = useState<string | null>(null)
 
+  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>({})
+
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/')
@@ -42,6 +67,7 @@ export default function ProfilePage() {
       if (!avatarDraft) setAvatarDraft(userProfile.avatar)
       setCoins(userProfile.coins ?? 0)
       setUnlockedItems(userProfile.unlockedItems ?? [])
+      setNotifPrefs(userProfile.notifPrefs ?? {})
     }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -109,6 +135,15 @@ export default function ProfilePage() {
     handleAvatarChange(item.apply(avatarDraft ?? userProfile.avatar))
   }
 
+  // Optimistic toggle: flip locally, persist in the background. A category is
+  // "on" unless explicitly false, so we only store the deviations.
+  function toggleNotifPref(key: keyof NotifPrefs, on: boolean) {
+    if (!user) return
+    const next = { ...notifPrefs, [key]: on }
+    setNotifPrefs(next)
+    updateNotifPrefs(user.uid, next).catch(() => {})
+  }
+
   if (authLoading) {
     return (
       <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#3476c8' }}>
@@ -170,6 +205,39 @@ export default function ProfilePage() {
               {savingName ? 'Saving...' : 'Save Name'}
             </button>
           </form>
+        </div>
+
+        {/* Notifications Section */}
+        <div style={{ background: '#efefef', borderRadius: 20, padding: '16px 20px', marginBottom: 16 }}>
+          <h2 style={{ color: '#111', fontWeight: 700, fontSize: 14, marginBottom: 4, marginTop: 0 }}>Notifications</h2>
+          <NotifToggle
+            label="Mute everything"
+            desc="Pause all push notifications"
+            checked={notifPrefs.muteAll === true}
+            onChange={(on) => toggleNotifPref('muteAll', on)}
+          />
+          <div style={{ height: 1, background: '#d4d4d4', margin: '2px 0 4px' }} />
+          <NotifToggle
+            label="Points"
+            desc="When you receive or lose points"
+            checked={notifPrefs.points !== false}
+            disabled={notifPrefs.muteAll === true}
+            onChange={(on) => toggleNotifPref('points', on)}
+          />
+          <NotifToggle
+            label="Court"
+            desc="Cases, appeals, and verdicts"
+            checked={notifPrefs.court !== false}
+            disabled={notifPrefs.muteAll === true}
+            onChange={(on) => toggleNotifPref('court', on)}
+          />
+          <NotifToggle
+            label="Social"
+            desc="Thanks, comments, and reactions"
+            checked={notifPrefs.social !== false}
+            disabled={notifPrefs.muteAll === true}
+            onChange={(on) => toggleNotifPref('social', on)}
+          />
         </div>
 
         {/* Avatar Builder Section */}

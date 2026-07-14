@@ -147,28 +147,41 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
   return cachedToken.value
 }
 
-// Look up the recipient's FCM tokens server-side so clients never handle
-// other users' push tokens.
-async function getRecipientTokens(
+// Look up the recipient's FCM tokens AND notification preferences
+// server-side, in one read — clients never handle other users' push tokens
+// and can't override their mute settings.
+type NotifCategory = 'points' | 'court' | 'social'
+
+async function getRecipient(
   sa: ServiceAccount,
   accessToken: string,
   uid: string
-): Promise<string[]> {
+): Promise<{ tokens: string[]; mutedAll: boolean; muted: (c: NotifCategory) => boolean }> {
+  const empty = { tokens: [], mutedAll: false, muted: () => false }
   const docUrl = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/users/${encodeURIComponent(uid)}`
   const res = await fetch(docUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
-  if (!res.ok) return []
+  if (!res.ok) return empty
 
   const doc = await res.json() as {
     fields?: {
       fcmTokens?: { arrayValue?: { values?: { stringValue?: string }[] } }
+      notifPrefs?: { mapValue?: { fields?: Record<string, { booleanValue?: boolean }> } }
     }
   }
   const values = doc.fields?.fcmTokens?.arrayValue?.values ?? []
-  return values
+  const tokens = values
     .map((v) => v.stringValue)
     .filter((t): t is string => typeof t === 'string' && t.length > 0)
+
+  const prefs = doc.fields?.notifPrefs?.mapValue?.fields ?? {}
+  // A category is muted only when explicitly set to false; default is on.
+  return {
+    tokens,
+    mutedAll: prefs.muteAll?.booleanValue === true,
+    muted: (c: NotifCategory) => prefs[c]?.booleanValue === false,
+  }
 }
 
 // Overwrite the recipient's fcmTokens array (used to drop dead tokens). We
@@ -223,11 +236,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { toUid, title, body, url } = await req.json() as {
+  const { toUid, title, body, url, category = 'points' } = await req.json() as {
     toUid: string
     title: string
     body: string
     url?: string
+    category?: NotifCategory
   }
 
   if (!toUid || !title || !body) {
@@ -235,7 +249,15 @@ export async function POST(req: NextRequest) {
   }
 
   const accessToken = await getAccessToken(sa)
-  const tokens = await getRecipientTokens(sa, accessToken, toUid)
+  const recipient = await getRecipient(sa, accessToken, toUid)
+
+  // Respect the recipient's mute preferences (enforced server-side so a
+  // client can't push past someone's settings)
+  if (recipient.mutedAll || recipient.muted(category)) {
+    return NextResponse.json({ sent: 0, failed: 0, muted: true })
+  }
+
+  const tokens = recipient.tokens
   if (!tokens.length) {
     return NextResponse.json({ sent: 0, failed: 0 })
   }

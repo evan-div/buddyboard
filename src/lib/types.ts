@@ -19,6 +19,16 @@ export type AvatarConfig = {
   eyeSpacing?:  number
 }
 
+// Push-notification categories a user can independently mute
+export type NotifCategory = 'points' | 'court' | 'social'
+
+export type NotifPrefs = {
+  muteAll?: boolean
+  points?: boolean   // points received / taken (default on)
+  court?: boolean    // court cases + verdicts (default on)
+  social?: boolean   // thanks, wall comments, reactions (default on)
+}
+
 export type User = {
   uid: string
   email: string
@@ -28,6 +38,7 @@ export type User = {
   groups: string[]
   coins?: number
   unlockedItems?: string[]
+  notifPrefs?: NotifPrefs
 }
 
 export type PlazaPreset = {

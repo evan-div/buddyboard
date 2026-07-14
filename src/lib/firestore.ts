@@ -21,7 +21,7 @@ import {
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { dayKey } from './utils'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -56,6 +56,9 @@ export async function getUser(uid: string): Promise<User | null> {
       avatar: data.avatar,
       createdAt: fromTimestamp(data.createdAt),
       groups: data.groups ?? [],
+      coins: data.coins ?? 0,
+      unlockedItems: data.unlockedItems ?? [],
+      notifPrefs: data.notifPrefs,
     } as User
   } catch (error) {
     console.error('Error getting user:', error)
@@ -611,7 +614,7 @@ export async function giveOrTakePoints(
     const sign = alloc.points > 0 ? '+' : ''
     const title = alloc.points > 0 ? '🎉 Points received!' : '📉 Points taken'
     const body = `${sign}${alloc.points} pts${alloc.reason ? ` · ${alloc.reason}` : ''}`
-    sendPushToUser(alloc.toUid, title, body, `/group/${groupId}`).catch(() => {})
+    sendPushToUser(alloc.toUid, title, body, `/group/${groupId}`, 'points').catch(() => {})
   }
 
   // Award badges to giver (fire-and-forget — don't block the transaction)
@@ -835,17 +838,24 @@ export async function sendPushToUser(
   recipientUid: string,
   title: string,
   body: string,
-  url?: string
+  url?: string,
+  category: NotifCategory = 'points',
 ): Promise<void> {
   // The API verifies this ID token and looks up the recipient's push tokens
-  // server-side — clients can't read (or spoof pushes to) other users' tokens
+  // (and notification preferences) server-side — clients can't read or spoof
+  // pushes to other users' tokens, and can't override their mute settings.
   const idToken = await auth.currentUser?.getIdToken().catch(() => null)
   if (!idToken) return
   await fetch('/api/notify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ toUid: recipientUid, title, body, url }),
+    body: JSON.stringify({ toUid: recipientUid, title, body, url, category }),
   }).catch(() => {})
+}
+
+// Persist a user's notification preferences (merged into their user doc)
+export async function updateNotifPrefs(uid: string, prefs: NotifPrefs): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { notifPrefs: prefs })
 }
 
 export async function reactToPost(

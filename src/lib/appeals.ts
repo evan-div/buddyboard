@@ -136,7 +136,7 @@ export async function sendThanks(
     createdAt: serverTimestamp(),
   })
 
-  sendPushToUser(notif.fromUid, '🙏 Thanks!', `${thankerName} said thanks for the ${Math.abs(notif.points)} pts`, `/group/${groupId}`).catch(() => {})
+  sendPushToUser(notif.fromUid, '🙏 Thanks!', `${thankerName} said thanks for the ${Math.abs(notif.points)} pts`, `/group/${groupId}`, 'social').catch(() => {})
 }
 
 // ─── Appeal filing ────────────────────────────────────────────────────────────
