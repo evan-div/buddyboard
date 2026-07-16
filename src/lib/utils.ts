@@ -1,3 +1,10 @@
+/**
+ * @file Utility functions for dates and time formatting
+ * @mobile-shareable ✅ - Copy as-is to React Native projects
+ * @description Timezone-aware day key generation and human-readable time formatting.
+ * No Firebase dependencies. Fully unit-tested.
+ */
+
 // Calendar-day key (YYYY-MM-DD) in the given IANA timezone, used for daily
 // give/take limit resets. offsetDays shifts the reference day (e.g. -1 for
 // "yesterday" in streak checks).

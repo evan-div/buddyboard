@@ -1,9 +1,15 @@
-// Pure court-vote tally logic, extracted from the castVote transaction so it
-// can be unit-tested. Every juror's vote counts equally — the Chief is a
-// status role with no extra voting power. Behavior:
-// - A majority of all eligible voters resolves immediately.
-// - When every eligible (non-party) member has voted without a majority,
-//   the case auto-resolves with ties going to the defendant (innocent).
+/**
+ * @file Pure court-vote tally logic
+ * @mobile-shareable ✅ - Copy as-is to React Native projects
+ * @description Extracted from the castVote transaction so it can be unit-tested.
+ * Every juror's vote counts equally — the Chief is a status role with no extra voting power.
+ * No Firebase dependencies. Fully unit-tested.
+ *
+ * Behavior:
+ * - A majority of all eligible voters resolves immediately.
+ * - When every eligible (non-party) member has voted without a majority,
+ *   the case auto-resolves with ties going to the defendant (innocent).
+ */
 
 export type TallyStatus = 'in_court' | 'resolved_innocent' | 'resolved_guilty'
 

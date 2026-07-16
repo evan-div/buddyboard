@@ -1,3 +1,18 @@
+/**
+ * @file Firebase SDK initialization
+ * @mobile-shareable ❌ - Platform-specific initialization required
+ * @description Web-specific setup with IndexedDB persistent cache and client-side auth.
+ * Mobile (React Native) needs separate initialization:
+ * - Use `firebase/app`, `firebase/auth`, `firebase/firestore` same SDKs
+ * - IndexedDB → Firestore local cache (different API)
+ * - Remove SSR compatibility checks (RN doesn't have server-side rendering)
+ *
+ * Recommended: Create platform-specific versions
+ * - src/lib/firebase.ts (this file, web)
+ * - mobile/src/lib/firebase.ts (Firebase RN version)
+ * Both export the same `auth` and `db` instances for compatibility
+ */
+
 import { initializeApp, getApps } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 import {

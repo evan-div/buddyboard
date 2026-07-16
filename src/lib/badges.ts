@@ -1,3 +1,10 @@
+/**
+ * @file Badge definitions and lookup logic
+ * @mobile-shareable ✅ - Copy as-is to React Native projects
+ * @description Badge system for achievements: points, streaks, court wins, generosity.
+ * No Firebase dependencies. Pure data structures and functions.
+ */
+
 export type BadgeDef = {
   id: string
   emoji: string

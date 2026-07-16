@@ -1,3 +1,26 @@
+/**
+ * @file Firestore data operations
+ * @mobile-shareable 🟡 - Partial reuse via data-layer abstraction
+ * @description Complete Firestore operations for all entities:
+ * - Users, groups, members (CRUD + subscriptions)
+ * - Points transactions and leaderboards
+ * - Court cases and voting (appeals.ts handles business logic)
+ * - Notifications and real-time listeners
+ * - Wall posts and comments
+ * - Plaza physics events and presence
+ * - Shop and badge awarding
+ *
+ * For mobile reuse: Extract data operation interfaces and create Firebase RN adapter.
+ * The business logic (validation, calculations) can be shared;
+ * Firestore-specific calls (onSnapshot, transactions) are platform-specific.
+ *
+ * Recommended structure for mobile:
+ * - Extract pure business logic (points allocation, badge logic) → shared lib
+ * - Create IDataLayer interface for operations
+ * - Implement in web via Firestore, mobile via Firebase RN
+ * Both platforms use the same type definitions from types.ts
+ */
+
 import {
   doc,
   getDoc,

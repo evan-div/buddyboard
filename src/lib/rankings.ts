@@ -1,6 +1,11 @@
-import type { GroupMember, Transaction } from './types'
+/**
+ * @file Pure leaderboard ranking logic
+ * @mobile-shareable ✅ - Copy as-is to React Native projects
+ * @description Period-based ranking computation (daily/weekly/monthly/alltime).
+ * No Firebase dependencies. Fully unit-tested with comprehensive test coverage.
+ */
 
-// Pure leaderboard ranking logic, kept free of React so it can be unit-tested.
+import type { GroupMember, Transaction } from './types'
 
 export type Period = 'daily' | 'weekly' | 'monthly' | 'alltime'
 

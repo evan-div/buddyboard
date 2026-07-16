@@ -1,3 +1,20 @@
+/**
+ * @file Court system: appeals, voting, case resolution
+ * @mobile-shareable 🟡 - Reusable with Firebase RN via data-layer abstraction
+ * @description Complete court workflow:
+ * - Filing appeals against point deductions
+ * - Accuser review (accept → points restored, deny → court)
+ * - Voting by jurors with real-time vote tally
+ * - Auto-resolution on full jury participation
+ * - Expired case deadline handling
+ *
+ * Uses voteTally.ts (shared ✅) for majority voting logic.
+ * Firestore-specific: runTransaction, writeBatch, updateDoc, onSnapshot.
+ *
+ * For mobile: Keep this file's business logic, replace Firestore calls
+ * with data-layer interface calls. Firebase RN SDK is compatible.
+ */
+
 import {
   doc,
   collection,

@@ -1,3 +1,10 @@
+/**
+ * @file Type definitions for BuddyBoard
+ * @mobile-shareable ✅ - Copy as-is to React Native projects
+ * @description Complete type system for users, groups, transactions, court cases, notifications, etc.
+ * No external dependencies. Safe to use in both web and mobile applications.
+ */
+
 export type AvatarConfig = {
   backgroundColor: string
   skinTone: 'light' | 'medium-light' | 'medium' | 'medium-dark' | 'dark'
