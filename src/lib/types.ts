@@ -26,6 +26,15 @@ export type AvatarConfig = {
   eyeSpacing?:  number
 }
 
+// Per-user UI personalization (Style tab). Applied as CSS variables.
+export type AccentId = 'violet' | 'coral' | 'teal' | 'lime' | 'amber' | 'pink'
+
+export type StylePrefs = {
+  accent?: AccentId          // default 'violet'
+  textSize?: 'small' | 'medium' | 'large'   // default 'medium'
+  compact?: boolean          // tighter card padding/spacing
+}
+
 // Push-notification categories a user can independently mute
 export type NotifCategory = 'points' | 'court' | 'social'
 
@@ -46,6 +55,7 @@ export type User = {
   coins?: number
   unlockedItems?: string[]
   notifPrefs?: NotifPrefs
+  stylePrefs?: StylePrefs
 }
 
 export type PlazaPreset = {
@@ -68,6 +78,7 @@ export type Group = {
   dailyTakeLimit?: number   // default 20
   timezone?: string
   presets?: PlazaPreset[]
+  rules?: string            // freeform group rules, editable by the mayor
 }
 
 export type GroupMember = {

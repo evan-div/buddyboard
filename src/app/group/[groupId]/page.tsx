@@ -6,7 +6,6 @@ import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import CloudWipe from '@/components/World/CloudWipe'
 import type { WipePhase } from '@/components/World/CloudWipe'
-import Avatar3D from '@/components/Avatar/Avatar3D'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import {
   getUser,
@@ -15,19 +14,26 @@ import {
   subscribeToFeed,
   updateUserAvatar,
   updateMemberAvatar,
+  updateStylePrefs,
   ensureInviteDoc,
   touchPresence,
 } from '@/lib/firestore'
-import type { Group, GroupMember, GroupNotification } from '@/lib/types'
+import type { Group, GroupMember, GroupNotification, StylePrefs } from '@/lib/types'
 import { dayKey } from '@/lib/utils'
+import { applyTheme, TEXT_ZOOM } from '@/lib/theme'
 import { subscribeToNotifications, fileAppeal, subscribeToCases } from '@/lib/appeals'
 
 import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/PointsToast'
 import { requestPushPermission } from '@/lib/fcm'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
+import TopBar, { TOP_BAR_HEIGHT } from '@/components/Shell/TopBar'
+import BottomTabBar, { TAB_BAR_HEIGHT, type TabDef } from '@/components/Shell/BottomTabBar'
+import PageHeader from '@/components/Shell/PageHeader'
 
 import WallTab from './tabs/WallTab'
 import LeaderboardTab from './tabs/LeaderboardTab'
+import InfoTab from './tabs/InfoTab'
+import StyleTab from './tabs/StyleTab'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
@@ -35,43 +41,6 @@ const AdminPanel = dynamic(() => import('@/components/Group/AdminPanel'), { ssr:
 const AvatarBuilder = dynamic(() => import('@/components/Avatar/AvatarBuilder'), { ssr: false })
 
 // ─── Group Page ───────────────────────────────────────────────────────────────
-
-// Share a plaza's invite via the native share sheet (mobile) or clipboard.
-// The link deep-links into the join sheet: /dashboard?join=CODE
-function InviteShareButton({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false)
-  async function share() {
-    const url = `${window.location.origin}/dashboard?join=${code}`
-    const data = { title: 'Join my BuddyBoard plaza', text: `Join my plaza with code ${code}`, url }
-    if (navigator.share) {
-      try { await navigator.share(data) } catch { /* cancelled or unsupported — no-op */ }
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    } catch { /* clipboard blocked — nothing to do */ }
-  }
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-        Invite friends
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ flex: 1, background: '#f3f4f6', border: '1px dashed #d1d5db', borderRadius: 12, padding: '10px 14px', textAlign: 'center' }}>
-          <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: 3, color: '#111', fontFamily: 'monospace' }}>{code}</span>
-        </div>
-        <button
-          onClick={share}
-          style={{ flexShrink: 0, padding: '11px 16px', background: '#6366f1', color: '#fff', fontWeight: 700, fontSize: 14, borderRadius: 12, border: 'none', cursor: 'pointer' }}
-        >
-          {copied ? '✓ Copied' : '📤 Share'}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 export default function GroupPage() {
   const router = useRouter()
@@ -83,7 +52,7 @@ export default function GroupPage() {
   // undefined = still loading, null = group not found
   const [group, setGroup] = useState<Group | null | undefined>(undefined)
   const [membersData, setMembersData] = useState<GroupMember[] | null>(null)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'leaderboard' | 'court' | 'wall'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'wall' | 'leaderboard' | 'court' | 'info' | 'style'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
   const [unreadWallCount, setUnreadWallCount] = useState(0)
@@ -94,9 +63,8 @@ export default function GroupPage() {
   const [notifications, setNotifications] = useState<GroupNotification[]>([])
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
-  const [showNav, setShowNav] = useState(false)
-  const [showGroupInfo, setShowGroupInfo] = useState(false)
   const [showAppearance, setShowAppearance] = useState(false)
+  const [stylePrefs, setStylePrefs] = useState<StylePrefs>({})
   const [appearanceDraft, setAppearanceDraft] = useState(DEFAULT_AVATAR)
   const [appearanceSaving, setAppearanceSaving] = useState(false)
   const [appearanceUnlocked, setAppearanceUnlocked] = useState<string[]>([])
@@ -113,6 +81,22 @@ export default function GroupPage() {
 
   // Keep ref in sync so feed subscription can read current tab without deps
   useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
+
+  // Load the user's saved style prefs once, then keep the CSS variables in
+  // sync as they change (accent, spacing). Text size is applied via zoom on
+  // the tab content below.
+  const styleLoaded = useRef(false)
+  useEffect(() => {
+    if (styleLoaded.current || !userProfile) return
+    styleLoaded.current = true
+    setStylePrefs(userProfile.stylePrefs ?? {})
+  }, [userProfile])
+  useEffect(() => { applyTheme(stylePrefs) }, [stylePrefs])
+
+  const handleStyleChange = useCallback((next: StylePrefs) => {
+    setStylePrefs(next)
+    if (user) updateStylePrefs(user.uid, next).catch(() => {})
+  }, [user])
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -328,207 +312,27 @@ export default function GroupPage() {
       {!authLoading && !loading && group && user && userProfile && (
         <div className="min-h-screen bg-[#0f0f13]">
 
-          {/* ── Floating nav overlay ── */}
-          <div style={{ position: 'fixed', top: 50, right: 16, zIndex: 30 }}>
-            {/* Row of circular buttons: Bell → Settings (mayor) → Hamburger */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                {/* Bell */}
-                {(() => {
-                  const unreadCount = notifications.filter((n) => !n.read).length
-                  return (
-                    <button
-                      onClick={() => setShowNotifPanel(true)}
-                      className={unreadCount > 0 ? 'bell-wiggle' : ''}
-                      style={{
-                        position: 'relative',
-                        width: 44, height: 44,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        borderRadius: '50%', border: 'none', cursor: 'pointer',
-                        background: unreadCount > 0 ? '#f35b5a' : 'rgba(255,255,255,0.9)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                        backdropFilter: 'blur(6px)',
-                        WebkitBackdropFilter: 'blur(6px)',
-                        transition: 'background 0.2s',
-                        touchAction: 'manipulation',
-                      }}
-                      aria-label="Notifications"
-                    >
-                      <span style={{ fontSize: 20 }}>🔔</span>
-                      {unreadCount > 0 && (
-                        <span style={{
-                          position: 'absolute', top: -2, right: -2,
-                          background: '#111', color: 'white',
-                          fontSize: 10, fontWeight: 900,
-                          borderRadius: '50%', width: 16, height: 16,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          border: '2px solid white',
-                        }}>
-                          {unreadCount}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })()}
+          {/* ── App shell: fixed top bar + bottom tab bar ── */}
+          <TopBar
+            unreadCount={notifications.filter((n) => !n.read).length}
+            onBellClick={() => setShowNotifPanel(true)}
+            avatar={userProfile.avatar ?? null}
+            onAvatarClick={() => router.push('/profile')}
+          />
+          <BottomTabBar
+            tabs={[
+              { key: 'plaza', label: 'Plaza', icon: '🌳' },
+              { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
+              { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
+              { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
+              { key: 'info', label: 'Info', icon: 'ℹ️' },
+              { key: 'style', label: 'Style', icon: '🎨' },
+            ] as readonly TabDef<typeof activeTab>[]}
+            active={activeTab}
+            onSelect={switchTab}
+          />
 
-                {/* Mayor gear */}
-                {isMayor && (
-                  <button
-                    onClick={() => setShowAdminPanel(true)}
-                    style={{
-                      width: 44, height: 44,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: '50%', border: 'none', cursor: 'pointer',
-                      background: 'rgba(255,255,255,0.9)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                      backdropFilter: 'blur(6px)',
-                      WebkitBackdropFilter: 'blur(6px)',
-                      touchAction: 'manipulation',
-                    }}
-                    aria-label="Admin panel"
-                  >
-                    <span style={{ fontSize: 20 }}>⚙️</span>
-                  </button>
-                )}
-
-                {/* Hamburger */}
-                <button
-                  onClick={() => setShowNav((v) => !v)}
-                  style={{
-                    width: 44, height: 44,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    borderRadius: '50%', border: 'none', cursor: 'pointer',
-                    background: showNav ? '#42b842' : 'rgba(255,255,255,0.9)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                    backdropFilter: 'blur(6px)',
-                    WebkitBackdropFilter: 'blur(6px)',
-                    transition: 'background 0.2s',
-                    touchAction: 'manipulation',
-                  }}
-                  aria-label="Navigation menu"
-                  aria-expanded={showNav}
-                >
-                  <span style={{ fontSize: 18, color: showNav ? 'white' : '#333', lineHeight: 1, fontWeight: 700 }}>
-                    {showNav ? '✕' : '☰'}
-                  </span>
-                </button>
-              </div>
-
-              {/* Nav dropdown */}
-              {showNav && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-                  {(
-                    [
-                      { key: 'plaza',       label: 'Plaza',  badge: 0               },
-                      { key: 'leaderboard', label: 'Ranks',  badge: 0               },
-                      { key: 'court',       label: 'Court',  badge: activeCaseCount  },
-                      { key: 'wall',        label: 'Wall',   badge: unreadWallCount  },
-                    ] as const
-                  ).map(({ key, label, badge }, navIdx) => (
-                    <button
-                      key={key}
-                      onClick={() => { switchTab(key); setShowNav(false) }}
-                      className="nav-cascade"
-                      style={{
-                        position: 'relative',
-                        animationDelay: `${navIdx * 45}ms`,
-                        padding: '10px 18px',
-                        borderRadius: 9999,
-                        background: activeTab === key ? '#42b842' : 'rgba(255,255,255,0.9)',
-                        fontWeight: 800,
-                        fontSize: 14,
-                        letterSpacing: '0.05em',
-                        textTransform: 'uppercase',
-                        color: activeTab === key ? 'white' : '#333',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                        border: 'none',
-                        cursor: 'pointer',
-                        backdropFilter: 'blur(6px)',
-                        WebkitBackdropFilter: 'blur(6px)',
-                        touchAction: 'manipulation',
-                        minWidth: 90,
-                      }}
-                    >
-                      {label}
-                      {badge > 0 && (
-                        <span style={{
-                          position: 'absolute', top: -5, right: -5,
-                          background: '#f35b5a', color: 'white',
-                          fontSize: 10, fontWeight: 900,
-                          borderRadius: '50%', width: 18, height: 18,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          border: '2px solid white',
-                        }}>
-                          {badge}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-
-                  {/* INFO button */}
-                  <button
-                    onClick={() => { setShowGroupInfo(true); setShowNav(false) }}
-                    className="nav-cascade"
-                    style={{
-                      animationDelay: '225ms',
-                      padding: '10px 18px',
-                      borderRadius: 9999,
-                      background: 'rgba(255,255,255,0.9)',
-                      fontWeight: 800,
-                      fontSize: 14,
-                      letterSpacing: '0.05em',
-                      textTransform: 'uppercase',
-                      color: '#333',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      backdropFilter: 'blur(6px)',
-                      WebkitBackdropFilter: 'blur(6px)',
-                      touchAction: 'manipulation',
-                      minWidth: 90,
-                    }}
-                  >
-                    Info
-                  </button>
-
-                  {/* APPEARANCE button */}
-                  <button
-                    onClick={async () => {
-                      const me = members.find(m => m.uid === user.uid)
-                      setAppearanceDraft(me ? { ...me.avatar } : DEFAULT_AVATAR)
-                      setShowAppearance(true)
-                      setShowNav(false)
-                      const userData = await getUser(user.uid)
-                      setAppearanceUnlocked(userData?.unlockedItems ?? [])
-                    }}
-                    className="nav-cascade"
-                    style={{
-                      animationDelay: '270ms',
-                      padding: '10px 18px',
-                      borderRadius: 9999,
-                      background: 'rgba(255,255,255,0.9)',
-                      fontWeight: 800,
-                      fontSize: 14,
-                      letterSpacing: '0.05em',
-                      textTransform: 'uppercase',
-                      color: '#333',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-                      border: 'none',
-                      cursor: 'pointer',
-                      backdropFilter: 'blur(6px)',
-                      WebkitBackdropFilter: 'blur(6px)',
-                      touchAction: 'manipulation',
-                      minWidth: 90,
-                    }}
-                  >
-                    Appearance
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ── Plaza: full-screen, nav floats over it ── */}
+          {/* ── Plaza: full-screen, shell bars float over it ── */}
           {activeTab === 'plaza' && (
             <MiiPlaza
               members={members}
@@ -542,27 +346,92 @@ export default function GroupPage() {
             />
           )}
 
-          {/* ── Other tabs: scrollable content below the floating nav ── */}
+          {/* ── Other tabs: scrollable content between the shell bars ── */}
           {activeTab !== 'plaza' && (
-            <div style={{ paddingTop: 122, maxWidth: 512, margin: '0 auto', padding: '122px 16px 32px' }}>
+            <div style={{
+              maxWidth: 512, margin: '0 auto',
+              padding: `${TOP_BAR_HEIGHT}px 16px ${TAB_BAR_HEIGHT + 28}px`,
+              zoom: TEXT_ZOOM[stylePrefs.textSize ?? 'medium'],
+            }}>
+              {activeTab === 'wall' && (
+                <>
+                  <PageHeader
+                    kicker="Group Wall"
+                    title={group.name}
+                    right={
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace, monospace', letterSpacing: 1,
+                        color: 'rgba(255,255,255,0.5)', background: 'var(--surface-2)',
+                        border: '1px solid var(--border)', borderRadius: 8, padding: '4px 8px',
+                      }}>
+                        {group.inviteCode}
+                      </span>
+                    }
+                  />
+                  <WallTab
+                    groupId={groupId}
+                    currentUid={user.uid}
+                    currentMember={members.find((m) => m.uid === user.uid) ?? null}
+                    members={members}
+                  />
+                </>
+              )}
               {activeTab === 'leaderboard' && (
-                <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
+                <>
+                  <PageHeader kicker="Leaderboard" title="Ranks" emoji="🏆" />
+                  <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
+                </>
               )}
               {activeTab === 'court' && (
-                <CourtTab
-                  groupId={groupId}
-                  currentUid={user.uid}
-                  memberUids={members.map((m) => m.uid)}
-                  members={members}
-                />
+                <>
+                  <PageHeader kicker="Group Justice" title="Court" emoji="⚖️" />
+                  <CourtTab
+                    groupId={groupId}
+                    currentUid={user.uid}
+                    memberUids={members.map((m) => m.uid)}
+                    members={members}
+                  />
+                </>
               )}
-              {activeTab === 'wall' && (
-                <WallTab
-                  groupId={groupId}
-                  currentUid={user.uid}
-                  currentMember={members.find((m) => m.uid === user.uid) ?? null}
-                  members={members}
-                />
+              {activeTab === 'info' && (
+                <>
+                  <PageHeader
+                    kicker={group.name}
+                    title="Group Info"
+                    emoji="ℹ️"
+                    right={isMayor ? (
+                      <button
+                        onClick={() => setShowAdminPanel(true)}
+                        style={{
+                          background: 'var(--surface-2)', border: '1px solid var(--border)',
+                          color: '#f3f4f6', fontWeight: 700, fontSize: 13,
+                          borderRadius: 10, padding: '7px 16px', cursor: 'pointer',
+                        }}
+                      >
+                        Edit
+                      </button>
+                    ) : undefined}
+                  />
+                  <InfoTab group={group} members={members} currentUid={user.uid} />
+                </>
+              )}
+              {activeTab === 'style' && (
+                <>
+                  <PageHeader kicker="Customize" title="Appearance" emoji="🎨" />
+                  <StyleTab
+                    uid={user.uid}
+                    stylePrefs={stylePrefs}
+                    onChangeStyle={handleStyleChange}
+                    notifPrefs={userProfile.notifPrefs ?? {}}
+                    onCustomizeAvatar={async () => {
+                      const me = members.find(m => m.uid === user.uid)
+                      setAppearanceDraft(me ? { ...me.avatar } : DEFAULT_AVATAR)
+                      setShowAppearance(true)
+                      const userData = await getUser(user.uid)
+                      setAppearanceUnlocked(userData?.unlockedItems ?? [])
+                    }}
+                  />
+                </>
               )}
             </div>
           )}
@@ -595,78 +464,6 @@ export default function GroupPage() {
           setAppealComment('')
         }}
       />
-
-      {showGroupInfo && group && (
-        <div
-          className="overlay-fade"
-          style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, backdropFilter: 'blur(4px)' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowGroupInfo(false) }}
-        >
-          <div className="sheet-rise" style={{ width: '100%', maxWidth: 360, background: '#fff', borderRadius: 24, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' }}>
-            {/* Header */}
-            <div style={{ background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)', padding: '28px 24px 20px', textAlign: 'center', position: 'relative' }}>
-              <button
-                onClick={() => setShowGroupInfo(false)}
-                aria-label="Close"
-                style={{ position: 'absolute', top: 14, right: 14, background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', width: 32, height: 32, color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                ✕
-              </button>
-              <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 8 }}>{group.emoji || '🏠'}</div>
-              <div style={{ color: '#fff', fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>{group.name}</div>
-              {group.description && (
-                <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 6 }}>{group.description}</div>
-              )}
-            </div>
-
-            <div style={{ padding: '20px 24px 24px', overflowY: 'auto', maxHeight: 400 }}>
-              {/* Daily limits */}
-              <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-                <div style={{ flex: 1, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>+{group.dailyGiveLimit ?? 100}</div>
-                  <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600, marginTop: 2 }}>pts/day to give</div>
-                </div>
-                <div style={{ flex: 1, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '10px 12px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: '#ea580c' }}>−{group.dailyTakeLimit ?? 20}</div>
-                  <div style={{ fontSize: 11, color: '#c2410c', fontWeight: 600, marginTop: 2 }}>pts/day to take</div>
-                </div>
-              </div>
-
-              {/* Members */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-                  {members.length} {members.length === 1 ? 'Member' : 'Members'}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {members.map((m) => (
-                    <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <Avatar3D config={m.avatar} size={36} />
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
-                          {m.displayName}
-                          {m.uid === user?.uid && (
-                            <span style={{ fontSize: 11, color: '#6366f1', fontWeight: 700, marginLeft: 6 }}>You</span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af' }}>{m.totalPoints} pts</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <InviteShareButton code={group.inviteCode} />
-
-              <button
-                onClick={() => setShowGroupInfo(false)}
-                style={{ width: '100%', padding: 14, background: '#6366f1', color: '#fff', fontWeight: 800, fontSize: 16, borderRadius: 14, border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }}
-              >
-                Got it
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Appearance modal ── */}
       {showAppearance && user && (() => {

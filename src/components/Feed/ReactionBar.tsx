@@ -39,8 +39,8 @@ export default function ReactionBar({ reactions, currentUid, onReact }: Props) {
               key={e}
               onClick={() => pick(e)}
               style={{
-                background: mine ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.06)',
-                border: mine ? '1.5px solid #6366f1' : '1.5px solid rgba(255,255,255,0.12)',
+                background: mine ? 'var(--accent-soft)' : 'rgba(255,255,255,0.06)',
+                border: mine ? '1.5px solid var(--accent)' : '1.5px solid rgba(255,255,255,0.12)',
                 borderRadius: 20, padding: '3px 9px', cursor: 'pointer',
                 fontSize: 14, color: '#fff', display: 'flex', alignItems: 'center', gap: 4,
                 fontWeight: 700,

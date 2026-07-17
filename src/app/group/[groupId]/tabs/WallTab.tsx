@@ -28,8 +28,8 @@ type WallItem =
 
 const cardBase: CSSProperties = {
   borderRadius: 18,
-  padding: '14px 16px',
-  border: '1px solid rgba(255,255,255,0.08)',
+  padding: 'var(--card-pad)',
+  border: '1px solid var(--border)',
 }
 
 // ─── Wall post card ──────────────────────────────────────────────────────────
@@ -69,9 +69,9 @@ function WallPostCard({
   const commentCount = post.commentCount ?? 0
 
   return (
-    <div style={{ ...cardBase, background: '#181820' }}>
+    <div style={{ ...cardBase, background: 'var(--surface)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
-        <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#2a2a36', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--surface-2)', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {post.avatarConfig ? <Avatar3D config={post.avatarConfig} size={36} /> : <span style={{ color: '#888', fontSize: 16 }}>👤</span>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -94,7 +94,7 @@ function WallPostCard({
       <div style={{ marginLeft: 46 }}>
         <button
           onClick={() => setExpanded((v) => !v)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 700, color: '#818cf8' }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}
         >
           {expanded ? 'Hide replies' : commentCount > 0 ? `💬 Reply · ${commentCount} comment${commentCount === 1 ? '' : 's'}` : '💬 Reply'}
         </button>
@@ -104,10 +104,10 @@ function WallPostCard({
         <div style={{ marginTop: 10, marginLeft: 46, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {comments.map((c) => (
             <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#2a2a36', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface-2)', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {c.avatarConfig ? <Avatar3D config={c.avatarConfig} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
               </div>
-              <div style={{ flex: 1, background: '#22222c', borderRadius: 12, padding: '7px 10px' }}>
+              <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 12, padding: '7px 10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
                   <span style={{ fontWeight: 700, fontSize: 12, color: c.uid === currentUid ? '#4ade80' : '#f3f4f6' }}>{c.displayName}</span>
                   <span style={{ fontSize: 10, color: '#6b7280' }}>{timeAgo(c.createdAt)}</span>
@@ -117,10 +117,10 @@ function WallPostCard({
             </div>
           ))}
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 4 }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#2a2a36', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface-2)', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {currentMember?.avatar ? <Avatar3D config={currentMember.avatar} size={28} /> : <span style={{ fontSize: 12 }}>👤</span>}
             </div>
-            <div style={{ flex: 1, background: '#22222c', borderRadius: 12, padding: '7px 10px', display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 12, padding: '7px 10px', display: 'flex', gap: 6, alignItems: 'flex-end' }}>
               <input
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
@@ -173,7 +173,7 @@ function TransactionCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-        <div style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, background: '#2a2a36' }}>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', flexShrink: 0, background: 'var(--surface-2)' }}>
           <Avatar3D config={recipient?.avatar ?? DEFAULT_AVATAR} size={32} />
         </div>
         <p style={{ fontSize: 14, color: '#f3f4f6', margin: 0, lineHeight: 1.4, flex: 1 }}>
@@ -306,7 +306,7 @@ export default function WallTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Composer */}
-      <div style={{ background: '#181820', borderRadius: 16, padding: '12px 14px', marginBottom: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: 16, padding: '12px 14px', marginBottom: 16, border: '1px solid var(--border)' }}>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -347,7 +347,7 @@ export default function WallTab({
           <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>Post something, or award some points!</p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--stack-gap)' }}>
           {items.map((item) => {
             if (item.kind === 'post') {
               return <WallPostCard key={`post-${item.post.id}`} post={item.post} groupId={groupId} currentUid={currentUid} currentMember={currentMember} />

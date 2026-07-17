@@ -51,6 +51,7 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
   const [giveLimit, setGiveLimit] = useState(group.dailyGiveLimit ?? 100)
   const [takeLimit, setTakeLimit] = useState(group.dailyTakeLimit ?? 20)
   const [timezone, setTimezone] = useState(group.timezone ?? 'UTC')
+  const [rules, setRules] = useState(group.rules ?? '')
   const [presets, setPresets] = useState<PlazaPreset[]>(group.presets ?? [])
   const [newPresetEmoji, setNewPresetEmoji] = useState('😊')
   const [newPresetLabel, setNewPresetLabel] = useState('')
@@ -82,6 +83,7 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
         dailyTakeLimit: takeLimit,
         timezone,
         presets,
+        rules: rules.trim(),
       })
       onRefresh?.()
     } finally {
@@ -257,6 +259,25 @@ export default function AdminPanel({ group, members, currentUid, chiefUid, onClo
                 <select value={timezone} onChange={(e) => setTimezone(e.target.value)} style={inputStyle}>
                   {TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
                 </select>
+              </div>
+
+              {/* Group rules — shown on the Info tab */}
+              <div>
+                <label style={labelStyle}>Group Rules</label>
+                <textarea
+                  value={rules}
+                  onChange={(e) => setRules(e.target.value)}
+                  placeholder="e.g. 1. Check in daily&#10;2. Court verdicts are final"
+                  maxLength={1000}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    borderRadius: 16,
+                    resize: 'none',
+                    fontFamily: 'inherit',
+                    lineHeight: 1.5,
+                  }}
+                />
               </div>
 
               {/* Quick Actions / Presets */}

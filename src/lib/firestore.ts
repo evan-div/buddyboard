@@ -41,10 +41,13 @@ import {
   arrayRemove,
   increment,
   serverTimestamp,
+  getCountFromServer,
+  getAggregateFromServer,
+  sum,
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { dayKey } from './utils'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs } from './types'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -82,6 +85,7 @@ export async function getUser(uid: string): Promise<User | null> {
       coins: data.coins ?? 0,
       unlockedItems: data.unlockedItems ?? [],
       notifPrefs: data.notifPrefs,
+      stylePrefs: data.stylePrefs,
     } as User
   } catch (error) {
     console.error('Error getting user:', error)
@@ -272,6 +276,7 @@ function mapGroupDoc(id: string, data: Record<string, unknown>): Group {
     dailyTakeLimit: data.dailyTakeLimit ?? 20,
     timezone: data.timezone ?? 'UTC',
     presets: data.presets ?? [],
+    rules: data.rules,
   } as Group
 }
 
@@ -809,6 +814,7 @@ export async function updateGroupSettings(
     dailyTakeLimit: number
     timezone: string
     presets: import('./types').PlazaPreset[]
+    rules: string
   }>
 ): Promise<void> {
   await updateDoc(doc(db, 'groups', groupId), settings)
@@ -879,6 +885,38 @@ export async function sendPushToUser(
 // Persist a user's notification preferences (merged into their user doc)
 export async function updateNotifPrefs(uid: string, prefs: NotifPrefs): Promise<void> {
   await updateDoc(doc(db, 'users', uid), { notifPrefs: prefs })
+}
+
+// Persist a user's UI personalization (Style tab)
+export async function updateStylePrefs(uid: string, prefs: StylePrefs): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { stylePrefs: prefs })
+}
+
+// Lifetime group stats for the Info tab. Uses server-side aggregation queries
+// (count/sum) so no transaction documents are downloaded.
+export type GroupStats = {
+  totalTransactions: number
+  totalPointsGiven: number
+}
+
+export async function getGroupStats(groupId: string): Promise<GroupStats | null> {
+  try {
+    const txRef = collection(db, 'groups', groupId, 'transactions')
+    const [countSnap, sumSnap] = await Promise.all([
+      getCountFromServer(txRef),
+      getAggregateFromServer(
+        query(txRef, where('points', '>', 0)),
+        { totalPointsGiven: sum('points') },
+      ),
+    ])
+    return {
+      totalTransactions: countSnap.data().count,
+      totalPointsGiven: sumSnap.data().totalPointsGiven ?? 0,
+    }
+  } catch (error) {
+    console.error('Error loading group stats:', error)
+    return null
+  }
 }
 
 export async function reactToPost(

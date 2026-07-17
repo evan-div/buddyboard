@@ -3,6 +3,16 @@
 :root {
   --background: #0f0f13;
   --foreground: #f0f0f5;
+
+  /* Design-system tokens. Accent + spacing are overridden at runtime from the
+     user's Style prefs (see src/lib/theme.ts). */
+  --accent: #8b5cf6;
+  --accent-soft: rgba(139, 92, 246, 0.2);
+  --surface: #181820;
+  --surface-2: #22222c;
+  --border: rgba(255, 255, 255, 0.08);
+  --card-pad: 14px 16px;
+  --stack-gap: 10px;
 }
 
 body {
@@ -51,16 +61,9 @@ body {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-/* Nav menu options cascade downward; `backwards` hides each until its delay */
-@keyframes nav-cascade {
-  from { opacity: 0; transform: translateY(-10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
 .overlay-fade { animation: overlay-fade 0.18s ease-out; }
 .sheet-rise   { animation: sheet-rise 0.22s ease-out; }
 .panel-slide  { animation: panel-slide 0.22s ease-out; }
-.nav-cascade  { animation: nav-cascade 0.22s ease-out backwards; }
 
 button {
   touch-action: manipulation;
@@ -74,5 +77,5 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bell-wiggle, .overlay-fade, .sheet-rise, .panel-slide, .nav-cascade { animation: none; }
+  .bell-wiggle, .overlay-fade, .sheet-rise, .panel-slide { animation: none; }
 }
