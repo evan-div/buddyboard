@@ -147,7 +147,6 @@ export interface MiiCharacterProps {
   isSelected: boolean
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
-  asleep?: boolean
   heldBy?: string | null   // display name of whoever is carrying this character
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
@@ -156,7 +155,7 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, initialPosition, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, asleep = false, heldBy = null, onPickupStart, onGroupMount,
+  dragMode = null, heldBy = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -207,7 +206,6 @@ export default function MiiCharacter({
     dragMode === 'mad' ? 'mad'
     : dragMode === 'flying' || dragMode === 'sliding' ? 'scared'
     : dragMode === 'dazed' ? 'dazed'
-    : asleep && !dragMode ? 'sleeping'
     : undefined
 
   useEffect(() => {
@@ -230,15 +228,6 @@ export default function MiiCharacter({
     if (rightArmRef.current) { rightArmRef.current.rotation.x = 0; rightArmRef.current.rotation.z = 0 }
     if (rightLegRef.current) rightLegRef.current.rotation.x = 0
   }, [celebrationType])
-
-  // Clear the sleeping slump when the member comes back online
-  useEffect(() => {
-    if (!asleep && bodyGroupRef.current) {
-      bodyGroupRef.current.rotation.x = 0
-      bodyGroupRef.current.rotation.z = 0
-      bodyGroupRef.current.position.y = 0
-    }
-  }, [asleep])
 
   useEffect(() => {
     selectedTimer.current = 0
@@ -405,7 +394,7 @@ export default function MiiCharacter({
     // ── blinking (skipped when lids are already doing something) ────────────
     {
       const b = blink.current
-      const lidsBusy = asleep || dragMode === 'dazed'
+      const lidsBusy = dragMode === 'dazed'
       if (b.t < 0) {
         b.next -= delta
         if (b.next <= 0 && !lidsBusy) {
@@ -613,26 +602,6 @@ export default function MiiCharacter({
       return
     }
 
-    // ── asleep ────────────────────────────────────────────────────────────────
-    // Member has no live plaza session: stand in place and snooze. The physics
-    // modes above still run first, so a sleeping character can be picked up
-    // and thrown like anyone else — it just never wanders on its own.
-    if (asleep) {
-      phase.current += delta
-      const t    = phase.current
-      const body = bodyGroupRef.current
-      if (body) {
-        body.position.y = Math.sin(t * 1.4) * 0.02   // slow breathing
-        body.rotation.x = 0.07                        // slight slump
-        body.rotation.z = Math.sin(t * 0.7) * 0.02
-      }
-      if (leftArmRef.current)  { leftArmRef.current.rotation.x  = 0.12; leftArmRef.current.rotation.z  = 0 }
-      if (rightArmRef.current) { rightArmRef.current.rotation.x = 0.12; rightArmRef.current.rotation.z = 0 }
-      if (leftLegRef.current)  leftLegRef.current.rotation.x  = 0
-      if (rightLegRef.current) rightLegRef.current.rotation.x = 0
-      return
-    }
-
     // ── selected ──────────────────────────────────────────────────────────────
     if (isSelected) {
       selectedTimer.current += delta
@@ -734,7 +703,7 @@ export default function MiiCharacter({
         const streak = member.currentStreak ?? 0
         if (!badge && streak < 3) return null
         return (
-          <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+          <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
             <div style={{ fontSize: 14, fontWeight: 800, whiteSpace: 'nowrap', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
               {streak >= 3 && <span>🔥{streak}</span>}
               {badge && <span title={badge.label}>{badge.emoji}</span>}
@@ -744,19 +713,13 @@ export default function MiiCharacter({
       })()}
 
       {celebrationType === 'shame' && (
-        <Html position={[0, overlayY - 0.1, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY - 0.1, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>👎</div>
         </Html>
       )}
 
-      {asleep && !dragMode && !celebrationType && (
-        <Html position={[0, overlayY + 0.22, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
-          <div style={{ fontSize: 18, filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.4))' }}>💤</div>
-        </Html>
-      )}
-
       {dragMode === 'held' && heldBy && (
-        <Html position={[0, overlayY + 0.25, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY + 0.25, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{
             background: 'rgba(15,15,25,0.78)', color: '#fff',
             borderRadius: 999, padding: '3px 10px',
@@ -770,19 +733,19 @@ export default function MiiCharacter({
       )}
 
       {dragMode === 'dazed' && (
-        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>💫</div>
         </Html>
       )}
 
       {dragMode === 'waking' && (
-        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😵</div>
         </Html>
       )}
 
       {dragMode === 'mad' && (
-        <Html position={[0, overlayY, 0]} center style={{ pointerEvents: 'none', userSelect: 'none' }}>
+        <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😤</div>
         </Html>
       )}

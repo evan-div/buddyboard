@@ -6,9 +6,9 @@ import type { AvatarConfig } from '@/lib/types'
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t }
 
 // Situational face override driven by what's happening to the character in
-// the plaza (thrown, knocked out, fuming, snoozing). Undefined = the
-// member's chosen avatar face.
-export type FaceExpression = 'mad' | 'scared' | 'dazed' | 'sleeping'
+// the plaza (thrown, knocked out, fuming). Undefined = the member's chosen
+// avatar face.
+export type FaceExpression = 'mad' | 'scared' | 'dazed'
 
 interface EyeProps {
   style: AvatarConfig['eyeStyle']
@@ -194,14 +194,11 @@ export function BeanFace({
   const pupilR = baseR * 0.58
   const spread = lerp(0.07, 0.28, eyeSpacing)
 
-  const effEyeStyle: AvatarConfig['eyeStyle'] =
-    expression === 'sleeping' ? 'sleepy' : eyeStyle
   const effEyeR = expression === 'scared' ? baseR * 1.25 : baseR
   const effMouth: MouthProps['style'] =
-    expression === 'mad'      ? 'frown' :
-    expression === 'scared'   ? 'o' :
-    expression === 'dazed'    ? 'o' :
-    expression === 'sleeping' ? 'small_smile' :
+    expression === 'mad'    ? 'frown' :
+    expression === 'scared' ? 'o' :
+    expression === 'dazed'  ? 'o' :
     mouthStyle
 
   return (
@@ -214,8 +211,8 @@ export function BeanFace({
           </>
         ) : (
           <>
-            <BeanEye style={effEyeStyle} x={-spread} y={0} z={eyeZ} baseR={effEyeR} pupilR={pupilR} />
-            <BeanEye style={effEyeStyle} x={ spread} y={0} z={eyeZ} baseR={effEyeR} pupilR={pupilR} />
+            <BeanEye style={eyeStyle} x={-spread} y={0} z={eyeZ} baseR={effEyeR} pupilR={pupilR} />
+            <BeanEye style={eyeStyle} x={ spread} y={0} z={eyeZ} baseR={effEyeR} pupilR={pupilR} />
           </>
         )}
       </group>

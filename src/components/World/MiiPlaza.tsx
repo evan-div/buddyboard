@@ -1539,9 +1539,6 @@ function Clouds() {
 // A member is "online" when their presence heartbeat (60s while the plaza is
 // open) is recent. Shown in the presence tab, not on the characters.
 const PRESENCE_TIMEOUT_MS = 150_000
-// The plaza dozes by default; a throw wakes everyone, and the characters
-// drift back to sleep after this long without further commotion.
-const WAKE_WINDOW_MS = 60_000
 
 // Compact a vector for a plaza-event doc
 function plazaVec(v: THREE.Vector3): PlazaVec {
@@ -1626,17 +1623,6 @@ function Scene({
     holdSentAt.current = now
     updatePlazaHold(groupId, uid, currentUid, plazaVec(pos))
   }, [groupId, currentUid])
-
-  // The whole plaza dozes until somebody gets thrown — then everyone wakes
-  // up and wanders, drifting back to sleep after a quiet spell.
-  const [sleeping, setSleeping] = useState(true)
-  const sleepTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const wakeAll = useCallback(() => {
-    setSleeping(false)
-    if (sleepTimer.current) clearTimeout(sleepTimer.current)
-    sleepTimer.current = setTimeout(() => setSleeping(true), WAKE_WINDOW_MS)
-  }, [])
-  useEffect(() => () => { if (sleepTimer.current) clearTimeout(sleepTimer.current) }, [])
 
   const setCharMode = useCallback((uid: string, mode: DragMode | null) => {
     const existing = physicsMap.current.get(uid)
@@ -1771,7 +1757,6 @@ function Scene({
           })
           playWhoosh(speed)
           buzz(18)
-          wakeAll()
           clearPlazaHold(groupId, uid)
           sendPlazaEvent(groupId, {
             type: 'throw', uid, by: currentUid,
@@ -1802,7 +1787,7 @@ function Scene({
       setHeldBy(draggingUid.current, null)
       draggingUid.current = null
     }
-  }, [onSelect, groupId, currentUid, wakeAll, setHeldBy])
+  }, [onSelect, groupId, currentUid, setHeldBy])
 
   // Register pointerup and touch events on canvas domElement
   useEffect(() => {
@@ -1912,7 +1897,6 @@ function Scene({
         phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? 0, ev.vel?.z ?? 0)
         phys.angVel.set(ev.angVel?.x ?? 0, ev.angVel?.y ?? 0, ev.angVel?.z ?? 0)
         playWhoosh(phys.vel.length())
-        wakeAll()
         remoteHolds.current.delete(ev.uid)
         setHeldBy(ev.uid, null)
       } else {
@@ -1926,7 +1910,7 @@ function Scene({
       group.position.copy(phys.pos)
     })
     return unsub
-  }, [groupId, currentUid, setCharMode, wakeAll, setHeldBy])
+  }, [groupId, currentUid, setCharMode, setHeldBy])
 
   // Live drag positions: other members' holds stream through plazaHolds docs.
   // The initial snapshot is applied too, so opening the plaza mid-drag shows
@@ -2004,7 +1988,6 @@ function Scene({
           isSelected={selectedUid === member.uid}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
-          asleep={sleeping}
           heldBy={heldByNames.get(member.uid) ?? null}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
@@ -2044,9 +2027,7 @@ function Scene({
 
 // ─── Presence tab ─────────────────────────────────────────────────────────────
 
-// Slim tab on the left edge showing who's in the plaza right now. Presence is
-// informational only — sleeping/waking of the 3D characters is driven by
-// throws, not by who's online.
+// Slim tab on the left edge showing who's in the plaza right now.
 function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentUid: string }) {
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())

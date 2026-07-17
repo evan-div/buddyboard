@@ -162,7 +162,7 @@ export default function GroupPage() {
   }, [group, currentUid])
 
   // Presence heartbeat: mark this member as active while the plaza is open so
-  // other clients can show inactive members as asleep.
+  // other clients can show who's currently online in the presence tab.
   useEffect(() => {
     if (!currentUid || !groupId) return
     const beat = () => {
