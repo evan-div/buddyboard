@@ -26,7 +26,6 @@ import PointsToastContainer, { type PointsToastItem } from '@/components/Toast/P
 import { requestPushPermission } from '@/lib/fcm'
 import NotificationPanel from '@/components/Notifications/NotificationPanel'
 
-import FeedTab from './tabs/FeedTab'
 import WallTab from './tabs/WallTab'
 import LeaderboardTab from './tabs/LeaderboardTab'
 
@@ -84,10 +83,10 @@ export default function GroupPage() {
   // undefined = still loading, null = group not found
   const [group, setGroup] = useState<Group | null | undefined>(undefined)
   const [membersData, setMembersData] = useState<GroupMember[] | null>(null)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'feed' | 'leaderboard' | 'court' | 'wall'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'leaderboard' | 'court' | 'wall'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
-  const [unreadFeedCount, setUnreadFeedCount] = useState(0)
+  const [unreadWallCount, setUnreadWallCount] = useState(0)
   const [activeCaseCount, setActiveCaseCount] = useState(0)
   const seenTxIds = useRef(new Set<string>())
   const notifInitialized = useRef(false)
@@ -211,9 +210,9 @@ export default function GroupPage() {
       for (const tx of txs) {
         if (!seenIds.has(tx.id)) {
           seenIds.add(tx.id)
-          // Badge for Feed tab when user isn't looking at it
-          if (activeTabRef.current !== 'feed') {
-            setUnreadFeedCount((prev) => prev + 1)
+          // Badge for Wall tab when user isn't looking at it
+          if (activeTabRef.current !== 'wall') {
+            setUnreadWallCount((prev) => prev + 1)
           }
           if (tx.toUid === currentUid) {
             const item: PointsToastItem = {
@@ -286,7 +285,7 @@ export default function GroupPage() {
 
   function switchTab(tab: typeof activeTab) {
     setActiveTab(tab)
-    if (tab === 'feed') setUnreadFeedCount(0)
+    if (tab === 'wall') setUnreadWallCount(0)
   }
 
   // Derived: Chief = member with highest positive totalPoints
@@ -421,10 +420,9 @@ export default function GroupPage() {
                   {(
                     [
                       { key: 'plaza',       label: 'Plaza',  badge: 0               },
-                      { key: 'feed',        label: 'Feed',   badge: unreadFeedCount  },
                       { key: 'leaderboard', label: 'Ranks',  badge: 0               },
                       { key: 'court',       label: 'Court',  badge: activeCaseCount  },
-                      { key: 'wall',        label: 'Wall',   badge: 0               },
+                      { key: 'wall',        label: 'Wall',   badge: unreadWallCount  },
                     ] as const
                   ).map(({ key, label, badge }, navIdx) => (
                     <button
@@ -547,7 +545,6 @@ export default function GroupPage() {
           {/* ── Other tabs: scrollable content below the floating nav ── */}
           {activeTab !== 'plaza' && (
             <div style={{ paddingTop: 122, maxWidth: 512, margin: '0 auto', padding: '122px 16px 32px' }}>
-              {activeTab === 'feed' && <FeedTab groupId={groupId} members={members} currentUid={user.uid} />}
               {activeTab === 'leaderboard' && (
                 <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
               )}
@@ -564,6 +561,7 @@ export default function GroupPage() {
                   groupId={groupId}
                   currentUid={user.uid}
                   currentMember={members.find((m) => m.uid === user.uid) ?? null}
+                  members={members}
                 />
               )}
             </div>
