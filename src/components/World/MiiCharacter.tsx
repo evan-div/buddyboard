@@ -10,6 +10,7 @@ import type { GroupMember } from '@/lib/types'
 import { highestBadge } from '@/lib/badges'
 import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
 import { BeanBody, BeanHair, BeanAccessory, outlineShade } from '@/components/Avatar/BeanParts'
+import { hashUid, slotIndex, currentWaypoint, idleVariant } from './plazaWalk'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
@@ -142,7 +143,6 @@ type AnimState = 'walking' | 'idle_bob' | 'idle_sway'
 
 export interface MiiCharacterProps {
   member: GroupMember
-  initialPosition: [number, number, number]
   bounds?: number
   isSelected: boolean
   celebrationType?: 'celebrate' | 'shame' | null
@@ -153,7 +153,7 @@ export interface MiiCharacterProps {
 }
 
 export default function MiiCharacter({
-  member, initialPosition, bounds = 5,
+  member, bounds = 5,
   isSelected, celebrationType = null,
   dragMode = null, heldBy = null, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
@@ -166,14 +166,16 @@ export default function MiiCharacter({
 
   const ragdoll       = useRef<RagdollRef>(makeRagdoll())
   const animState     = useRef<AnimState>('walking')
-  const idleTimer     = useRef(0)
   const phase         = useRef(0)
   const celebTimer    = useRef(0)
   const selectedTimer = useRef(0)
   const dragTimer     = useRef(0)
   // Seeded lazily (first frame / mount effect) so render stays pure and we
-  // don't allocate a new Vector3 + call Math.random on every re-render
+  // don't allocate a new Vector3 on every re-render
   const targetPos = useRef<THREE.Vector3 | null>(null)
+  // Shared wander schedule: same waypoint on every client (see plazaWalk.ts)
+  const uidHash = useMemo(() => hashUid(member.uid), [member.uid])
+  const slotRef = useRef(-1)
   const prevDragMode = useRef<DragMode | null>(null)
   const prevBodyRot  = useRef({ x: 0, z: 0 })
   const wakeProne    = useRef(false)
@@ -209,12 +211,14 @@ export default function MiiCharacter({
     : undefined
 
   useEffect(() => {
-    if (groupRef.current) {
-      groupRef.current.position.set(initialPosition[0], initialPosition[1], initialPosition[2])
+    // Spawn AT the current shared waypoint: a client joining late renders
+    // everyone where the other clients already have them.
+    syncTarget(Date.now())
+    if (groupRef.current && targetPos.current) {
+      groupRef.current.position.set(targetPos.current.x, 0, targetPos.current.z)
     }
-    // Desync this character's animation cycle from the others
+    // Desync this character's animation cycle from the others (cosmetic only)
     phase.current = Math.random() * Math.PI * 2
-    pickNewTarget()
     onGroupMount?.(member.uid, groupRef.current)
     return () => { onGroupMount?.(member.uid, null) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -292,7 +296,9 @@ export default function MiiCharacter({
     if (dragMode === null && groupRef.current) {
       groupRef.current.rotation.x = 0
       groupRef.current.rotation.z = 0
-      pickNewTarget()
+      // Physics is over: walk from wherever we landed back to the shared
+      // waypoint, re-converging this client with everyone else's simulation.
+      syncTarget(Date.now())
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -363,12 +369,15 @@ export default function MiiCharacter({
     if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
   }
 
-  function pickNewTarget() {
-    animState.current = 'walking'
-    const angle  = Math.random() * Math.PI * 2
-    const radius = 1.0 + Math.random() * (bounds * 0.85)
+  // Aim at the current shared waypoint for this character's time slot. Every
+  // client computes the same target from the wall clock, so wandering stays in
+  // sync across viewers with zero network traffic.
+  function syncTarget(nowMs: number) {
+    const wp = currentWaypoint(uidHash, nowMs, bounds)
+    slotRef.current = wp.slot
     if (!targetPos.current) targetPos.current = new THREE.Vector3()
-    targetPos.current.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
+    targetPos.current.set(wp.x, 0, wp.z)
+    animState.current = 'walking'
   }
 
   useFrame((_, rawDelta) => {
@@ -649,14 +658,19 @@ export default function MiiCharacter({
     const t    = phase.current
     const body = bodyGroupRef.current
 
+    // Retarget the moment the wall clock rolls into a new slot. This replaces
+    // the old random idle timer and also self-heals after any pause that
+    // skipped frames (selection, celebration, backgrounded tab).
+    const nowMs = Date.now()
+    if (slotIndex(uidHash, nowMs) !== slotRef.current) syncTarget(nowMs)
+
     if (animState.current === 'walking') {
-      if (!targetPos.current) pickNewTarget()
+      if (!targetPos.current) syncTarget(nowMs)
       const dx   = targetPos.current!.x - group.position.x
       const dz   = targetPos.current!.z - group.position.z
       const dist = Math.sqrt(dx * dx + dz * dz)
       if (dist < 0.15) {
-        animState.current = Math.random() < 0.5 ? 'idle_bob' : 'idle_sway'
-        idleTimer.current = 2 + Math.random() * 3.5
+        animState.current = idleVariant(uidHash, slotRef.current)
         if (body) body.position.y = 0
         if (leftArmRef.current)  leftArmRef.current.rotation.x  = 0
         if (rightArmRef.current) rightArmRef.current.rotation.x = 0
@@ -675,14 +689,18 @@ export default function MiiCharacter({
         // Springy little hop on each step
         if (body) body.position.y = Math.abs(Math.sin(t * 5.5)) * 0.045
       }
-    } else if (animState.current === 'idle_bob') {
-      idleTimer.current -= delta
-      if (body) body.position.y = Math.sin(t * 2.6) * 0.03
-      if (idleTimer.current <= 0) { if (body) body.position.y = 0; pickNewTarget() }
-    } else if (animState.current === 'idle_sway') {
-      idleTimer.current -= delta
-      if (body) body.rotation.z = Math.sin(t * 1.8) * 0.07
-      if (idleTimer.current <= 0) { if (body) body.rotation.z = 0; pickNewTarget() }
+    } else if (animState.current === 'idle_bob' || animState.current === 'idle_sway') {
+      // Ease onto the exact waypoint: arrival stops within 0.15u from an
+      // approach direction that differs per client, so without this nudge
+      // resting spots could differ by ~0.3u between viewers.
+      const k = Math.min(1, delta * 3)
+      group.position.x += (targetPos.current!.x - group.position.x) * k
+      group.position.z += (targetPos.current!.z - group.position.z) * k
+      if (animState.current === 'idle_bob') {
+        if (body) body.position.y = Math.sin(t * 2.6) * 0.03
+      } else {
+        if (body) body.rotation.z = Math.sin(t * 1.8) * 0.07
+      }
     }
   })
 

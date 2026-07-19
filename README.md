@@ -31,6 +31,15 @@ firebase deploy --only firestore:rules
 firebase deploy --only firestore:indexes
 ```
 
+**⚠️ Rules are NOT deployed by CI** — deploying the app (Vercel) does not
+update Firestore rules. After any change to `firestore.rules` you must run the
+deploy command above yourself, or the live database keeps enforcing the old
+ruleset. Symptom of forgetting this for the plaza: dragged characters freeze
+mid-air on other members' screens, with
+`[plaza] hold write failed (permission-denied)` in their console. Verify in the
+Firebase console (Firestore → Rules) that the published text matches the file —
+it must contain `match /plazaHolds`.
+
 Notes on the current security posture:
 
 - Group documents can only be fetched by ID; list queries are denied, and

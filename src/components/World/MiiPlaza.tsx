@@ -8,6 +8,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
+import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -989,6 +990,12 @@ const IMPACT_MAD  = 4
 const FALL_DEPTH     = -30   // y below which a fallen character despawns
 const RESPAWN_DELAY  = 1.6   // seconds hidden before dropping back in
 const RESPAWN_HEIGHT = 9     // drop-in height above the island center
+// Wander radius scale shared by spawn, respawn, and MiiCharacter's schedule —
+// all three must agree or clients compute different waypoints.
+const WANDER_BOUNDS = 3.0
+// A remote hold with no stream updates for this long is treated as abandoned
+// (holder crashed, lost connection, or their writes are being denied)
+const HOLD_STALE_MS = 6_000
 // ─── Lying-down orientation ───────────────────────────────────────────────────
 // lyingQuat/readLyingPose live in plazaMath.ts (unit-tested). These scratch
 // quaternions are for slerp targets in the physics loop below.
@@ -1167,7 +1174,7 @@ function PhysicsUpdater({
         // let go so the character doesn't dangle forever.
         const hold = remoteHolds.current.get(uid)
         if (hold) {
-          if (Date.now() - hold.lastAt > 10_000) {
+          if (Date.now() - hold.lastAt > HOLD_STALE_MS) {
             remoteHolds.current.delete(uid)
             onHoldStale(uid)
             phys.vel.set(0, -2, 0)
@@ -1376,15 +1383,19 @@ function PhysicsUpdater({
           setCharMode(uid, null)
         }
       } else if (phys.mode === 'fallen') {
-        // Hidden below the clouds; after a beat, drop back in from the sky
+        // Hidden below the clouds; after a beat, drop back in from the sky.
+        // Respawn AT the current shared wander waypoint with a deterministic
+        // yaw, so every client sees the drop-in at the same spot and the
+        // simulations re-converge (vel/angVel start at zero → the fall and
+        // bounce chain is identical everywhere).
         phys.modeTimer += delta
         if (phys.modeTimer >= RESPAWN_DELAY) {
-          const a = Math.random() * Math.PI * 2
-          const r = Math.random() * 1.2
-          phys.pos.set(Math.cos(a) * r, RESPAWN_HEIGHT, Math.sin(a) * r)
+          const h  = hashUid(uid)
+          const wp = currentWaypoint(h, Date.now(), WANDER_BOUNDS)
+          phys.pos.set(wp.x, RESPAWN_HEIGHT, wp.z)
           phys.vel.set(0, 0, 0)
           phys.angVel.set(0, 0, 0)
-          group.rotation.set(0, Math.random() * Math.PI * 2, 0)
+          group.rotation.set(0, respawnYaw(h, wp.slot), 0)
           group.position.copy(phys.pos)
           group.visible = true
           setCharMode(uid, 'flying')
@@ -1586,21 +1597,9 @@ function Scene({
   const dragCursorVel = useRef(new THREE.Vector3())
   const [dragModeMap, setDragModeMap] = useState<Map<string, DragMode>>(new Map())
 
-  // Spawn positions derived deterministically from each uid, so a member keeps
-  // the same spawn point no matter how Firestore re-orders the list. (The
-  // position is only applied on mount inside MiiCharacter; after that the
-  // character wanders on its own.)
-  const spawnPositions = useMemo(() => {
-    const map = new Map<string, [number, number, number]>()
-    for (const member of members) {
-      let h = 0
-      for (let i = 0; i < member.uid.length; i++) h = (Math.imul(31, h) + member.uid.charCodeAt(i)) | 0
-      const angle  = ((h >>> 0) / 4294967295) * Math.PI * 2
-      const radius = 0.5 + ((h >>> 8) & 0xffff) / 65535 * 2.0
-      map.set(member.uid, [Math.cos(angle) * radius, 0, Math.sin(angle) * radius])
-    }
-    return map
-  }, [members])
+  // (Spawn positions are computed inside MiiCharacter on mount: each character
+  // appears at its current shared wander waypoint, so a client that joins late
+  // renders everyone where other clients already have them.)
 
   // Live drag streaming: who is holding whom (for the ✋ pill) and where
   // remote-held characters should glide to. Local sends are throttled.
@@ -1777,9 +1776,11 @@ function Scene({
             return next
           })
           clearPlazaHold(groupId, uid)
+          // Carry vel/angVel so remote clients replay the identical drop
+          // instead of inventing their own random spin
           sendPlazaEvent(groupId, {
             type: 'drop', uid, by: currentUid,
-            pos: plazaVec(phys.pos),
+            pos: plazaVec(phys.pos), vel: plazaVec(phys.vel), angVel: plazaVec(phys.angVel),
           })
         }
       }
@@ -1893,6 +1894,14 @@ function Scene({
         phys.pos.y = HOLD_HEIGHT - HEAD_HEIGHT
         playPickup()
         setHeldBy(ev.uid, ev.by)
+        // Seed the hold at the pickup point so the staleness rescue applies
+        // even if the holder's plazaHolds stream never reaches us (e.g. their
+        // writes are being denied) — without this the character would hang
+        // frozen in mid-air until the release event.
+        remoteHolds.current.set(ev.uid, {
+          target: new THREE.Vector3(ev.pos.x, HOLD_HEIGHT - HEAD_HEIGHT, ev.pos.z),
+          lastAt: Date.now(),
+        })
       } else if (ev.type === 'throw') {
         phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? 0, ev.vel?.z ?? 0)
         phys.angVel.set(ev.angVel?.x ?? 0, ev.angVel?.y ?? 0, ev.angVel?.z ?? 0)
@@ -1901,8 +1910,11 @@ function Scene({
         setHeldBy(ev.uid, null)
       } else {
         phys.gentleDrop = true
-        phys.vel.set(0, -2, 0)
-        phys.angVel.set(0, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 1.5)
+        // New events carry the drop physics; fall back to the legacy local
+        // randoms for events written by older clients
+        phys.vel.set(ev.vel?.x ?? 0, ev.vel?.y ?? -2, ev.vel?.z ?? 0)
+        if (ev.angVel) phys.angVel.set(ev.angVel.x, ev.angVel.y, ev.angVel.z)
+        else phys.angVel.set(0, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 1.5)
         remoteHolds.current.delete(ev.uid)
         setHeldBy(ev.uid, null)
       }
@@ -1983,8 +1995,7 @@ function Scene({
         <MiiCharacter
           key={member.uid}
           member={member}
-          initialPosition={spawnPositions.get(member.uid) ?? [0, 0, 0]}
-          bounds={3.0}
+          bounds={WANDER_BOUNDS}
           isSelected={selectedUid === member.uid}
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
@@ -2007,7 +2018,12 @@ function Scene({
         cameraLocked={cameraLocked}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
-        onHoldStale={(uid) => setHeldBy(uid, null)}
+        onHoldStale={(uid) => {
+          setHeldBy(uid, null)
+          // Delete the abandoned hold doc (rules allow any member) so it
+          // doesn't replay a phantom hold to every future joiner
+          clearPlazaHold(groupId, uid)
+        }}
       />
       <OrbitControls
         ref={orbitRef}

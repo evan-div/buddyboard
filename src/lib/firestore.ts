@@ -997,11 +997,30 @@ export function subscribeToWallComments(
 
 // ============ PLAZA EVENTS & PRESENCE ============
 
+// Plaza writes are fire-and-forget, but a permission failure here is the
+// difference between a live shared plaza and characters frozen mid-air on
+// other screens — surface it (throttled) instead of swallowing it silently.
+let plazaWarnAt = 0
+function plazaWriteWarn(op: string): (err: unknown) => void {
+  return (err) => {
+    const now = Date.now()
+    if (now - plazaWarnAt < 10_000) return
+    plazaWarnAt = now
+    const code = (err as { code?: string })?.code ?? String(err)
+    console.warn(
+      `[plaza] ${op} failed (${code})` +
+      (String(code).includes('permission-denied')
+        ? ' — firestore.rules is likely not deployed; run `firebase deploy --only firestore:rules` (see README)'
+        : '')
+    )
+  }
+}
+
 // Broadcast a physics interaction (pickup / drop / throw) so other members'
 // plazas act it out too. Fire-and-forget.
 export function sendPlazaEvent(groupId: string, event: Omit<PlazaEvent, 'id' | 'at'>): void {
   const ref = doc(collection(db, 'groups', groupId, 'plazaEvents'))
-  setDoc(ref, { ...event, at: serverTimestamp() }).catch(() => {})
+  setDoc(ref, { ...event, at: serverTimestamp() }).catch(plazaWriteWarn('event write'))
 }
 
 export function subscribeToPlazaEvents(
@@ -1038,11 +1057,11 @@ export function subscribeToPlazaEvents(
 // member doing the holding into one doc per character, deleted on release.
 // Other clients lerp the character toward it, so drags are visible live.
 export function updatePlazaHold(groupId: string, uid: string, by: string, pos: PlazaVec): void {
-  setDoc(doc(db, 'groups', groupId, 'plazaHolds', uid), { by, pos, at: serverTimestamp() }).catch(() => {})
+  setDoc(doc(db, 'groups', groupId, 'plazaHolds', uid), { by, pos, at: serverTimestamp() }).catch(plazaWriteWarn('hold write'))
 }
 
 export function clearPlazaHold(groupId: string, uid: string): void {
-  deleteDoc(doc(db, 'groups', groupId, 'plazaHolds', uid)).catch(() => {})
+  deleteDoc(doc(db, 'groups', groupId, 'plazaHolds', uid)).catch(plazaWriteWarn('hold clear'))
 }
 
 export type PlazaHoldChange =
