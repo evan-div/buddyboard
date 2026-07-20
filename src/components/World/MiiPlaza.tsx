@@ -1457,6 +1457,26 @@ const SPRITE_DEFS: SpriteDef[] = (() => {
   return defs
 })()
 
+// Multiply the alpha channel by a soft elliptical falloff (normalized to the
+// canvas so it matches the 2:1 aspect). The centre 72% keeps its full puff
+// detail; the outer band fades to fully transparent so puffs clipped by the
+// canvas border don't leave a hard rectangular sprite seam.
+function fadeCloudEdges(ctx: CanvasRenderingContext2D, W: number, H: number) {
+  const img = ctx.getImageData(0, 0, W, H)
+  const data = img.data
+  for (let y = 0; y < H; y++) {
+    const ny = (y / (H - 1)) * 2 - 1
+    for (let x = 0; x < W; x++) {
+      const nx = (x / (W - 1)) * 2 - 1
+      const dist = Math.hypot(nx, ny)
+      if (dist <= 0.72) continue
+      const f = Math.max(0, 1 - (dist - 0.72) / 0.28)
+      data[(y * W + x) * 4 + 3] *= f
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
 function makeCloudTex(seed: number): THREE.CanvasTexture {
   const W = 512, H = 256
   const cv = document.createElement('canvas')
@@ -1481,6 +1501,8 @@ function makeCloudTex(seed: number): THREE.CanvasTexture {
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
     ctx.fill()
   }
+
+  fadeCloudEdges(ctx, W, H)
   return new THREE.CanvasTexture(cv)
 }
 
