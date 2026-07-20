@@ -277,6 +277,26 @@ function GardenFloor() {
 // A slimmed-down version of MiiPlaza's cloud field — a ring of soft billboard
 // puffs around and behind the stage so the sky has the same depth.
 
+// Multiply the alpha channel by a soft elliptical falloff (normalized to the
+// canvas so it matches the 2:1 aspect). The centre 72% keeps its full puff
+// detail; the outer band fades to fully transparent so puffs clipped by the
+// canvas border don't leave a hard rectangular sprite seam.
+function fadeCloudEdges(ctx: CanvasRenderingContext2D, W: number, H: number) {
+  const img = ctx.getImageData(0, 0, W, H)
+  const data = img.data
+  for (let y = 0; y < H; y++) {
+    const ny = (y / (H - 1)) * 2 - 1
+    for (let x = 0; x < W; x++) {
+      const nx = (x / (W - 1)) * 2 - 1
+      const dist = Math.hypot(nx, ny)
+      if (dist <= 0.72) continue
+      const f = Math.max(0, 1 - (dist - 0.72) / 0.28)
+      data[(y * W + x) * 4 + 3] *= f
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
 function makeCloudTex(seed: number): THREE.CanvasTexture {
   const W = 512, H = 256
   const cv = document.createElement('canvas')
@@ -302,23 +322,7 @@ function makeCloudTex(seed: number): THREE.CanvasTexture {
     ctx.fill()
   }
 
-  // Fade the whole texture to fully transparent at every edge with an elliptical
-  // mask. Puffs near the border would otherwise be clipped by the canvas and
-  // leave a hard rectangular seam where the sprite quad ends.
-  ctx.globalCompositeOperation = 'destination-in'
-  const mask = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W / 2)
-  mask.addColorStop(0.00, 'rgba(0,0,0,1)')
-  mask.addColorStop(0.60, 'rgba(0,0,0,1)')
-  mask.addColorStop(1.00, 'rgba(0,0,0,0)')
-  ctx.save()
-  ctx.translate(W / 2, H / 2)
-  ctx.scale(1, H / W)          // squash the circular mask into an ellipse
-  ctx.translate(-W / 2, -H / 2)
-  ctx.fillStyle = mask
-  ctx.fillRect(0, 0, W, H)
-  ctx.restore()
-  ctx.globalCompositeOperation = 'source-over'
-
+  fadeCloudEdges(ctx, W, H)
   return new THREE.CanvasTexture(cv)
 }
 
