@@ -25,10 +25,17 @@ const GRASS_DARK  = '#246b24'
 // A rounded rectangle (matches the plaza's soft-cornered footprint) just big
 // enough to seat the podium row.
 
-const ISLE_HX   = 4.1   // half-width  (x)
-const ISLE_HZ   = 2.1   // half-depth  (z)
+const ISLE_HX   = 4.0   // half-width  (x)
+const ISLE_HZ   = 2.15  // half-depth  (z)
 const ISLE_CR   = 0.9   // corner radius
-const DIRT_DEPTH = 8
+const DIRT_DEPTH = 3.4  // how far the tapered dirt underside drops below the grass
+const DIRT_TAPER = 0.82 // how sharply the underside pinches toward a point
+
+// Scale factor for the dirt cross-section at a given depth (0 = grass, 1 = tip),
+// so the column narrows into a rounded floating-island point.
+function dirtTaperAt(depthFrac: number): number {
+  return 1 - Math.pow(Math.min(1, Math.max(0, depthFrac)), 1.5) * DIRT_TAPER
+}
 
 const TILE     = 1.05                       // checker square size (world units)
 const CHK_TILES = 8                          // tiles per checker canvas
@@ -102,10 +109,20 @@ function GardenFloor() {
 
   const isleShape = useMemo(() => makeIsleShape(), [])
   const topGeo  = useMemo(() => new THREE.ShapeGeometry(isleShape), [isleShape])
-  const dirtGeo = useMemo(
-    () => new THREE.ExtrudeGeometry(isleShape, { depth: DIRT_DEPTH, bevelEnabled: false }),
-    [isleShape],
-  )
+  const dirtGeo = useMemo(() => {
+    const geo = new THREE.ExtrudeGeometry(isleShape, { depth: DIRT_DEPTH, bevelEnabled: false })
+    // Pinch the cross-section inward with depth (shape XY = world XZ) so the
+    // underside tapers to a rounded point instead of a flat-bottomed wall.
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) {
+      const s = dirtTaperAt(pos.getZ(i) / DIRT_DEPTH)
+      pos.setX(i, pos.getX(i) * s)
+      pos.setY(i, pos.getY(i) * s)
+    }
+    pos.needsUpdate = true
+    geo.computeVertexNormals()
+    return geo
+  }, [isleShape])
 
   // Canvas checkerboard mapped across the island (shape UVs are raw XY).
   const baseTex = useMemo(() => {
@@ -215,8 +232,9 @@ function GardenFloor() {
       const nx = p.x, nz = p.y   // shape Y → world Z
       const len = Math.hypot(nx, nz) || 1
       const size = 0.14 + rng() * 0.4
-      const y = -(0.15 + Math.pow(rng(), 1.7) * (DIRT_DEPTH * 0.7))
-      dummy.position.set(nx - (nx / len) * size * 0.3, y, nz - (nz / len) * size * 0.3)
+      const depth = 0.12 + Math.pow(rng(), 1.6) * (DIRT_DEPTH * 0.85)
+      const s = dirtTaperAt(depth / DIRT_DEPTH)   // ride the tapered wall
+      dummy.position.set(nx * s - (nx / len) * size * 0.3, -depth, nz * s - (nz / len) * size * 0.3)
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI)
       dummy.scale.set(size, size * (0.7 + rng() * 0.5), size)
       dummy.updateMatrix()
@@ -651,8 +669,8 @@ export default function PodiumScene({ first, second, third, period }: {
       background: 'linear-gradient(to bottom, #1e4fa0 0%, #3476c8 28%, #5ca8e0 58%, #90caf0 80%, #c8e8f8 100%)',
     }}>
       <Canvas
-        camera={{ position: [0, 2.7, 7.8], fov: 56 }}
-        onCreated={({ camera }) => camera.lookAt(0, 1.6, 0)}
+        camera={{ position: [0, 3.2, 10.0], fov: 50 }}
+        onCreated={({ camera }) => camera.lookAt(0, 0.95, 0)}
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
         style={{ width: '100%', height: '100%' }}
