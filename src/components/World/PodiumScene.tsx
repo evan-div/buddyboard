@@ -353,18 +353,18 @@ const BASE_CLOUD_DEFS: CloudDef[] = (() => {
   let s = 77
   const rng = () => { s = (Math.imul(1664525, s) + 1013904223) | 0; return (s >>> 0) / 4294967296 }
   const defs: CloudDef[] = []
-  const count = 24
+  const count = 30
   for (let i = 0; i < count; i++) {
-    const angle  = (i / count) * Math.PI * 2 + rng() * 0.4 - 0.2
-    // A full but airy ring around the lower dirt: a larger minimum radius keeps
-    // puffs off the centre (no solid blob under the tip) and low opacity makes
-    // them read as thin drifting mist the island rests in.
-    const radius = 4.2 + rng() * 4.3
+    const angle  = (i / count) * Math.PI * 2 + rng() * 0.45 - 0.225
+    // A soft cloud floor at/below the tapered tip that the island dips into,
+    // spread wide so it wraps and sits under the base rather than veiling its
+    // front. Low and semi-transparent so it reads as drifting mist, not a deck.
+    const radius = 3.2 + rng() * 5.4
     defs.push({
-      pos: [Math.cos(angle) * radius, -2.5 + rng() * 1.0, Math.sin(angle) * radius],
+      pos: [Math.cos(angle) * radius, -3.3 + rng() * 1.05, Math.sin(angle) * radius],
       texIdx: Math.floor(rng() * 3),
-      width: 3.2 + rng() * 3.0,
-      opacity: 0.5 + rng() * 0.2,
+      width: 3.8 + rng() * 3.2,
+      opacity: 0.45 + rng() * 0.25,
     })
   }
   return defs

@@ -1481,6 +1481,24 @@ function makeCloudTex(seed: number): THREE.CanvasTexture {
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
     ctx.fill()
   }
+
+  // Fade the whole texture to fully transparent at every edge with an elliptical
+  // mask, so puffs clipped by the canvas border don't leave a hard rectangular
+  // seam where the sprite quad ends.
+  ctx.globalCompositeOperation = 'destination-in'
+  const mask = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W / 2)
+  mask.addColorStop(0.00, 'rgba(0,0,0,1)')
+  mask.addColorStop(0.60, 'rgba(0,0,0,1)')
+  mask.addColorStop(1.00, 'rgba(0,0,0,0)')
+  ctx.save()
+  ctx.translate(W / 2, H / 2)
+  ctx.scale(1, H / W)
+  ctx.translate(-W / 2, -H / 2)
+  ctx.fillStyle = mask
+  ctx.fillRect(0, 0, W, H)
+  ctx.restore()
+  ctx.globalCompositeOperation = 'source-over'
+
   return new THREE.CanvasTexture(cv)
 }
 
