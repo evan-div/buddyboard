@@ -301,10 +301,28 @@ function makeCloudTex(seed: number): THREE.CanvasTexture {
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
     ctx.fill()
   }
+
+  // Fade the whole texture to fully transparent at every edge with an elliptical
+  // mask. Puffs near the border would otherwise be clipped by the canvas and
+  // leave a hard rectangular seam where the sprite quad ends.
+  ctx.globalCompositeOperation = 'destination-in'
+  const mask = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W / 2)
+  mask.addColorStop(0.00, 'rgba(0,0,0,1)')
+  mask.addColorStop(0.60, 'rgba(0,0,0,1)')
+  mask.addColorStop(1.00, 'rgba(0,0,0,0)')
+  ctx.save()
+  ctx.translate(W / 2, H / 2)
+  ctx.scale(1, H / W)          // squash the circular mask into an ellipse
+  ctx.translate(-W / 2, -H / 2)
+  ctx.fillStyle = mask
+  ctx.fillRect(0, 0, W, H)
+  ctx.restore()
+  ctx.globalCompositeOperation = 'source-over'
+
   return new THREE.CanvasTexture(cv)
 }
 
-interface CloudDef { pos: [number, number, number]; texIdx: number; width: number }
+interface CloudDef { pos: [number, number, number]; texIdx: number; width: number; opacity?: number }
 
 const CLOUD_DEFS: CloudDef[] = (() => {
   let s = 42
@@ -335,22 +353,24 @@ const BASE_CLOUD_DEFS: CloudDef[] = (() => {
   let s = 77
   const rng = () => { s = (Math.imul(1664525, s) + 1013904223) | 0; return (s >>> 0) / 4294967296 }
   const defs: CloudDef[] = []
-  const count = 15
+  const count = 24
   for (let i = 0; i < count; i++) {
-    const angle  = (i / count) * Math.PI * 2 + rng() * 0.5 - 0.25
-    // A loose ring around the lower dirt — spaced out so sky shows between,
-    // sitting just below the base so the island appears to rest in the clouds.
-    const radius = 3.6 + rng() * 4.2
+    const angle  = (i / count) * Math.PI * 2 + rng() * 0.4 - 0.2
+    // A full but airy ring around the lower dirt: a larger minimum radius keeps
+    // puffs off the centre (no solid blob under the tip) and low opacity makes
+    // them read as thin drifting mist the island rests in.
+    const radius = 4.2 + rng() * 4.3
     defs.push({
-      pos: [Math.cos(angle) * radius, -2.7 + rng() * 0.9, Math.sin(angle) * radius],
+      pos: [Math.cos(angle) * radius, -2.5 + rng() * 1.0, Math.sin(angle) * radius],
       texIdx: Math.floor(rng() * 3),
-      width: 2.8 + rng() * 2.8,
+      width: 3.2 + rng() * 3.0,
+      opacity: 0.5 + rng() * 0.2,
     })
   }
   return defs
 })()
 
-function CloudSprite({ pos, texture, width }: { pos: [number, number, number]; texture: THREE.Texture; width: number }) {
+function CloudSprite({ pos, texture, width, opacity = 1 }: { pos: [number, number, number]; texture: THREE.Texture; width: number; opacity?: number }) {
   const ref = useRef<THREE.Sprite>(null)
   const driftT = Math.abs(pos[0] * 12.9898 + pos[2] * 78.233) % (Math.PI * 2)
   const height = width * 0.5
@@ -362,7 +382,7 @@ function CloudSprite({ pos, texture, width }: { pos: [number, number, number]; t
   })
   return (
     <sprite ref={ref} position={pos} scale={[width, height, 1]}>
-      <spriteMaterial map={texture} transparent alphaTest={0.01} depthWrite={false} />
+      <spriteMaterial map={texture} transparent opacity={opacity} alphaTest={0.01} depthWrite={false} />
     </sprite>
   )
 }
@@ -375,7 +395,7 @@ function Clouds() {
         <CloudSprite key={`sky-${i}`} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
       {BASE_CLOUD_DEFS.map((def, i) => (
-        <CloudSprite key={`base-${i}`} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
+        <CloudSprite key={`base-${i}`} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} opacity={def.opacity} />
       ))}
     </>
   )
