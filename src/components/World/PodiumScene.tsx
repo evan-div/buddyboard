@@ -28,8 +28,8 @@ const GRASS_DARK  = '#246b24'
 const ISLE_HX   = 4.0   // half-width  (x)
 const ISLE_HZ   = 2.15  // half-depth  (z)
 const ISLE_CR   = 0.9   // corner radius
-const DIRT_DEPTH = 3.4  // how far the tapered dirt underside drops below the grass
-const DIRT_TAPER = 0.82 // how sharply the underside pinches toward a point
+const DIRT_DEPTH = 3.0  // how far the tapered dirt underside drops below the grass
+const DIRT_TAPER = 0.52 // how sharply the underside pinches toward a point
 
 // Scale factor for the dirt cross-section at a given depth (0 = grass, 1 = tip),
 // so the column narrows into a rounded floating-island point.
@@ -329,6 +329,27 @@ const CLOUD_DEFS: CloudDef[] = (() => {
   return defs
 })()
 
+// A low band of clouds hugging the island's base, so it reads as floating in a
+// cloud layer rather than hanging in empty sky.
+const BASE_CLOUD_DEFS: CloudDef[] = (() => {
+  let s = 77
+  const rng = () => { s = (Math.imul(1664525, s) + 1013904223) | 0; return (s >>> 0) / 4294967296 }
+  const defs: CloudDef[] = []
+  const count = 15
+  for (let i = 0; i < count; i++) {
+    const angle  = (i / count) * Math.PI * 2 + rng() * 0.5 - 0.25
+    // A loose ring around the lower dirt — spaced out so sky shows between,
+    // sitting just below the base so the island appears to rest in the clouds.
+    const radius = 3.6 + rng() * 4.2
+    defs.push({
+      pos: [Math.cos(angle) * radius, -2.7 + rng() * 0.9, Math.sin(angle) * radius],
+      texIdx: Math.floor(rng() * 3),
+      width: 2.8 + rng() * 2.8,
+    })
+  }
+  return defs
+})()
+
 function CloudSprite({ pos, texture, width }: { pos: [number, number, number]; texture: THREE.Texture; width: number }) {
   const ref = useRef<THREE.Sprite>(null)
   const driftT = Math.abs(pos[0] * 12.9898 + pos[2] * 78.233) % (Math.PI * 2)
@@ -351,7 +372,10 @@ function Clouds() {
   return (
     <>
       {CLOUD_DEFS.map((def, i) => (
-        <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
+        <CloudSprite key={`sky-${i}`} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
+      ))}
+      {BASE_CLOUD_DEFS.map((def, i) => (
+        <CloudSprite key={`base-${i}`} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
     </>
   )
