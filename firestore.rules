@@ -83,7 +83,10 @@ service cloud.firestore {
       allow delete: if false;
 
       match /members/{mid} {
-        allow read: if isMember(gid);
+        // Members can read the roster; additionally anyone signed in may read
+        // their OWN member doc — the join flow checks it before becoming a
+        // member, and this only ever exposes a user's own membership.
+        allow read: if isMember(gid) || (signedIn() && request.auth.uid == mid);
         allow create: if signedIn() && request.auth.uid == mid;
         // Gameplay writes points/badges onto other members' docs; limits are
         // client-enforced (see header note)

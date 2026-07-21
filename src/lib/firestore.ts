@@ -206,16 +206,26 @@ export async function joinGroup(inviteCode: string, user: User): Promise<string>
     throw new Error('This group is full (max 20 members)')
   }
 
-  // Check if user is already a member
+  // Check if user is already a member. Under the security rules a non-member
+  // can't read member docs, so a permission error here just means "not a member
+  // yet" — swallow it and let the join proceed (the batch below only writes this
+  // user's own member doc, which the rules do allow).
   const memberRef = doc(db, 'groups', groupId, 'members', user.uid)
-  const memberSnap = await getDoc(memberRef)
-  if (memberSnap.exists()) {
+  const memberSnap = await getDoc(memberRef).catch(() => null)
+  if (memberSnap?.exists()) {
     throw new Error('You are already a member of this group')
   }
 
-  // Fetch existing members to notify them
-  const existingMembersSnap = await getDocs(collection(db, 'groups', groupId, 'members'))
-  const existingMemberUids = existingMembersSnap.docs.map((d) => d.id).filter((uid) => uid !== user.uid)
+  // Fetch existing members so we can notify them. Listing members requires
+  // already being a member, so this read is denied for a joiner — treat a
+  // failure as "no one to notify" rather than aborting the whole join.
+  let existingMemberUids: string[] = []
+  try {
+    const existingMembersSnap = await getDocs(collection(db, 'groups', groupId, 'members'))
+    existingMemberUids = existingMembersSnap.docs.map((d) => d.id).filter((uid) => uid !== user.uid)
+  } catch {
+    existingMemberUids = []
+  }
 
   const today = dayKey(groupData.timezone)
   const batch = writeBatch(db)
