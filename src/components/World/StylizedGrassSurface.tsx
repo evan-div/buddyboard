@@ -8,10 +8,10 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 // grass/dirt masks, color variation, and world-space wind. The implementation is
 // intentionally self-contained so the Plaza does not need the demo's GLB or Leva.
 
-// Each instance is a two-blade crossed cluster. This keeps a full silhouette
-// from every camera angle without paying for 40k separate instance matrices.
-const MOBILE_CLUSTERS = 20_000 // 40k visible blades / 120k triangles
-const DESKTOP_CLUSTERS = 30_000 // 60k visible blades / 180k triangles
+// Each instance is a two-blade crossed cluster. The denser mobile field remains
+// inexpensive while putting enough separate roots on screen to read as a lawn.
+const MOBILE_CLUSTERS = 32_000 // 64k visible blades / 192k triangles
+const DESKTOP_CLUSTERS = 44_000 // 88k visible blades / 264k triangles
 const PATCH_W = FSIZE / 10
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -93,6 +93,43 @@ function seededRandom(seed: number) {
   }
 }
 
+function makeJitteredPositions(count: number, seed: number): [number, number][] {
+  const span = FSIZE * 1.06
+  let gridSize = Math.ceil(Math.sqrt(count / 0.8))
+
+  // A jittered cell per root avoids the clumps and empty streaks produced by
+  // pure random sampling. Retry with one extra row if edge clipping leaves us
+  // a few positions short, then shuffle before trimming to keep every side even.
+  while (true) {
+    const random = seededRandom(seed + gridSize)
+    const cellSize = span / gridSize
+    const positions: [number, number][] = []
+
+    for (let row = 0; row < gridSize; row++) {
+      for (let column = 0; column < gridSize; column++) {
+        const x = -span / 2 + (column + 0.5 + (random() - 0.5) * 0.88) * cellSize
+        const z = -span / 2 + (row + 0.5 + (random() - 0.5) * 0.88) * cellSize
+        const theta = Math.atan2(z, x)
+        if (Math.hypot(x, z) <= plazaEdgeRadius(theta) - 0.08) {
+          positions.push([x, z])
+        }
+      }
+    }
+
+    if (positions.length >= count) {
+      for (let i = positions.length - 1; i > 0; i--) {
+        const swapIndex = Math.floor(random() * (i + 1))
+        const current = positions[i]
+        positions[i] = positions[swapIndex]
+        positions[swapIndex] = current
+      }
+      return positions.slice(0, count)
+    }
+
+    gridSize++
+  }
+}
+
 function makeBladeMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -101,8 +138,8 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       uWindStrength: { value: 0.075 },
       uWindDir: { value: new THREE.Vector2(-0.82, -0.57).normalize() },
       uGrassBottom: { value: new THREE.Color('#315f25') },
-      uGrassTop: { value: new THREE.Color('#86c947') },
-      uGrassDry: { value: new THREE.Color('#b9a64a') },
+      uGrassTop: { value: new THREE.Color('#74b83f') },
+      uGrassDry: { value: new THREE.Color('#a69843') },
       uDirtColor: { value: new THREE.Color('#8f6a42') },
     },
     vertexShader: /* glsl */ `
@@ -156,7 +193,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
 
         // A restrained warm tip lift suggests the demo's back-scatter without
         // adding a shadow map or multi-sample lighting cost on mobile.
-        vec3 tipGlow = vec3(0.12, 0.16, 0.035) * pow(gradient, 3.0);
+        vec3 tipGlow = vec3(0.07, 0.09, 0.02) * pow(gradient, 3.0);
         gl_FragColor = vec4(grass * vLight + tipGlow, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -211,7 +248,7 @@ function makeGroundTexture(): THREE.CanvasTexture {
       const worldZ = (py / (size - 1) - 0.5) * FSIZE
       const checker = (Math.floor((worldX + FSIZE / 2) / PATCH_W)
         + Math.floor((worldZ + FSIZE / 2) / PATCH_W)) & 1
-      grass.copy(dark).lerp(light, checker * 0.38)
+      grass.copy(dark).lerp(light, checker * 0.25)
 
       const patch = fieldFbm(worldX * 0.105 - 4.2, worldZ * 0.105 - 1.3)
       grass.lerp(dry, smoothstep(0.49, 0.78, patch) * 0.32)
@@ -256,24 +293,19 @@ export default function StylizedGrassSurface({
     const mesh = bladesRef.current
     if (!mesh) return
 
-    const random = seededRandom(0x62756464 + (mobile ? 1 : 0))
+    const seed = 0x62756464 + (mobile ? 1 : 0)
+    const random = seededRandom(seed ^ 0x47726173)
+    const positions = makeJitteredPositions(clusterCount, seed)
     const dummy = new THREE.Object3D()
-    let placed = 0
-    while (placed < clusterCount) {
-      const x = (random() - 0.5) * FSIZE * 1.06
-      const z = (random() - 0.5) * FSIZE * 1.06
-      const theta = Math.atan2(z, x)
-      if (Math.hypot(x, z) > plazaEdgeRadius(theta) - 0.08) continue
-
+    positions.forEach(([x, z], placed) => {
       const height = 0.16 + random() * 0.075
-      const width = 0.043 + random() * 0.022
+      const width = 0.046 + random() * 0.024
       dummy.position.set(x, 0.006, z)
       dummy.rotation.set(0, random() * Math.PI * 2, 0)
       dummy.scale.set(width, height, width)
       dummy.updateMatrix()
       mesh.setMatrixAt(placed, dummy.matrix)
-      placed++
-    }
+    })
     mesh.instanceMatrix.needsUpdate = true
     mesh.computeBoundingSphere()
   }, [clusterCount, mobile])
