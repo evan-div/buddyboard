@@ -10,8 +10,8 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 
 // Each instance is a two-blade crossed cluster. The denser mobile field remains
 // inexpensive while putting enough separate roots on screen to read as a lawn.
-const MOBILE_CLUSTERS = 32_000 // 64k visible blades / 192k triangles
-const DESKTOP_CLUSTERS = 44_000 // 88k visible blades / 264k triangles
+const MOBILE_CLUSTERS = 38_000 // 76k visible blades / 228k triangles
+const DESKTOP_CLUSTERS = 52_000 // 104k visible blades / 312k triangles
 const PATCH_W = FSIZE / 10
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -41,6 +41,12 @@ const FIELD_NOISE_GLSL = /* glsl */ `
   float fieldDirt(vec2 worldXZ) {
     float warped = fieldFbm(worldXZ * 0.16 + vec2(2.4, -1.7));
     return smoothstep(0.66, 0.77, warped);
+  }
+
+  float fieldLongGrass(vec2 worldXZ) {
+    float meadow = fieldFbm(worldXZ * 0.075 + vec2(-6.8, 4.1));
+    float edgeVariation = fieldNoise(worldXZ * 0.22 + vec2(3.7, -8.2));
+    return smoothstep(0.58, 0.70, meadow) * mix(0.82, 1.0, edgeVariation);
   }
 `
 
@@ -149,6 +155,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
+      varying float vLongGrass;
       varying float vLight;
       ${FIELD_NOISE_GLSL}
 
@@ -158,15 +165,16 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         vBladeHeight = position.y;
         vDirt = fieldDirt(bladeBase.xz);
         vPatch = fieldFbm(bladeBase.xz * 0.105 - vec2(4.2, 1.3));
+        vLongGrass = fieldLongGrass(bladeBase.xz);
 
-        // Dirt is a shared GPU mask: the ground turns earthy while blades in
-        // the same patch shrink down instead of ending at a hard boundary.
-        localPosition.y *= mix(1.0, 0.14, vDirt);
+        // Broad meadow masks create coherent long-grass patches, while the dirt
+        // mask still wins wherever the shared ground texture turns earthy.
+        localPosition.y *= mix(1.0, 1.48, vLongGrass) * mix(1.0, 0.14, vDirt);
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
         float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
         gust += sin(uTime * 2.05 + dot(bladeBase.xz, vec2(-0.13, 0.51))) * 0.38;
-        float bend = pow(position.y, 1.55) * gust * uWindStrength;
+        float bend = pow(position.y, 1.55) * gust * uWindStrength * mix(1.0, 1.22, vLongGrass);
         worldPosition.xz += uWindDir * bend;
 
         vec2 bladeFacing = normalize(vec2(instanceMatrix[0][0], instanceMatrix[0][2]));
@@ -182,6 +190,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
+      varying float vLongGrass;
       varying float vLight;
 
       void main() {
@@ -190,6 +199,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         float dryMix = smoothstep(0.49, 0.78, vPatch) * 0.42;
         grass = mix(grass, uGrassDry, dryMix);
         grass = mix(grass, uDirtColor, vDirt * 0.72);
+        grass *= mix(vec3(1.0), vec3(0.88, 0.96, 0.84), vLongGrass * 0.22);
 
         // A restrained warm tip lift suggests the demo's back-scatter without
         // adding a shadow map or multi-sample lighting cost on mobile.
@@ -298,7 +308,7 @@ export default function StylizedGrassSurface({
     const positions = makeJitteredPositions(clusterCount, seed)
     const dummy = new THREE.Object3D()
     positions.forEach(([x, z], placed) => {
-      const height = 0.16 + random() * 0.075
+      const height = 0.175 + random() * 0.08
       const width = 0.046 + random() * 0.024
       dummy.position.set(x, 0.006, z)
       dummy.rotation.set(0, random() * Math.PI * 2, 0)
