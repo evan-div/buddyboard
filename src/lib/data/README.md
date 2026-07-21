@@ -27,13 +27,23 @@ This folder contains the abstract data layer interface that separates business l
 
 ### Web (Firestore)
 
-```typescript
-// src/lib/firestore.ts
-import { setDataLayer } from './data/dataLayer'
-import { FirestoreDataLayer } from './firestore-impl'
+Implemented in `firestore-impl.ts`, which delegates to the operations in
+`../firestore.ts` and `../appeals.ts` (both close over the shared `db`/`auth`).
+It self-registers via `setDataLayer()` on import, and `AuthContext` pulls it in
+at app startup:
 
-// During app initialization
-setDataLayer(new FirestoreDataLayer(db, auth))
+```typescript
+// src/lib/data/firestore-impl.ts
+import { setDataLayer } from './dataLayer'
+
+export class FirestoreDataLayer implements IDataLayer { /* ... */ }
+
+setDataLayer(new FirestoreDataLayer())
+```
+
+```typescript
+// src/contexts/AuthContext.tsx — side-effect import at startup
+import '@/lib/data/firestore-impl'
 ```
 
 ### Mobile (Firebase RN)
@@ -166,6 +176,7 @@ describe('IDataLayer', () => {
 
 ## Next Steps
 
+- [x] Web: implement `firestore-impl.ts` and register it via `setDataLayer()` at startup
 1. Mobile developers: Copy `dataLayer.ts` to your project
 2. Create platform-specific `firebase-impl.ts`
 3. Call `setDataLayer()` during app startup

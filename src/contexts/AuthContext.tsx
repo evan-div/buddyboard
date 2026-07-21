@@ -11,6 +11,8 @@ import {
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { createOrUpdateUser, getUser } from '@/lib/firestore'
+// Registers the web (Firestore) data layer via setDataLayer() at app startup.
+import '@/lib/data/firestore-impl'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import type { User } from '@/lib/types'
 

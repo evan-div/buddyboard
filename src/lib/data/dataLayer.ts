@@ -147,12 +147,6 @@ export interface IDataLayer {
   ): UnsubscribeFn
 
   // ============ COURT SYSTEM ============
-  subscribeToNotifications(
-    groupId: string,
-    uid: string,
-    callback: NotificationCallback
-  ): UnsubscribeFn
-
   subscribeToCases(groupId: string, callback: CasesCallback): UnsubscribeFn
 
   fileAppeal(
