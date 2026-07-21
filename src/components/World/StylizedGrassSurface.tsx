@@ -169,7 +169,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
 
         // Broad meadow masks create coherent long-grass patches, while the dirt
         // mask still wins wherever the shared ground texture turns earthy.
-        localPosition.y *= mix(1.0, 1.48, vLongGrass) * mix(1.0, 0.14, vDirt);
+        localPosition.y *= mix(1.0, 1.60, vLongGrass) * mix(1.0, 0.14, vDirt);
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
         float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
