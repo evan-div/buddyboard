@@ -129,7 +129,7 @@ function Shot({ config, onDone }: { config: AvatarConfig; onDone: (url: string) 
         mouthY={mouthY}
         mouthZ={eyeZ}
       />
-      <BeanHair style={config.hairStyle} color={config.hairColor} bodyTop={dims.bodyTop} radius={dims.radius} />
+      <BeanHair style={config.hairStyle} color={config.hairColor} bodyTop={dims.bodyTop} headRadius={dims.headRadius} />
       <BeanAccessory
         style={config.accessory}
         bodyTop={dims.bodyTop}

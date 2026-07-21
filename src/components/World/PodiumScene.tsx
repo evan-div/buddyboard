@@ -624,7 +624,7 @@ function PodiumBean({ member, x, podiumH, phaseOffset, period, gradientMap }: {
             style={member.avatar.hairStyle}
             color={member.avatar.hairColor}
             bodyTop={dims.bodyTop}
-            radius={dims.radius}
+            headRadius={dims.headRadius}
           />
 
           {/* Accessory */}

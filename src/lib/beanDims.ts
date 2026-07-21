@@ -20,6 +20,7 @@ export type BeanDims = {
   faceCenterY: number  // Y position of eye center
   faceZ: number        // Z (radius) at the face surface
   armX: number         // X offset for arm attachment
+  headRadius: number   // radius of the head sphere the hair wraps
 }
 
 function shapeExtras(
@@ -27,7 +28,7 @@ function shapeExtras(
   radius: number,
   capLen: number,
   groundY: number,
-): Pick<BeanDims, 'bodyTop' | 'armAttachY' | 'faceCenterY' | 'faceZ' | 'armX'> {
+): Pick<BeanDims, 'bodyTop' | 'armAttachY' | 'faceCenterY' | 'faceZ' | 'armX' | 'headRadius'> {
   switch (shape) {
     case 'peanut': {
       const topR = radius * 0.72
@@ -38,6 +39,7 @@ function shapeExtras(
         faceCenterY: topY,
         faceZ:       topR,
         armX:        topR + 0.02,
+        headRadius:  topR,
       }
     }
     case 'gourd': {
@@ -49,6 +51,7 @@ function shapeExtras(
         faceCenterY: topY,
         faceZ:       topR,
         armX:        radius + 0.02,
+        headRadius:  topR,
       }
     }
     case 'strawberry': {
@@ -60,6 +63,7 @@ function shapeExtras(
         faceCenterY: topY,
         faceZ:       topR,
         armX:        topR + 0.02,
+        headRadius:  topR,
       }
     }
     default: { // bean
@@ -69,6 +73,7 @@ function shapeExtras(
         faceCenterY: groundY + capLen * 0.22,
         faceZ:       radius,
         armX:        radius + 0.02,
+        headRadius:  radius,
       }
     }
   }
