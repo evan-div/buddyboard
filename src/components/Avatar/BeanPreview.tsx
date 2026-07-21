@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useEffect, type PointerEvent as RPointerEvent } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SKIN_TONES } from '@/lib/avatarDefaults'
@@ -433,15 +433,42 @@ function BeanAccessory({ style, bodyTop, radius, eyeY, eyeZ, eyeSpread }: {
   return null
 }
 
-function BeanScene({ config }: { config: AvatarConfig }) {
+// Shared, mutable spin state driven by pointer handlers on the container div and
+// read every frame in BeanScene. Kept in a ref (not state) so dragging never
+// triggers React re-renders.
+type SpinState = { y: number; vel: number; dragging: boolean; engaged: boolean; lastX: number }
+
+function BeanScene({ config, centerY, camPos, fov, spin }: {
+  config: AvatarConfig
+  centerY: number
+  camPos: [number, number, number]
+  fov: number
+  spin: { current: SpinState }
+}) {
   const groupRef  = useRef<THREE.Group>(null)
+  const framed    = useRef('')
   const dims      = useBeanDims(config)
   const gradient  = useGradient()
   const skinColor = SKIN_TONES[config.skinTone]
   const bodyColor = config.bodyColor ?? config.shirtColor
 
-  useFrame((_, dt) => {
-    if (groupRef.current) groupRef.current.rotation.y += dt * 0.6
+  useFrame((state) => {
+    // Keep the camera framed on the current pose. r3f reads the <Canvas camera>
+    // prop only once, so reframing (e.g. picking a tall hairstyle) is applied
+    // here — cheap, and guarded so it only runs when the framing actually
+    // changes. `state.camera` is a callback argument, not a hook return, so
+    // mutating it is fine.
+    const key = `${camPos[0]},${camPos[1]},${camPos[2]},${fov}`
+    if (framed.current !== key) {
+      const cam = state.camera as THREE.PerspectiveCamera
+      cam.position.set(camPos[0], camPos[1], camPos[2])
+      cam.fov = fov
+      cam.lookAt(0, 0, 0)
+      cam.updateProjectionMatrix()
+      framed.current = key
+    }
+    // The parent owns the spin physics; the scene just reflects the angle.
+    if (groupRef.current) groupRef.current.rotation.y = spin.current.y
   })
 
   const eyeY      = dims.faceCenterY
@@ -450,13 +477,9 @@ function BeanScene({ config }: { config: AvatarConfig }) {
   const mouthY    = dims.faceCenterY - dims.faceZ * 0.38
   const mouthZ    = dims.faceZ
 
-  // Center the character in the preview
-  const charBottom = dims.legAttachY - dims.legLen - 0.04
-  const charCenter = (charBottom + dims.bodyTop) / 2
-
   return (
     <group ref={groupRef}>
-    <group position={[0, -charCenter, 0]}>
+    <group position={[0, -centerY, 0]}>
       {/* Left leg */}
       <group position={[-dims.radius * 0.4, dims.legAttachY, 0]}>
         <mesh position={[0, -dims.legLen / 2, 0]} scale={1.1}>
@@ -557,13 +580,97 @@ function BeanScene({ config }: { config: AvatarConfig }) {
   )
 }
 
-export default function BeanPreview({ config }: { config: AvatarConfig }) {
+export default function BeanPreview({ config, headshot = false, size = 200 }: {
+  config: AvatarConfig
+  /** Frame tightly on the head (for the circular avatar preview). */
+  headshot?: boolean
+  size?: number
+}) {
+  const dims = useBeanDims(config)
+  const spin = useRef<SpinState>({ y: 0, vel: 0, dragging: false, engaged: false, lastX: 0 })
+
+  // Spin physics run here (the ref's owner) rather than in BeanScene, where the
+  // ref would be a prop and mutating it isn't allowed. Idle auto-spin until the
+  // user first grabs the character; after that, drag sets the angle and a fling
+  // coasts to rest wherever they let go.
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000)
+      last = now
+      const s = spin.current
+      if (!s.dragging) {
+        if (s.engaged) {
+          s.y += s.vel
+          s.vel *= 0.92
+          if (Math.abs(s.vel) < 0.0002) s.vel = 0
+        } else {
+          s.y += dt * 0.6
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  // Camera framing + how far to drop the character so the framed region sits at
+  // the origin the camera looks at (and the spin axis runs through it).
+  const { camPos, fov, centerY } = useMemo(() => {
+    if (headshot) {
+      const tallHat  = ['wizard_hat', 'bunny_ears'].includes(config.accessory)
+      const headwear = ['hat', 'crown', 'horns', 'halo', 'flower_crown'].includes(config.accessory)
+      const tallHair = ['mohawk', 'topknot', 'bun', 'afro', 'curly'].includes(config.hairStyle)
+      const top    = dims.bodyTop + (tallHat ? 0.8 : headwear || tallHair ? 0.5 : 0.3)
+      const bottom = dims.faceCenterY - dims.radius * 1.1
+      const cy     = (top + bottom) / 2
+      const halfH  = ((top - bottom) / 2) * 1.15
+      const f      = 30
+      const dist   = halfH / Math.tan(((f / 2) * Math.PI) / 180)
+      return { camPos: [0, 0.03, dims.faceZ * 0.6 + dist] as [number, number, number], fov: f, centerY: cy }
+    }
+    const charBottom = dims.legAttachY - dims.legLen - 0.04
+    return { camPos: [0, 0.85, 3.4] as [number, number, number], fov: 40, centerY: (charBottom + dims.bodyTop) / 2 }
+  }, [config, dims, headshot])
+
+  // Drag / swipe to rotate. Pointer events cover mouse + touch; pointer capture
+  // keeps the gesture alive if the finger leaves the canvas mid-swipe.
+  const onPointerDown = (e: RPointerEvent) => {
+    const s = spin.current
+    s.dragging = true
+    s.engaged  = true
+    s.vel      = 0
+    s.lastX    = e.clientX
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onPointerMove = (e: RPointerEvent) => {
+    const s = spin.current
+    if (!s.dragging) return
+    const d = (e.clientX - s.lastX) * 0.011
+    s.lastX = e.clientX
+    s.y   += d
+    s.vel  = d // carried into inertia on release
+  }
+  const endDrag = (e: RPointerEvent) => {
+    const s = spin.current
+    if (!s.dragging) return
+    s.dragging = false
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* pointer already released */ }
+  }
+
   return (
-    <div style={{ width: 200, height: 200 }}>
-      <Canvas camera={{ position: [0, 0.85, 3.4], fov: 40 }} gl={{ antialias: true }}>
+    <div
+      style={{ width: size, height: size, touchAction: 'none', cursor: 'grab' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      <Canvas camera={{ position: camPos, fov }} gl={{ antialias: true }}>
         <ambientLight intensity={0.7} />
         <directionalLight position={[2, 3, 2]} intensity={0.8} />
-        <BeanScene config={config} />
+        <BeanScene config={config} centerY={centerY} camPos={camPos} fov={fov} spin={spin} />
       </Canvas>
     </div>
   )

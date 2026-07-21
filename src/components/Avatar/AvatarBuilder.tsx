@@ -12,7 +12,7 @@ import {
   BODY_COLORS,
 } from '@/lib/avatarDefaults'
 import type { AvatarConfig } from '@/lib/types'
-import Avatar3D from './Avatar3D'
+import { backgroundFor } from './Avatar3D'
 
 const BeanPreview = dynamic(() => import('./BeanPreview'), { ssr: false })
 
@@ -359,13 +359,14 @@ export default function AvatarBuilder({ value, onChange, className, unlockedItem
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }} className={className}>
-      {/* Preview: show rotating 3D bean on Body/Style tabs, 2D SVG on Look/Colors */}
+      {/* Live 3D preview — drag / swipe to spin the character and see every angle.
+          Full body on Body/Style tabs, a head-framed portrait in the circle elsewhere. */}
       {(activeTab === 'body' || activeTab === 'style')
         ? <div style={{ borderRadius: 20, overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', background: '#f0f4ff', width: 200, height: 200 }}>
             <BeanPreview config={value} />
           </div>
-        : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white' }}>
-            <Avatar3D config={value} size={140} />
+        : <div style={{ borderRadius: '50%', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '4px solid white', background: backgroundFor(value.backgroundColor) }}>
+            <BeanPreview config={value} headshot size={180} />
           </div>
       }
 

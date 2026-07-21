@@ -144,7 +144,7 @@ function Shot({ config, onDone }: { config: AvatarConfig; onDone: (url: string) 
 
 // ─── Background (matches the old 2D avatar's backgrounds, incl. shop unlocks) ──
 
-function backgroundFor(bg: string): string {
+export function backgroundFor(bg: string): string {
   switch (bg) {
     case 'fire':
       return 'radial-gradient(circle at 50% 80%, #fbbf24 0%, #f97316 40%, #dc2626 100%)'
