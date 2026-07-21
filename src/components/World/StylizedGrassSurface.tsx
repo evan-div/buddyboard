@@ -147,6 +147,9 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       uGrassTop: { value: new THREE.Color('#74b83f') },
       uGrassDry: { value: new THREE.Color('#a69843') },
       uDirtColor: { value: new THREE.Color('#8f6a42') },
+      uSunDir: { value: new THREE.Vector3(-0.48, 0.76, -0.44).normalize() },
+      uTransColor: { value: new THREE.Color('#c6df63') },
+      uTransStrength: { value: 0.34 },
     },
     vertexShader: /* glsl */ `
       uniform float uTime;
@@ -155,8 +158,10 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
+      varying float vDirtCore;
       varying float vLongGrass;
-      varying float vLight;
+      varying vec3 vWorldPosition;
+      varying vec3 vBladeNormal;
       ${FIELD_NOISE_GLSL}
 
       void main() {
@@ -164,12 +169,15 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         vec3 bladeBase = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         vBladeHeight = position.y;
         vDirt = fieldDirt(bladeBase.xz);
+        vDirtCore = smoothstep(0.58, 0.92, vDirt);
         vPatch = fieldFbm(bladeBase.xz * 0.105 - vec2(4.2, 1.3));
         vLongGrass = fieldLongGrass(bladeBase.xz);
 
-        // Broad meadow masks create coherent long-grass patches, while the dirt
-        // mask still wins wherever the shared ground texture turns earthy.
-        localPosition.y *= mix(1.0, 1.60, vLongGrass) * mix(1.0, 0.14, vDirt);
+        // The broad dirt edge becomes short green turf first; only the core is
+        // pressed down to brown stubble. Meadow height composes underneath it.
+        float wearHeight = mix(1.0, 0.42, vDirt);
+        wearHeight = mix(wearHeight, 0.14, vDirtCore);
+        localPosition.y *= mix(1.0, 1.60, vLongGrass) * wearHeight;
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
         float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
@@ -177,8 +185,20 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         float bend = pow(position.y, 1.55) * gust * uWindStrength * mix(1.0, 1.22, vLongGrass);
         worldPosition.xz += uWindDir * bend;
 
-        vec2 bladeFacing = normalize(vec2(instanceMatrix[0][0], instanceMatrix[0][2]));
-        vLight = 0.78 + abs(dot(bladeFacing, normalize(vec2(0.65, 0.76)))) * 0.22;
+        // Long-grass regions share a slowly changing lean direction, so they
+        // read as coherent meadow swaths rather than individually tall blades.
+        float sweep = fieldNoise(bladeBase.xz * 0.045 + vec2(9.4, -3.2));
+        vec2 meadowPerp = vec2(-uWindDir.y, uWindDir.x);
+        vec2 meadowDir = normalize(uWindDir + meadowPerp * ((sweep - 0.5) * 0.85));
+        worldPosition.xz += meadowDir * pow(position.y, 1.45) * vLongGrass * 0.075;
+
+        mat3 instanceRotation = mat3(
+          normalize(vec3(instanceMatrix[0])),
+          normalize(vec3(instanceMatrix[1])),
+          normalize(vec3(instanceMatrix[2]))
+        );
+        vBladeNormal = normalize(mat3(modelMatrix) * instanceRotation * normal);
+        vWorldPosition = worldPosition.xyz;
         gl_Position = projectionMatrix * viewMatrix * worldPosition;
       }
     `,
@@ -187,24 +207,41 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       uniform vec3 uGrassTop;
       uniform vec3 uGrassDry;
       uniform vec3 uDirtColor;
+      uniform vec3 uSunDir;
+      uniform vec3 uTransColor;
+      uniform float uTransStrength;
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
+      varying float vDirtCore;
       varying float vLongGrass;
-      varying float vLight;
+      varying vec3 vWorldPosition;
+      varying vec3 vBladeNormal;
 
       void main() {
         float gradient = smoothstep(0.05, 0.96, vBladeHeight);
         vec3 grass = mix(uGrassBottom, uGrassTop, gradient);
         float dryMix = smoothstep(0.49, 0.78, vPatch) * 0.42;
         grass = mix(grass, uGrassDry, dryMix);
-        grass = mix(grass, uDirtColor, vDirt * 0.72);
+
+        // Separate shortening from browning: green turf at the outer edge,
+        // warm stubble through the transition, and earth color only at the core.
+        float tanStubble = smoothstep(0.28, 0.78, vDirt) * (1.0 - vDirtCore);
+        grass = mix(grass, uGrassDry, tanStubble * 0.42);
+        grass = mix(grass, uDirtColor, vDirtCore * 0.82);
         grass *= mix(vec3(1.0), vec3(0.88, 0.96, 0.84), vLongGrass * 0.22);
 
-        // A restrained warm tip lift suggests the demo's back-scatter without
-        // adding a shadow map or multi-sample lighting cost on mobile.
-        vec3 tipGlow = vec3(0.07, 0.09, 0.02) * pow(gradient, 3.0);
-        gl_FragColor = vec4(grass * vLight + tipGlow, 1.0);
+        // Stable base lighting prevents random blade rotation from sparkling.
+        // The true blade normal is reserved for directional, tip-biased light
+        // transmission when the viewer looks toward the art-directed sun.
+        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+        vec3 sunDir = normalize(uSunDir);
+        float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.5);
+        float edgeOn = 1.0 - abs(dot(normalize(vBladeNormal), sunDir));
+        float tipTransmission = pow(gradient, 2.2);
+        vec3 transmission = uTransColor * uTransStrength * backlit * edgeOn * tipTransmission;
+
+        gl_FragColor = vec4(grass * 0.94 + transmission, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
