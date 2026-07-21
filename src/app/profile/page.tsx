@@ -45,7 +45,14 @@ export default function ProfilePage() {
   const [nameError, setNameError] = useState('')
 
   const [avatarSaving, setAvatarSaving] = useState(false)
+  const [avatarSaved, setAvatarSaved] = useState(false)
+  const [avatarDirty, setAvatarDirty] = useState(false)
   const [avatarDraft, setAvatarDraft] = useState<AvatarConfig | null>(null)
+
+  // Where the "Back" button returns to. When the profile is opened from a
+  // group's plaza (via the top-bar avatar) we get a `?from=/group/<id>` param
+  // so we can send the user back where they came from instead of the dashboard.
+  const [backTo, setBackTo] = useState('/dashboard')
 
   const [coins, setCoins] = useState(0)
   const [unlockedItems, setUnlockedItems] = useState<string[]>([])
@@ -59,6 +66,15 @@ export default function ProfilePage() {
       router.push('/')
     }
   }, [user, authLoading, router])
+
+  // Read the return destination from the query string once on mount. Only
+  // accept internal paths (single leading slash) to avoid open-redirects.
+  useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get('from')
+    if (from && from.startsWith('/') && !from.startsWith('//')) {
+      setBackTo(from) // eslint-disable-line react-hooks/set-state-in-effect
+    }
+  }, [])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- initialize form fields once the async profile arrives */
@@ -97,14 +113,28 @@ export default function ProfilePage() {
     }
   }
 
+  // Edit the local draft only — nothing is persisted until the user taps the
+  // green "Save Avatar" button. This lets them experiment freely and lock in
+  // their look with an explicit save.
   function handleAvatarChange(newAvatar: AvatarConfig) {
-    if (!user || !userProfile) return
     setAvatarDraft(newAvatar)
+    setAvatarDirty(true)
+    setAvatarSaved(false)
+  }
+
+  function handleSaveAvatar() {
+    if (!user || !userProfile || !avatarDraft) return
+    const newAvatar = avatarDraft
     setAvatarSaving(true)
     const groupUpdates = (userProfile.groups ?? []).map(gId =>
       updateMemberAvatar(gId, user.uid, newAvatar)
     )
     Promise.all([updateUserAvatar(user.uid, newAvatar), ...groupUpdates])
+      .then(() => {
+        setAvatarDirty(false)
+        setAvatarSaved(true)
+        setTimeout(() => setAvatarSaved(false), 2000)
+      })
       .catch((err) => console.error('Error saving avatar:', err))
       .finally(() => setAvatarSaving(false))
   }
@@ -172,7 +202,7 @@ export default function ProfilePage() {
         {/* Header */}
         <div style={{ background: 'rgba(239,239,239,0.85)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', borderRadius: 16, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push(backTo)}
             aria-label="Back"
             style={{ color: '#111', background: 'none', border: 'none', fontSize: 20, fontWeight: 700, cursor: 'pointer', lineHeight: 1, padding: 0 }}
           >
@@ -248,6 +278,15 @@ export default function ProfilePage() {
             onChange={handleAvatarChange}
             unlockedItems={unlockedItems}
           />
+          {avatarSaved && <p style={{ color: '#42b842', fontSize: 13, margin: '12px 0 0', textAlign: 'center' }}>Saved!</p>}
+          <button
+            type="button"
+            onClick={handleSaveAvatar}
+            disabled={!avatarDirty || avatarSaving}
+            style={{ marginTop: 12, background: '#42b842', color: 'white', borderRadius: 9999, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 2, fontSize: 15, padding: 14, width: '100%', border: 'none', cursor: !avatarDirty || avatarSaving ? 'not-allowed' : 'pointer', opacity: !avatarDirty || avatarSaving ? 0.5 : 1 }}
+          >
+            {avatarSaving ? 'Saving...' : 'Save Avatar'}
+          </button>
         </div>
 
         {/* Shop Section */}

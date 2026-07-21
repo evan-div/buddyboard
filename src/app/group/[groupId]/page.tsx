@@ -317,7 +317,7 @@ export default function GroupPage() {
             unreadCount={notifications.filter((n) => !n.read).length}
             onBellClick={() => setShowNotifPanel(true)}
             avatar={userProfile.avatar ?? null}
-            onAvatarClick={() => router.push('/profile')}
+            onAvatarClick={() => router.push(`/profile?from=${encodeURIComponent(`/group/${groupId}`)}`)}
           />
           <BottomTabBar
             tabs={[
