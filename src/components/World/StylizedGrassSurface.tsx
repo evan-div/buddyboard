@@ -8,8 +8,10 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 // grass/dirt masks, color variation, and world-space wind. The implementation is
 // intentionally self-contained so the Plaza does not need the demo's GLB or Leva.
 
-const MOBILE_BLADES = 28_000
-const DESKTOP_BLADES = 46_000
+// Each instance is a two-blade crossed cluster. This keeps a full silhouette
+// from every camera angle without paying for 40k separate instance matrices.
+const MOBILE_CLUSTERS = 20_000 // 40k visible blades / 120k triangles
+const DESKTOP_CLUSTERS = 30_000 // 60k visible blades / 180k triangles
 const PATCH_W = FSIZE / 10
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -38,7 +40,7 @@ const FIELD_NOISE_GLSL = /* glsl */ `
 
   float fieldDirt(vec2 worldXZ) {
     float warped = fieldFbm(worldXZ * 0.16 + vec2(2.4, -1.7));
-    return smoothstep(0.61, 0.72, warped);
+    return smoothstep(0.66, 0.77, warped);
   }
 `
 
@@ -53,20 +55,31 @@ function makePlazaShape(): THREE.Shape {
 }
 
 function makeBladeGeometry(): THREE.BufferGeometry {
-  // Three joined triangles give the blade a tapered, bendable silhouette while
-  // staying below the triangle budget of the old ~100k one-triangle field.
+  // Two slightly mismatched tapered blades cross at 90 degrees. A cluster reads
+  // as grass even when one blade is edge-on, and its six triangles are still a
+  // predictable mobile budget.
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute([
-    -0.5, 0.00, 0,
-     0.5, 0.00, 0,
-    -0.34, 0.48, 0,
-     0.34, 0.48, 0,
-     0.00, 1.00, 0,
+    // Blade A — X-facing, full height
+    -0.50, 0.00, -0.02,
+     0.50, 0.00, -0.02,
+    -0.34, 0.48, -0.02,
+     0.34, 0.48, -0.02,
+     0.00, 1.00, -0.02,
+    // Blade B — Z-facing, offset and a little shorter
+     0.02, 0.00, -0.46,
+     0.02, 0.00,  0.46,
+     0.02, 0.44, -0.31,
+     0.02, 0.44,  0.31,
+     0.02, 0.90,  0.00,
   ], 3))
   geometry.setIndex([
     0, 1, 2,
     1, 3, 2,
     2, 3, 4,
+    5, 6, 7,
+    6, 8, 7,
+    7, 8, 9,
   ])
   geometry.computeVertexNormals()
   return geometry
@@ -198,11 +211,11 @@ function makeGroundTexture(): THREE.CanvasTexture {
       const worldZ = (py / (size - 1) - 0.5) * FSIZE
       const checker = (Math.floor((worldX + FSIZE / 2) / PATCH_W)
         + Math.floor((worldZ + FSIZE / 2) / PATCH_W)) & 1
-      grass.copy(dark).lerp(light, checker * 0.52)
+      grass.copy(dark).lerp(light, checker * 0.38)
 
       const patch = fieldFbm(worldX * 0.105 - 4.2, worldZ * 0.105 - 1.3)
       grass.lerp(dry, smoothstep(0.49, 0.78, patch) * 0.32)
-      const dirtMask = smoothstep(0.61, 0.72, fieldFbm(worldX * 0.16 + 2.4, worldZ * 0.16 - 1.7))
+      const dirtMask = smoothstep(0.66, 0.77, fieldFbm(worldX * 0.16 + 2.4, worldZ * 0.16 - 1.7))
       const variation = THREE.MathUtils.lerp(0.82, 1.15, fieldNoise(worldX * 2.6, worldZ * 2.6))
       dirtVar.copy(dirt).multiplyScalar(variation)
       grass.lerp(dirtVar, dirtMask)
@@ -231,7 +244,7 @@ export default function StylizedGrassSurface({
   mobile: boolean
   reducedMotion: boolean
 }) {
-  const bladeCount = mobile ? MOBILE_BLADES : DESKTOP_BLADES
+  const clusterCount = mobile ? MOBILE_CLUSTERS : DESKTOP_CLUSTERS
   const bladesRef = useRef<THREE.InstancedMesh>(null)
   const plazaShape = useMemo(() => makePlazaShape(), [])
   const groundGeometry = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
@@ -246,24 +259,24 @@ export default function StylizedGrassSurface({
     const random = seededRandom(0x62756464 + (mobile ? 1 : 0))
     const dummy = new THREE.Object3D()
     let placed = 0
-    while (placed < bladeCount) {
+    while (placed < clusterCount) {
       const x = (random() - 0.5) * FSIZE * 1.06
       const z = (random() - 0.5) * FSIZE * 1.06
       const theta = Math.atan2(z, x)
       if (Math.hypot(x, z) > plazaEdgeRadius(theta) - 0.08) continue
 
-      const height = 0.13 + random() * 0.065
-      const width = 0.034 + random() * 0.018
+      const height = 0.16 + random() * 0.075
+      const width = 0.043 + random() * 0.022
       dummy.position.set(x, 0.006, z)
       dummy.rotation.set(0, random() * Math.PI * 2, 0)
-      dummy.scale.set(width, height, 1)
+      dummy.scale.set(width, height, width)
       dummy.updateMatrix()
       mesh.setMatrixAt(placed, dummy.matrix)
       placed++
     }
     mesh.instanceMatrix.needsUpdate = true
     mesh.computeBoundingSphere()
-  }, [bladeCount, mobile])
+  }, [clusterCount, mobile])
 
   useFrame((_, delta) => {
     if (!reducedMotion) {
@@ -283,7 +296,7 @@ export default function StylizedGrassSurface({
       </mesh>
       <instancedMesh
         ref={bladesRef}
-        args={[bladeGeometry, bladeMaterial, bladeCount]}
+        args={[bladeGeometry, bladeMaterial, clusterCount]}
         frustumCulled={false}
       />
     </>
