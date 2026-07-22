@@ -13,8 +13,8 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 const MOBILE_CLUSTERS = 38_000 // 76k visible blades / 228k triangles
 const DESKTOP_CLUSTERS = 52_000 // 104k visible blades / 312k triangles
 const MAX_INTERACTORS = 10
-const INTERACTOR_RADIUS = 0.38
-const INTERACTOR_FALLOFF = 0.46
+const INTERACTOR_RADIUS = 0.26
+const INTERACTOR_FALLOFF = 0.29
 const PATCH_W = FSIZE / 10
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -211,7 +211,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         wearHeight = mix(wearHeight, 0.14, vDirtCore);
         localPosition.y *= mix(1.0, 1.60, vLongGrass)
           * wearHeight
-          * mix(1.0, 0.30, characterInfluence);
+          * mix(1.0, 0.52, characterInfluence);
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
         float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
@@ -231,7 +231,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         worldPosition.xz += characterAway
           * pow(position.y, 1.35)
           * characterInfluence
-          * 0.13;
+          * 0.075;
 
         mat3 instanceRotation = mat3(
           normalize(vec3(instanceMatrix[0])),
