@@ -99,7 +99,17 @@ function makeBladeMat(
 
 const N_ROCKS = 90
 
-function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean; lowerGraphics: boolean; reducedMotion: boolean }) {
+function GrassFloor({
+  mobile,
+  lowerGraphics,
+  reducedMotion,
+  characterGroups,
+}: {
+  mobile: boolean
+  lowerGraphics: boolean
+  reducedMotion: boolean
+  characterGroups: React.RefObject<Map<string, THREE.Group>>
+}) {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
   const rocksRef = useRef<THREE.InstancedMesh>(null)
@@ -272,7 +282,11 @@ function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean;
           <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
         </>
       ) : (
-        <StylizedGrassSurface mobile={mobile} reducedMotion={reducedMotion} />
+        <StylizedGrassSurface
+          mobile={mobile}
+          reducedMotion={reducedMotion}
+          characterGroups={characterGroups}
+        />
       )}
       {/* Dirt base — the plaza outline extruded deep below any camera angle */}
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
@@ -2022,7 +2036,12 @@ function Scene({
       <Suspense fallback={null}>
         <Clouds />
       </Suspense>
-      <GrassFloor mobile={mobile} lowerGraphics={lowerGraphics} reducedMotion={reducedMotion} />
+      <GrassFloor
+        mobile={mobile}
+        lowerGraphics={lowerGraphics}
+        reducedMotion={reducedMotion}
+        characterGroups={charGroups}
+      />
       <BlobShadows members={members} charGroups={charGroups} />
       {members.map((member) => (
         <MiiCharacter
