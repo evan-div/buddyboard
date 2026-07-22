@@ -6,6 +6,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
+import StylizedGrassSurface from './StylizedGrassSurface'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
@@ -98,7 +99,7 @@ function makeBladeMat(
 
 const N_ROCKS = 90
 
-function GrassFloor() {
+function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean; lowerGraphics: boolean; reducedMotion: boolean }) {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
   const rocksRef = useRef<THREE.InstancedMesh>(null)
@@ -191,6 +192,7 @@ function GrassFloor() {
   const darkMat  = useMemo(() => makeBladeMat(DARK_COLOR, timeUniforms), [])
 
   useEffect(() => {
+    if (!lowerGraphics) return
     const dummy = new THREE.Object3D()
     let li = 0, di = 0
     for (let ix = 0; ix < PATCH_GRID; ix++) {
@@ -224,7 +226,7 @@ function GrassFloor() {
       darkRef.current.count = di
       darkRef.current.instanceMatrix.needsUpdate = true
     }
-  }, [])
+  }, [lowerGraphics])
 
   // Rocks half-buried in the dirt wall around the rim — denser near the top
   // where the wall is most visible, thinning out below
@@ -254,19 +256,24 @@ function GrassFloor() {
   }, [])
 
   useFrame((_, delta) => {
+    if (!lowerGraphics || reducedMotion) return
     for (const u of timeUniforms.current) u.value += delta
   })
 
   return (
     <group>
-      {/* Rounded checkerboard top — rotated to lie flat, DoubleSide so the
-          face stays visible with the same orientation as the dirt below */}
-      <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-        <meshStandardMaterial map={baseTex} roughness={0.95} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Blade instances sit on top for 3D raised-grass texture */}
-      <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
-      <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
+      {lowerGraphics ? (
+        <>
+          {/* Original one-triangle checker grass remains the explicit fallback. */}
+          <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+            <meshStandardMaterial map={baseTex} roughness={0.95} side={THREE.DoubleSide} />
+          </mesh>
+          <instancedMesh ref={lightRef} args={[bladeGeo, lightMat, BLADES_EACH]} frustumCulled={false} />
+          <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
+        </>
+      ) : (
+        <StylizedGrassSurface mobile={mobile} reducedMotion={reducedMotion} />
+      )}
       {/* Dirt base — the plaza outline extruded deep below any camera angle */}
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <meshStandardMaterial map={dirtTex} roughness={0.95} />
@@ -1594,6 +1601,8 @@ function Scene({
   animatingUid,
   animationType,
   mobile,
+  lowerGraphics,
+  reducedMotion,
 }: {
   members: GroupMember[]
   groupId: string
@@ -1606,6 +1615,8 @@ function Scene({
   animatingUid: string | null
   animationType: 'celebrate' | 'shame' | null
   mobile: boolean
+  lowerGraphics: boolean
+  reducedMotion: boolean
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
@@ -2011,7 +2022,7 @@ function Scene({
       <Suspense fallback={null}>
         <Clouds />
       </Suspense>
-      <GrassFloor />
+      <GrassFloor mobile={mobile} lowerGraphics={lowerGraphics} reducedMotion={reducedMotion} />
       <BlobShadows members={members} charGroups={charGroups} />
       {members.map((member) => (
         <MiiCharacter
@@ -2180,6 +2191,8 @@ interface Props {
   inviteCode?: string
   remainingGive: number
   remainingTake: number
+  lowerGraphics?: boolean
+  reducedMotion?: boolean
   presets?: PlazaPreset[]
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
@@ -2187,7 +2200,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2252,8 +2265,8 @@ export default function MiiPlaza({
     >
       <Canvas
         camera={{ position: [8, 6, 8], fov: 60 }}
-        dpr={[1, 2]}
-        gl={{ antialias: true, alpha: true }}
+        dpr={lowerGraphics ? 1 : [1, 2]}
+        gl={{ antialias: !lowerGraphics, alpha: true, powerPreference: lowerGraphics ? 'low-power' : 'high-performance' }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={() => { if (selectedMember) handleClose() }}
       >
@@ -2270,6 +2283,8 @@ export default function MiiPlaza({
             animatingUid={animatingUid}
             animationType={animationType}
             mobile={isMobile}
+            lowerGraphics={lowerGraphics}
+            reducedMotion={reducedMotion}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
