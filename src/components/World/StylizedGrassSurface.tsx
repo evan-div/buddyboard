@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FSIZE, plazaEdgeRadius } from './plazaMath'
@@ -12,6 +12,9 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 // inexpensive while putting enough separate roots on screen to read as a lawn.
 const MOBILE_CLUSTERS = 38_000 // 76k visible blades / 228k triangles
 const DESKTOP_CLUSTERS = 52_000 // 104k visible blades / 312k triangles
+const MAX_INTERACTORS = 10
+const INTERACTOR_RADIUS = 0.38
+const INTERACTOR_FALLOFF = 0.46
 const PATCH_W = FSIZE / 10
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -150,11 +153,17 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       uSunDir: { value: new THREE.Vector3(-0.48, 0.76, -0.44).normalize() },
       uTransColor: { value: new THREE.Color('#c6df63') },
       uTransStrength: { value: 0.34 },
+      uInteractorCount: { value: 0 },
+      uInteractors: {
+        value: Array.from({ length: MAX_INTERACTORS }, () => new THREE.Vector4()),
+      },
     },
     vertexShader: /* glsl */ `
       uniform float uTime;
       uniform float uWindStrength;
       uniform vec2 uWindDir;
+      uniform int uInteractorCount;
+      uniform vec4 uInteractors[${MAX_INTERACTORS}];
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
@@ -173,11 +182,36 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         vPatch = fieldFbm(bladeBase.xz * 0.105 - vec2(4.2, 1.3));
         vLongGrass = fieldLongGrass(bladeBase.xz);
 
+        // Visible, grounded Miis are soft influence discs. The strongest nearby
+        // character wins so overlapping groups never crush the grass twice.
+        float characterInfluence = 0.0;
+        vec2 characterAway = vec2(1.0, 0.0);
+        for (int i = 0; i < ${MAX_INTERACTORS}; i++) {
+          if (i >= uInteractorCount) break;
+          vec4 interactor = uInteractors[i];
+          vec2 offset = bladeBase.xz - interactor.xy;
+          float distanceToCharacter = length(offset);
+          float influence = (1.0 - smoothstep(
+            interactor.z,
+            interactor.z + ${INTERACTOR_FALLOFF.toFixed(2)},
+            distanceToCharacter
+          )) * interactor.w;
+          if (influence > characterInfluence) {
+            characterInfluence = influence;
+            characterAway = distanceToCharacter > 0.0001
+              ? offset / distanceToCharacter
+              : vec2(1.0, 0.0);
+          }
+        }
+
         // The broad dirt edge becomes short green turf first; only the core is
-        // pressed down to brown stubble. Meadow height composes underneath it.
+        // pressed down to brown stubble. Character trampling composes last so it
+        // remains visible even in the tallest meadow patches.
         float wearHeight = mix(1.0, 0.42, vDirt);
         wearHeight = mix(wearHeight, 0.14, vDirtCore);
-        localPosition.y *= mix(1.0, 1.60, vLongGrass) * wearHeight;
+        localPosition.y *= mix(1.0, 1.60, vLongGrass)
+          * wearHeight
+          * mix(1.0, 0.30, characterInfluence);
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
         float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
@@ -191,6 +225,13 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         vec2 meadowPerp = vec2(-uWindDir.y, uWindDir.x);
         vec2 meadowDir = normalize(uWindDir + meadowPerp * ((sweep - 0.5) * 0.85));
         worldPosition.xz += meadowDir * pow(position.y, 1.45) * vLongGrass * 0.075;
+
+        // Pressed blades also splay away from the character instead of merely
+        // scaling down, which gives the contact patch a physical rim.
+        worldPosition.xz += characterAway
+          * pow(position.y, 1.35)
+          * characterInfluence
+          * 0.13;
 
         mat3 instanceRotation = mat3(
           normalize(vec3(instanceMatrix[0])),
@@ -324,9 +365,11 @@ function makeGroundTexture(): THREE.CanvasTexture {
 export default function StylizedGrassSurface({
   mobile,
   reducedMotion,
+  characterGroups,
 }: {
   mobile: boolean
   reducedMotion: boolean
+  characterGroups?: RefObject<Map<string, THREE.Group>>
 }) {
   const clusterCount = mobile ? MOBILE_CLUSTERS : DESKTOP_CLUSTERS
   const bladesRef = useRef<THREE.InstancedMesh>(null)
@@ -335,6 +378,7 @@ export default function StylizedGrassSurface({
   const bladeGeometry = useMemo(() => makeBladeGeometry(), [])
   const bladeMaterial = useMemo(() => makeBladeMaterial(), [])
   const groundTexture = useMemo(() => makeGroundTexture(), [])
+  const interactorCandidates = useRef<THREE.Group[]>([])
 
   useEffect(() => {
     const mesh = bladesRef.current
@@ -357,7 +401,27 @@ export default function StylizedGrassSurface({
     mesh.computeBoundingSphere()
   }, [clusterCount, mobile])
 
-  useFrame((_, delta) => {
+  useFrame(({ camera }, delta) => {
+    const candidates = interactorCandidates.current
+    candidates.length = 0
+    if (characterGroups?.current) {
+      for (const group of characterGroups.current.values()) {
+        if (group.visible && group.position.y < 1.05) candidates.push(group)
+      }
+      candidates.sort((a, b) =>
+        a.position.distanceToSquared(camera.position)
+        - b.position.distanceToSquared(camera.position))
+    }
+
+    const slots = bladeMaterial.uniforms.uInteractors.value as THREE.Vector4[]
+    const count = Math.min(candidates.length, MAX_INTERACTORS)
+    for (let i = 0; i < count; i++) {
+      const group = candidates[i]
+      const groundedStrength = THREE.MathUtils.clamp(1 - Math.max(0, group.position.y) / 1.05, 0, 1)
+      slots[i].set(group.position.x, group.position.z, INTERACTOR_RADIUS, groundedStrength)
+    }
+    bladeMaterial.uniforms.uInteractorCount.value = count
+
     if (!reducedMotion) {
       bladeMaterial.uniforms.uTime.value =
         (bladeMaterial.uniforms.uTime.value + Math.min(delta, 0.1)) % 3600
