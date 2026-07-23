@@ -158,7 +158,7 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
       uMeadowScale: { value: 0.075 },
       uMeadowAmount: { value: 1 },
       uMeadowHeight: { value: 1.6 },
-      uGenerationSeed: { value: 0 },
+      uGenerationSeed: { value: new THREE.Vector2() },
       uGrassBottom: { value: new THREE.Color('#315f25') },
       uGrassTop: { value: new THREE.Color('#74b83f') },
       uGrassDry: { value: new THREE.Color('#a69843') },
