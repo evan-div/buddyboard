@@ -148,6 +148,7 @@ export interface MiiCharacterProps {
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   heldBy?: string | null   // display name of whoever is carrying this character
+  visible?: boolean
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -155,7 +156,7 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, heldBy = null, onPickupStart, onGroupMount,
+  dragMode = null, heldBy = null, visible = true, onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -707,6 +708,7 @@ export default function MiiCharacter({
   return (
     <group
       ref={groupRef}
+      visible={visible}
       onPointerDown={e => {
         e.stopPropagation()
         if (!dragMode) onPickupStart?.()
@@ -716,7 +718,7 @@ export default function MiiCharacter({
 
       {celebrationType === 'celebrate' && <CelebrationParticles bodyTop={dims.bodyTop} />}
 
-      {!dragMode && (() => {
+      {visible && !dragMode && (() => {
         const badge  = highestBadge(member.badges ?? [])
         const streak = member.currentStreak ?? 0
         if (!badge && streak < 3) return null
@@ -730,13 +732,13 @@ export default function MiiCharacter({
         )
       })()}
 
-      {celebrationType === 'shame' && (
+      {visible && celebrationType === 'shame' && (
         <Html position={[0, overlayY - 0.1, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>👎</div>
         </Html>
       )}
 
-      {dragMode === 'held' && heldBy && (
+      {visible && dragMode === 'held' && heldBy && (
         <Html position={[0, overlayY + 0.25, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{
             background: 'rgba(15,15,25,0.78)', color: '#fff',
@@ -750,19 +752,19 @@ export default function MiiCharacter({
         </Html>
       )}
 
-      {dragMode === 'dazed' && (
+      {visible && dragMode === 'dazed' && (
         <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>💫</div>
         </Html>
       )}
 
-      {dragMode === 'waking' && (
+      {visible && dragMode === 'waking' && (
         <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😵</div>
         </Html>
       )}
 
-      {dragMode === 'mad' && (
+      {visible && dragMode === 'mad' && (
         <Html position={[0, overlayY, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none', userSelect: 'none' }}>
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😤</div>
         </Html>

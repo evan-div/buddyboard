@@ -10,9 +10,19 @@ import { FSIZE, plazaEdgeRadius } from './plazaMath'
 
 // Each instance is a two-blade crossed cluster. The denser mobile field remains
 // inexpensive while putting enough separate roots on screen to read as a lawn.
-const MOBILE_CLUSTERS = 38_000 // 76k visible blades / 228k triangles
-const DESKTOP_CLUSTERS = 52_000 // 104k visible blades / 312k triangles
 const PATCH_W = FSIZE / 10
+
+export type GrassTuning = {
+  bladeCount: number
+  bladeHeight: number
+  bladeWidth: number
+  randomness: number
+  seed: number
+  meadowCount: number
+  meadowHeight: number
+  windSpeed: number
+  windStrength: number
+}
 
 const FIELD_NOISE_GLSL = /* glsl */ `
   float fieldHash(vec2 p) {
@@ -44,9 +54,9 @@ const FIELD_NOISE_GLSL = /* glsl */ `
   }
 
   float fieldLongGrass(vec2 worldXZ) {
-    float meadow = fieldFbm(worldXZ * 0.075 + vec2(-6.8, 4.1));
-    float edgeVariation = fieldNoise(worldXZ * 0.22 + vec2(3.7, -8.2));
-    return smoothstep(0.58, 0.70, meadow) * mix(0.82, 1.0, edgeVariation);
+    float meadow = fieldFbm(worldXZ * uMeadowScale + vec2(-6.8, 4.1) + uGenerationSeed);
+    float edgeVariation = fieldNoise(worldXZ * 0.22 + vec2(3.7, -8.2) + uGenerationSeed);
+    return smoothstep(0.58, 0.70, meadow) * mix(0.82, 1.0, edgeVariation) * uMeadowAmount;
   }
 `
 
@@ -99,7 +109,7 @@ function seededRandom(seed: number) {
   }
 }
 
-function makeJitteredPositions(count: number, seed: number): [number, number][] {
+function makeJitteredPositions(count: number, seed: number, randomness: number): [number, number][] {
   const span = FSIZE * 1.06
   let gridSize = Math.ceil(Math.sqrt(count / 0.8))
 
@@ -113,8 +123,9 @@ function makeJitteredPositions(count: number, seed: number): [number, number][] 
 
     for (let row = 0; row < gridSize; row++) {
       for (let column = 0; column < gridSize; column++) {
-        const x = -span / 2 + (column + 0.5 + (random() - 0.5) * 0.88) * cellSize
-        const z = -span / 2 + (row + 0.5 + (random() - 0.5) * 0.88) * cellSize
+        const jitter = THREE.MathUtils.lerp(0.05, 0.98, randomness)
+        const x = -span / 2 + (column + 0.5 + (random() - 0.5) * jitter) * cellSize
+        const z = -span / 2 + (row + 0.5 + (random() - 0.5) * jitter) * cellSize
         const theta = Math.atan2(z, x)
         if (Math.hypot(x, z) <= plazaEdgeRadius(theta) - 0.08) {
           positions.push([x, z])
@@ -142,7 +153,12 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
     uniforms: {
       uTime: { value: 0 },
       uWindStrength: { value: 0.075 },
+      uWindSpeed: { value: 1 },
       uWindDir: { value: new THREE.Vector2(-0.82, -0.57).normalize() },
+      uMeadowScale: { value: 0.075 },
+      uMeadowAmount: { value: 1 },
+      uMeadowHeight: { value: 1.6 },
+      uGenerationSeed: { value: 0 },
       uGrassBottom: { value: new THREE.Color('#315f25') },
       uGrassTop: { value: new THREE.Color('#74b83f') },
       uGrassDry: { value: new THREE.Color('#a69843') },
@@ -154,7 +170,12 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
     vertexShader: /* glsl */ `
       uniform float uTime;
       uniform float uWindStrength;
+      uniform float uWindSpeed;
       uniform vec2 uWindDir;
+      uniform float uMeadowScale;
+      uniform float uMeadowAmount;
+      uniform float uMeadowHeight;
+      uniform vec2 uGenerationSeed;
       varying float vBladeHeight;
       varying float vPatch;
       varying float vDirt;
@@ -177,11 +198,11 @@ function makeBladeMaterial(): THREE.ShaderMaterial {
         // pressed down to brown stubble. Meadow height composes underneath it.
         float wearHeight = mix(1.0, 0.42, vDirt);
         wearHeight = mix(wearHeight, 0.14, vDirtCore);
-        localPosition.y *= mix(1.0, 1.60, vLongGrass) * wearHeight;
+        localPosition.y *= mix(1.0, uMeadowHeight, vLongGrass) * wearHeight;
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(localPosition, 1.0);
-        float gust = sin(uTime * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
-        gust += sin(uTime * 2.05 + dot(bladeBase.xz, vec2(-0.13, 0.51))) * 0.38;
+        float gust = sin(uTime * uWindSpeed * 1.20 + dot(bladeBase.xz, vec2(0.38, 0.27)));
+        gust += sin(uTime * uWindSpeed * 2.05 + dot(bladeBase.xz, vec2(-0.13, 0.51))) * 0.38;
         float bend = pow(position.y, 1.55) * gust * uWindStrength * mix(1.0, 1.22, vLongGrass);
         worldPosition.xz += uWindDir * bend;
 
@@ -322,13 +343,13 @@ function makeGroundTexture(): THREE.CanvasTexture {
 }
 
 export default function StylizedGrassSurface({
-  mobile,
   reducedMotion,
+  tuning,
 }: {
-  mobile: boolean
   reducedMotion: boolean
+  tuning: GrassTuning
 }) {
-  const clusterCount = mobile ? MOBILE_CLUSTERS : DESKTOP_CLUSTERS
+  const clusterCount = Math.max(1, Math.round(tuning.bladeCount / 2))
   const bladesRef = useRef<THREE.InstancedMesh>(null)
   const plazaShape = useMemo(() => makePlazaShape(), [])
   const groundGeometry = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
@@ -337,25 +358,51 @@ export default function StylizedGrassSurface({
   const groundTexture = useMemo(() => makeGroundTexture(), [])
 
   useEffect(() => {
+    bladeMaterial.uniforms.uWindSpeed.value = tuning.windSpeed
+    bladeMaterial.uniforms.uWindStrength.value = tuning.windStrength
+    bladeMaterial.uniforms.uMeadowScale.value = tuning.meadowCount * 0.0125
+    bladeMaterial.uniforms.uMeadowAmount.value = tuning.meadowCount > 0 ? 1 : 0
+    bladeMaterial.uniforms.uMeadowHeight.value = tuning.meadowHeight
+    bladeMaterial.uniforms.uGenerationSeed.value.set(
+      (tuning.seed % 97) * 0.173,
+      (tuning.seed % 53) * -0.219,
+    )
+  }, [
+    bladeMaterial,
+    tuning.meadowCount,
+    tuning.meadowHeight,
+    tuning.seed,
+    tuning.windSpeed,
+    tuning.windStrength,
+  ])
+
+  useEffect(() => {
     const mesh = bladesRef.current
     if (!mesh) return
 
-    const seed = 0x62756464 + (mobile ? 1 : 0)
+    const seed = Math.round(tuning.seed)
     const random = seededRandom(seed ^ 0x47726173)
-    const positions = makeJitteredPositions(clusterCount, seed)
+    const positions = makeJitteredPositions(clusterCount, seed, tuning.randomness)
     const dummy = new THREE.Object3D()
     positions.forEach(([x, z], placed) => {
-      const height = 0.175 + random() * 0.08
-      const width = 0.046 + random() * 0.024
+      const height = tuning.bladeHeight * (1 + (random() - 0.5) * tuning.randomness)
+      const width = tuning.bladeWidth * (1 + (random() - 0.5) * tuning.randomness)
       dummy.position.set(x, 0.006, z)
-      dummy.rotation.set(0, random() * Math.PI * 2, 0)
+      dummy.rotation.set(0, random() * Math.PI * 2 * tuning.randomness, 0)
       dummy.scale.set(width, height, width)
       dummy.updateMatrix()
       mesh.setMatrixAt(placed, dummy.matrix)
     })
+    mesh.count = clusterCount
     mesh.instanceMatrix.needsUpdate = true
     mesh.computeBoundingSphere()
-  }, [clusterCount, mobile])
+  }, [
+    clusterCount,
+    tuning.bladeHeight,
+    tuning.bladeWidth,
+    tuning.randomness,
+    tuning.seed,
+  ])
 
   useFrame((_, delta) => {
     if (!reducedMotion) {

@@ -6,7 +6,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
-import StylizedGrassSurface from './StylizedGrassSurface'
+import StylizedGrassSurface, { type GrassTuning } from './StylizedGrassSurface'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
@@ -97,9 +97,19 @@ function makeBladeMat(
   return mat
 }
 
-const N_ROCKS = 90
+const MAX_ROCKS = 500
 
-function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean; lowerGraphics: boolean; reducedMotion: boolean }) {
+function GrassFloor({
+  lowerGraphics,
+  reducedMotion,
+  grass,
+  rockCount,
+}: {
+  lowerGraphics: boolean
+  reducedMotion: boolean
+  grass: GrassTuning
+  rockCount: number
+}) {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
   const rocksRef = useRef<THREE.InstancedMesh>(null)
@@ -237,7 +247,7 @@ function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean;
     const color = new THREE.Color()
     let seed = 12345
     const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
-    for (let i = 0; i < N_ROCKS; i++) {
+    for (let i = 0; i < rockCount; i++) {
       const th   = rng() * Math.PI * 2
       const y    = -(0.3 + Math.pow(rng(), 1.7) * 9.5)
       const size = 0.18 + rng() * 0.55
@@ -251,13 +261,14 @@ function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean;
       color.setRGB(shade, shade * (0.9 + rng() * 0.1), shade * 0.82)
       mesh.setColorAt(i, color)
     }
+    mesh.count = rockCount
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
-  }, [])
+  }, [rockCount])
 
   useFrame((_, delta) => {
     if (!lowerGraphics || reducedMotion) return
-    for (const u of timeUniforms.current) u.value += delta
+    for (const u of timeUniforms.current) u.value += delta * grass.windSpeed
   })
 
   return (
@@ -272,14 +283,14 @@ function GrassFloor({ mobile, lowerGraphics, reducedMotion }: { mobile: boolean;
           <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
         </>
       ) : (
-        <StylizedGrassSurface mobile={mobile} reducedMotion={reducedMotion} />
+        <StylizedGrassSurface reducedMotion={reducedMotion} tuning={grass} />
       )}
       {/* Dirt base — the plaza outline extruded deep below any camera angle */}
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <meshStandardMaterial map={dirtTex} roughness={0.95} />
       </mesh>
       {/* Rocks poking out of the dirt wall */}
-      <instancedMesh ref={rocksRef} args={[undefined, undefined, N_ROCKS]}>
+      <instancedMesh ref={rocksRef} args={[undefined, undefined, MAX_ROCKS]}>
         <dodecahedronGeometry args={[1, 0]} />
         <meshStandardMaterial roughness={0.9} flatShading />
       </instancedMesh>
@@ -301,9 +312,24 @@ type SceneTuning = {
   cameraDistance: number
   focalLength: number
   cameraTilt: number
+  minZoomDistance: number
+  maxZoomDistance: number
+  minCameraTilt: number
+  maxCameraTilt: number
   panSpeed: number
   cameraDecay: number
   cloudAmount: number
+  cloudSpeed: number
+  grassBladeCount: number
+  grassBladeHeight: number
+  grassBladeWidth: number
+  grassRandomness: number
+  grassSeed: number
+  grassMeadowCount: number
+  grassMeadowHeight: number
+  windSpeed: number
+  windStrength: number
+  rockCount: number
   charactersVisible: boolean
   uiVisible: boolean
   autoOrbit: boolean
@@ -315,9 +341,24 @@ const DEFAULT_SCENE_TUNING: SceneTuning = {
   cameraTilt: THREE.MathUtils.radToDeg(Math.asin(
     (DEFAULT_CAM_POS.y - DEFAULT_CAM_LOOK.y) / DEFAULT_CAM_POS.distanceTo(DEFAULT_CAM_LOOK),
   )),
+  minZoomDistance: 3,
+  maxZoomDistance: 40,
+  minCameraTilt: 10,
+  maxCameraTilt: 80,
   panSpeed: 1,
   cameraDecay: 0.08,
   cloudAmount: 100,
+  cloudSpeed: 1,
+  grassBladeCount: 104_000,
+  grassBladeHeight: 0.215,
+  grassBladeWidth: 0.058,
+  grassRandomness: 0.35,
+  grassSeed: 6_764,
+  grassMeadowCount: 6,
+  grassMeadowHeight: 1.6,
+  windSpeed: 1,
+  windStrength: 0.075,
+  rockCount: 90,
   charactersVisible: true,
   uiVisible: true,
   autoOrbit: false,
@@ -436,20 +477,71 @@ function SceneControls({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const sliders: {
-    key: keyof Pick<SceneTuning, 'cameraDistance' | 'focalLength' | 'cameraTilt' | 'panSpeed' | 'cameraDecay' | 'cloudAmount'>
+  type NumericTuningKey =
+    | 'cameraDistance' | 'focalLength' | 'cameraTilt'
+    | 'minZoomDistance' | 'maxZoomDistance' | 'minCameraTilt' | 'maxCameraTilt'
+    | 'panSpeed' | 'cameraDecay' | 'cloudAmount' | 'cloudSpeed'
+    | 'grassBladeCount' | 'grassBladeHeight' | 'grassBladeWidth'
+    | 'grassRandomness' | 'grassSeed' | 'grassMeadowCount' | 'grassMeadowHeight'
+    | 'windSpeed' | 'windStrength' | 'rockCount'
+
+  type SliderDefinition = {
+    key: NumericTuningKey
     label: string
     min: number
     max: number
     step: number
     valueLabel: (value: number) => string
+  }
+
+  const sliderSections: {
+    title: string
+    description?: string
+    sliders: SliderDefinition[]
   }[] = [
-    { key: 'cameraDistance', label: 'Zoom distance', min: 4, max: 24, step: 0.1, valueLabel: (v) => v.toFixed(1) },
-    { key: 'focalLength', label: 'Focal length', min: 12, max: 85, step: 0.5, valueLabel: (v) => `${v.toFixed(1)} mm` },
-    { key: 'cameraTilt', label: 'Camera tilt', min: 12, max: 70, step: 1, valueLabel: (v) => `${Math.round(v)}°` },
-    { key: 'panSpeed', label: 'Pan speed', min: 0.1, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
-    { key: 'cameraDecay', label: 'Pan decay', min: 0.01, max: 0.3, step: 0.01, valueLabel: (v) => v.toFixed(2) },
-    { key: 'cloudAmount', label: 'Cloud amount', min: 0, max: 100, step: 1, valueLabel: (v) => `${Math.round(v)}%` },
+    {
+      title: 'Camera preview',
+      sliders: [
+        { key: 'cameraDistance', label: 'Current zoom', min: tuning.minZoomDistance, max: tuning.maxZoomDistance, step: 0.1, valueLabel: (v) => v.toFixed(1) },
+        { key: 'focalLength', label: 'Focal length', min: 5, max: 200, step: 0.5, valueLabel: (v) => `${v.toFixed(1)} mm` },
+        { key: 'cameraTilt', label: 'Current tilt', min: tuning.minCameraTilt, max: tuning.maxCameraTilt, step: 1, valueLabel: (v) => `${Math.round(v)}°` },
+      ],
+    },
+    {
+      title: 'User camera limits',
+      description: 'These clamp mouse, wheel, touch, and pinch controls.',
+      sliders: [
+        { key: 'minZoomDistance', label: 'Closest zoom', min: 0.25, max: 100, step: 0.25, valueLabel: (v) => v.toFixed(2) },
+        { key: 'maxZoomDistance', label: 'Farthest zoom', min: 1, max: 500, step: 1, valueLabel: (v) => v.toFixed(0) },
+        { key: 'minCameraTilt', label: 'Lowest tilt', min: 1, max: 88, step: 1, valueLabel: (v) => `${Math.round(v)}°` },
+        { key: 'maxCameraTilt', label: 'Highest tilt', min: 2, max: 89, step: 1, valueLabel: (v) => `${Math.round(v)}°` },
+        { key: 'panSpeed', label: 'Pan speed', min: 0.1, max: 5, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'cameraDecay', label: 'Pan decay', min: 0.01, max: 0.3, step: 0.01, valueLabel: (v) => v.toFixed(2) },
+      ],
+    },
+    {
+      title: 'Grass generation',
+      description: 'Count and generation changes rebuild the field live.',
+      sliders: [
+        { key: 'grassBladeCount', label: 'Blade count', min: 2_000, max: 300_000, step: 2_000, valueLabel: (v) => Math.round(v).toLocaleString() },
+        { key: 'grassSeed', label: 'Generation seed', min: 1, max: 9_999, step: 1, valueLabel: (v) => Math.round(v).toString() },
+        { key: 'grassRandomness', label: 'Generation randomness', min: 0, max: 1, step: 0.01, valueLabel: (v) => `${Math.round(v * 100)}%` },
+        { key: 'grassBladeHeight', label: 'Blade height', min: 0.02, max: 1.2, step: 0.005, valueLabel: (v) => v.toFixed(3) },
+        { key: 'grassBladeWidth', label: 'Blade width', min: 0.005, max: 0.2, step: 0.001, valueLabel: (v) => v.toFixed(3) },
+        { key: 'grassMeadowCount', label: 'Meadow patches', min: 0, max: 24, step: 1, valueLabel: (v) => Math.round(v).toString() },
+        { key: 'grassMeadowHeight', label: 'Meadow height', min: 1, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'windSpeed', label: 'Wind speed', min: 0, max: 5, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'windStrength', label: 'Wind strength', min: 0, max: 0.3, step: 0.005, valueLabel: (v) => v.toFixed(3) },
+        { key: 'rockCount', label: 'Rock count', min: 0, max: MAX_ROCKS, step: 5, valueLabel: (v) => Math.round(v).toString() },
+      ],
+    },
+    {
+      title: 'Clouds',
+      sliders: [
+        { key: 'cloudAmount', label: 'Cloud amount', min: 0, max: 100, step: 1, valueLabel: (v) => `${Math.round(v)}%` },
+        { key: 'cloudSpeed', label: 'Cloud speed', min: 0, max: 5, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+      ],
+    },
   ]
 
   const toggles: {
@@ -515,30 +607,44 @@ function SceneControls({
         </button>
       </div>
 
-      <div style={{ display: 'grid', gap: 11 }}>
-        {sliders.map((slider) => {
-          const value = tuning[slider.key]
-          return (
-            <label key={slider.key} style={{ display: 'grid', gap: 5 }}>
-              <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#d6d9df' }}>{slider.label}</span>
-                <output style={{ fontSize: 10, color: '#8da2ff', fontFamily: 'ui-monospace, monospace' }}>
-                  {slider.valueLabel(value)}
-                </output>
-              </span>
-              <input
-                type="range"
-                min={slider.min}
-                max={slider.max}
-                step={slider.step}
-                value={value}
-                aria-label={slider.label}
-                onChange={(event) => onChange({ [slider.key]: Number(event.target.value) })}
-                style={{ width: '100%', margin: 0, accentColor: '#7c83ff', cursor: 'pointer' }}
-              />
-            </label>
-          )
-        })}
+      <div style={{ display: 'grid', gap: 15 }}>
+        {sliderSections.map((section) => (
+          <div key={section.title} style={{ display: 'grid', gap: 10 }}>
+            <div>
+              <div style={{ color: '#fff', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {section.title}
+              </div>
+              {section.description && (
+                <div style={{ color: '#777e8b', fontSize: 9, lineHeight: 1.35, marginTop: 3 }}>
+                  {section.description}
+                </div>
+              )}
+            </div>
+            {section.sliders.map((slider) => {
+              const value = tuning[slider.key]
+              return (
+                <label key={slider.key} style={{ display: 'grid', gap: 5 }}>
+                  <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#d6d9df' }}>{slider.label}</span>
+                    <output style={{ fontSize: 10, color: '#8da2ff', fontFamily: 'ui-monospace, monospace' }}>
+                      {slider.valueLabel(value)}
+                    </output>
+                  </span>
+                  <input
+                    type="range"
+                    min={slider.min}
+                    max={slider.max}
+                    step={slider.step}
+                    value={value}
+                    aria-label={slider.label}
+                    onChange={(event) => onChange({ [slider.key]: Number(event.target.value) })}
+                    style={{ width: '100%', margin: 0, accentColor: '#7c83ff', cursor: 'pointer' }}
+                  />
+                </label>
+              )
+            })}
+          </div>
+        ))}
       </div>
 
       <div style={{ height: 1, background: 'rgba(255,255,255,0.10)', margin: '13px 0 11px' }} />
@@ -1743,10 +1849,11 @@ function makeCloudTex(seed: number): THREE.CanvasTexture {
 }
 
 // Full-sphere billboard via THREE.Sprite — always faces the camera on every axis, no visible edges
-function CloudSprite({ pos, texture, width }: {
+function CloudSprite({ pos, texture, width, speed }: {
   pos: [number, number, number]
   texture: THREE.Texture
   width: number
+  speed: number
 }) {
   const ref    = useRef<THREE.Sprite>(null)
   // Deterministic per-sprite drift offset (render must stay pure)
@@ -1755,7 +1862,7 @@ function CloudSprite({ pos, texture, width }: {
 
   useFrame(({ clock }) => {
     if (!ref.current) return
-    const t = clock.elapsedTime * 0.05 + driftT
+    const t = clock.elapsedTime * 0.05 * speed + driftT
     ref.current.position.x = pos[0] + Math.sin(t)        * 4.0
     ref.current.position.z = pos[2] + Math.cos(t * 0.65) * 3.0
   })
@@ -1767,7 +1874,7 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
-function Clouds({ amount }: { amount: number }) {
+function Clouds({ amount, speed }: { amount: number; speed: number }) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
@@ -1797,7 +1904,7 @@ function Clouds({ amount }: { amount: number }) {
         <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
       {SPRITE_DEFS.slice(0, Math.round(SPRITE_DEFS.length * amount / 100)).map((def, i) => (
-        <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
+        <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} speed={speed} />
       ))}
     </>
   )
@@ -2251,9 +2358,24 @@ function Scene({
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        {tuning.cloudAmount > 0 && <Clouds amount={tuning.cloudAmount} />}
+        {tuning.cloudAmount > 0 && <Clouds amount={tuning.cloudAmount} speed={tuning.cloudSpeed} />}
       </Suspense>
-      <GrassFloor mobile={mobile} lowerGraphics={lowerGraphics} reducedMotion={reducedMotion} />
+      <GrassFloor
+        lowerGraphics={lowerGraphics}
+        reducedMotion={reducedMotion}
+        rockCount={tuning.rockCount}
+        grass={{
+          bladeCount: tuning.grassBladeCount,
+          bladeHeight: tuning.grassBladeHeight,
+          bladeWidth: tuning.grassBladeWidth,
+          randomness: tuning.grassRandomness,
+          seed: tuning.grassSeed,
+          meadowCount: tuning.grassMeadowCount,
+          meadowHeight: tuning.grassMeadowHeight,
+          windSpeed: tuning.windSpeed,
+          windStrength: tuning.windStrength,
+        }}
+      />
       <group visible={tuning.charactersVisible}>
         <BlobShadows members={members} charGroups={charGroups} />
         {members.map((member) => (
@@ -2265,6 +2387,7 @@ function Scene({
             celebrationType={member.uid === animatingUid ? animationType : null}
             dragMode={dragModeMap.get(member.uid) ?? null}
             heldBy={heldByNames.get(member.uid) ?? null}
+            visible={tuning.charactersVisible}
             onPickupStart={() => handlePickupStart(member)}
             onGroupMount={(uid, g) => {
               if (g) charGroups.current.set(uid, g)
@@ -2295,8 +2418,8 @@ function Scene({
         ref={orbitRef}
         enabled={!cameraLocked}
         target={[0, 0.6, 0]}
-        minDistance={3}
-        maxDistance={40}
+        minDistance={tuning.minZoomDistance}
+        maxDistance={tuning.maxZoomDistance}
         enableRotate={true}
         enablePan={true}
         panSpeed={tuning.panSpeed}
@@ -2304,8 +2427,8 @@ function Scene({
         dampingFactor={tuning.cameraDecay}
         autoRotate={tuning.autoOrbit && !cameraLocked}
         autoRotateSpeed={0.65}
-        minPolarAngle={THREE.MathUtils.degToRad(10)}
-        maxPolarAngle={THREE.MathUtils.degToRad(80)}
+        minPolarAngle={THREE.MathUtils.degToRad(90 - tuning.maxCameraTilt)}
+        maxPolarAngle={THREE.MathUtils.degToRad(90 - tuning.minCameraTilt)}
         makeDefault
       />
     </>
@@ -2470,7 +2593,36 @@ export default function MiiPlaza({
   }, [onUiVisibilityChange, tuning])
 
   const updateTuning = useCallback((patch: Partial<SceneTuning>) => {
-    setTuning((current) => ({ ...current, ...patch }))
+    setTuning((current) => {
+      const next = { ...current, ...patch }
+
+      if (patch.minZoomDistance !== undefined && next.minZoomDistance >= next.maxZoomDistance) {
+        next.maxZoomDistance = next.minZoomDistance + 0.25
+      } else if (patch.maxZoomDistance !== undefined && next.maxZoomDistance <= next.minZoomDistance) {
+        next.minZoomDistance = Math.max(0.25, next.maxZoomDistance - 0.25)
+      }
+
+      if (patch.minCameraTilt !== undefined && next.minCameraTilt >= next.maxCameraTilt) {
+        next.maxCameraTilt = Math.min(89, next.minCameraTilt + 1)
+        next.minCameraTilt = Math.min(next.minCameraTilt, next.maxCameraTilt - 1)
+      } else if (patch.maxCameraTilt !== undefined && next.maxCameraTilt <= next.minCameraTilt) {
+        next.minCameraTilt = Math.max(1, next.maxCameraTilt - 1)
+        next.maxCameraTilt = Math.max(next.maxCameraTilt, next.minCameraTilt + 1)
+      }
+
+      next.cameraDistance = THREE.MathUtils.clamp(
+        next.cameraDistance,
+        next.minZoomDistance,
+        next.maxZoomDistance,
+      )
+      next.cameraTilt = THREE.MathUtils.clamp(
+        next.cameraTilt,
+        next.minCameraTilt,
+        next.maxCameraTilt,
+      )
+
+      return next
+    })
   }, [])
 
   useEffect(() => {
