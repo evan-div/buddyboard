@@ -12,19 +12,41 @@ export const FSIZE = 26
 
 const EDGE_EXP = 4
 
-export function plazaEdgeRadius(theta: number): number {
+export type PlazaEdgeSettings = {
+  seed: number
+  aggressiveness: number
+}
+
+export const DEFAULT_PLAZA_EDGE: PlazaEdgeSettings = {
+  seed: 0,
+  aggressiveness: 1,
+}
+
+export function plazaEdgeRadius(
+  theta: number,
+  settings: PlazaEdgeSettings = DEFAULT_PLAZA_EDGE,
+): number {
   const c = Math.abs(Math.cos(theta))
   const s = Math.abs(Math.sin(theta))
   const base = (FSIZE / 2) / Math.pow(c ** EDGE_EXP + s ** EDGE_EXP, 1 / EDGE_EXP)
-  const wobble = 1 + 0.025 * Math.sin(theta * 5 + 1.7) + 0.015 * Math.sin(theta * 9 + 0.4)
+  const seedPhase = settings.seed * 0.61803398875
+  const aggression = THREE.MathUtils.clamp(settings.aggressiveness, 0, 4)
+  const wobble = 1 + aggression * (
+    0.025 * Math.sin(theta * 5 + 1.7 + seedPhase)
+    + 0.015 * Math.sin(theta * 9 + 0.4 - seedPhase * 1.7)
+  )
   return base * wobble
 }
 
 // Pull a position back inside the rounded edge; returns true if it was outside
-export function clampToPlazaEdge(pos: THREE.Vector3, margin = 0.45): boolean {
+export function clampToPlazaEdge(
+  pos: THREE.Vector3,
+  margin = 0.45,
+  settings: PlazaEdgeSettings = DEFAULT_PLAZA_EDGE,
+): boolean {
   const r = Math.hypot(pos.x, pos.z)
   if (r === 0) return false
-  const maxR = plazaEdgeRadius(Math.atan2(pos.z, pos.x)) - margin
+  const maxR = plazaEdgeRadius(Math.atan2(pos.z, pos.x), settings) - margin
   if (r <= maxR) return false
   const scale = maxR / r
   pos.x *= scale

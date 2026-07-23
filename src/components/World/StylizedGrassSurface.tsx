@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FSIZE, plazaEdgeRadius } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, type PlazaEdgeSettings } from './plazaMath'
 
 // Mobile-first interpretation of cortiz2894/stylized-components' GrassField:
 // keep Buddyboard's procedural island, but use tapered instanced blades, shared
@@ -22,6 +22,8 @@ export type GrassTuning = {
   meadowHeight: number
   windSpeed: number
   windStrength: number
+  edgeSeed: number
+  edgeAggressiveness: number
 }
 
 const FIELD_NOISE_GLSL = /* glsl */ `
@@ -60,11 +62,11 @@ const FIELD_NOISE_GLSL = /* glsl */ `
   }
 `
 
-function makePlazaShape(): THREE.Shape {
+function makePlazaShape(edge: PlazaEdgeSettings): THREE.Shape {
   const points: THREE.Vector2[] = []
   for (let i = 0; i < 96; i++) {
     const theta = (i / 96) * Math.PI * 2
-    const radius = plazaEdgeRadius(theta)
+    const radius = plazaEdgeRadius(theta, edge)
     points.push(new THREE.Vector2(Math.cos(theta) * radius, Math.sin(theta) * radius))
   }
   return new THREE.Shape(points)
@@ -109,7 +111,12 @@ function seededRandom(seed: number) {
   }
 }
 
-function makeJitteredPositions(count: number, seed: number, randomness: number): [number, number][] {
+function makeJitteredPositions(
+  count: number,
+  seed: number,
+  randomness: number,
+  edge: PlazaEdgeSettings,
+): [number, number][] {
   const span = FSIZE * 1.06
   let gridSize = Math.ceil(Math.sqrt(count / 0.8))
 
@@ -127,7 +134,7 @@ function makeJitteredPositions(count: number, seed: number, randomness: number):
         const x = -span / 2 + (column + 0.5 + (random() - 0.5) * jitter) * cellSize
         const z = -span / 2 + (row + 0.5 + (random() - 0.5) * jitter) * cellSize
         const theta = Math.atan2(z, x)
-        if (Math.hypot(x, z) <= plazaEdgeRadius(theta) - 0.08) {
+        if (Math.hypot(x, z) <= plazaEdgeRadius(theta, edge) - 0.08) {
           positions.push([x, z])
         }
       }
@@ -351,7 +358,11 @@ export default function StylizedGrassSurface({
 }) {
   const clusterCount = Math.max(1, Math.round(tuning.bladeCount / 2))
   const bladesRef = useRef<THREE.InstancedMesh>(null)
-  const plazaShape = useMemo(() => makePlazaShape(), [])
+  const edge = useMemo(() => ({
+    seed: tuning.edgeSeed,
+    aggressiveness: tuning.edgeAggressiveness,
+  }), [tuning.edgeAggressiveness, tuning.edgeSeed])
+  const plazaShape = useMemo(() => makePlazaShape(edge), [edge])
   const groundGeometry = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
   const bladeGeometry = useMemo(() => makeBladeGeometry(), [])
   const bladeMaterial = useMemo(() => makeBladeMaterial(), [])
@@ -382,7 +393,7 @@ export default function StylizedGrassSurface({
 
     const seed = Math.round(tuning.seed)
     const random = seededRandom(seed ^ 0x47726173)
-    const positions = makeJitteredPositions(clusterCount, seed, tuning.randomness)
+    const positions = makeJitteredPositions(clusterCount, seed, tuning.randomness, edge)
     const dummy = new THREE.Object3D()
     positions.forEach(([x, z], placed) => {
       const height = tuning.bladeHeight * (1 + (random() - 0.5) * tuning.randomness)
@@ -402,6 +413,7 @@ export default function StylizedGrassSurface({
     tuning.bladeWidth,
     tuning.randomness,
     tuning.seed,
+    edge,
   ])
 
   useFrame((_, delta) => {

@@ -8,7 +8,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import StylizedGrassSurface, { type GrassTuning } from './StylizedGrassSurface'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, type PlazaEdgeSettings } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
@@ -63,12 +63,12 @@ const DARK_COLOR  = '#246b24'
 // ─── Plaza outline ────────────────────────────────────────────────────────────
 // Edge math lives in plazaMath.ts (unit-tested); this file renders it.
 
-function makePlazaShape(): THREE.Shape {
+function makePlazaShape(edge: PlazaEdgeSettings): THREE.Shape {
   const pts: THREE.Vector2[] = []
   const N = 96
   for (let i = 0; i < N; i++) {
     const th = (i / N) * Math.PI * 2
-    const r = plazaEdgeRadius(th)
+    const r = plazaEdgeRadius(th, edge)
     pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
   }
   return new THREE.Shape(pts)
@@ -104,11 +104,19 @@ function GrassFloor({
   reducedMotion,
   grass,
   rockCount,
+  dirtPatchCount,
+  dirtPatchScale,
+  dirtPatchContrast,
+  edge,
 }: {
   lowerGraphics: boolean
   reducedMotion: boolean
   grass: GrassTuning
   rockCount: number
+  dirtPatchCount: number
+  dirtPatchScale: number
+  dirtPatchContrast: number
+  edge: PlazaEdgeSettings
 }) {
   const lightRef = useRef<THREE.InstancedMesh>(null)
   const darkRef  = useRef<THREE.InstancedMesh>(null)
@@ -135,7 +143,7 @@ function GrassFloor({
     return tex
   }, [])
 
-  const plazaShape = useMemo(() => makePlazaShape(), [])
+  const plazaShape = useMemo(() => makePlazaShape(edge), [edge])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
   const dirtGeo = useMemo(
     () => new THREE.ExtrudeGeometry(plazaShape, { depth: 150, bevelEnabled: false }),
@@ -156,11 +164,19 @@ function GrassFloor({
     ctx.fillRect(0, 0, S, S)
 
     const patchShades = ['#5d3a20', '#7a4d2b', '#63401f', '#54331b', '#7d5533']
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < dirtPatchCount; i++) {
       ctx.fillStyle = patchShades[Math.floor(rng() * patchShades.length)]
-      ctx.globalAlpha = 0.15 + rng() * 0.15
+      ctx.globalAlpha = THREE.MathUtils.clamp((0.15 + rng() * 0.15) * dirtPatchContrast, 0, 1)
       ctx.beginPath()
-      ctx.ellipse(rng() * S, rng() * S, 16 + rng() * 44, 10 + rng() * 30, rng() * Math.PI, 0, Math.PI * 2)
+      ctx.ellipse(
+        rng() * S,
+        rng() * S,
+        (16 + rng() * 44) * dirtPatchScale,
+        (10 + rng() * 30) * dirtPatchScale,
+        rng() * Math.PI,
+        0,
+        Math.PI * 2,
+      )
       ctx.fill()
     }
 
@@ -184,7 +200,7 @@ function GrassFloor({
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping
     tex.repeat.set(0.22, 0.22)
     return tex
-  }, [])
+  }, [dirtPatchContrast, dirtPatchCount, dirtPatchScale])
 
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
@@ -218,7 +234,7 @@ function GrassFloor({
           const px = cx + ox
           const pz = cz + oz
           // No blades beyond the rounded plaza edge
-          if (Math.hypot(px, pz) > plazaEdgeRadius(Math.atan2(pz, px)) - 0.06) continue
+          if (Math.hypot(px, pz) > plazaEdgeRadius(Math.atan2(pz, px), edge) - 0.06) continue
           dummy.position.set(px, 0, pz)
           dummy.rotation.set(tiltX, yawBase + (Math.random() - 0.5) * 1.2, 0)
           dummy.scale.setScalar(0.80 + Math.random() * 0.45)
@@ -236,7 +252,7 @@ function GrassFloor({
       darkRef.current.count = di
       darkRef.current.instanceMatrix.needsUpdate = true
     }
-  }, [lowerGraphics])
+  }, [edge, lowerGraphics])
 
   // Rocks half-buried in the dirt wall around the rim — denser near the top
   // where the wall is most visible, thinning out below
@@ -251,7 +267,7 @@ function GrassFloor({
       const th   = rng() * Math.PI * 2
       const y    = -(0.3 + Math.pow(rng(), 1.7) * 9.5)
       const size = 0.18 + rng() * 0.55
-      const rOut = plazaEdgeRadius(th) - size * 0.35
+      const rOut = plazaEdgeRadius(th, edge) - size * 0.35
       dummy.position.set(Math.cos(th) * rOut, y, Math.sin(th) * rOut)
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI)
       dummy.scale.set(size, size * (0.7 + rng() * 0.5), size)
@@ -264,7 +280,7 @@ function GrassFloor({
     mesh.count = rockCount
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
-  }, [rockCount])
+  }, [edge, rockCount])
 
   useFrame((_, delta) => {
     if (!lowerGraphics || reducedMotion) return
@@ -320,6 +336,13 @@ type SceneTuning = {
   cameraDecay: number
   cloudAmount: number
   cloudSpeed: number
+  cloudSize: number
+  lowerFogOpacity: number
+  dirtPatchCount: number
+  dirtPatchScale: number
+  dirtPatchContrast: number
+  plazaEdgeSeed: number
+  plazaEdgeAggressiveness: number
   grassBladeCount: number
   grassBladeHeight: number
   grassBladeWidth: number
@@ -349,6 +372,13 @@ const DEFAULT_SCENE_TUNING: SceneTuning = {
   cameraDecay: 0.08,
   cloudAmount: 100,
   cloudSpeed: 1,
+  cloudSize: 1,
+  lowerFogOpacity: 1,
+  dirtPatchCount: 46,
+  dirtPatchScale: 1,
+  dirtPatchContrast: 1,
+  plazaEdgeSeed: 0,
+  plazaEdgeAggressiveness: 1,
   grassBladeCount: 104_000,
   grassBladeHeight: 0.215,
   grassBladeWidth: 0.058,
@@ -480,7 +510,9 @@ function SceneControls({
   type NumericTuningKey =
     | 'cameraDistance' | 'focalLength' | 'cameraTilt'
     | 'minZoomDistance' | 'maxZoomDistance' | 'minCameraTilt' | 'maxCameraTilt'
-    | 'panSpeed' | 'cameraDecay' | 'cloudAmount' | 'cloudSpeed'
+    | 'panSpeed' | 'cameraDecay' | 'cloudAmount' | 'cloudSpeed' | 'cloudSize'
+    | 'lowerFogOpacity' | 'dirtPatchCount' | 'dirtPatchScale' | 'dirtPatchContrast'
+    | 'plazaEdgeSeed' | 'plazaEdgeAggressiveness'
     | 'grassBladeCount' | 'grassBladeHeight' | 'grassBladeWidth'
     | 'grassRandomness' | 'grassSeed' | 'grassMeadowCount' | 'grassMeadowHeight'
     | 'windSpeed' | 'windStrength' | 'rockCount'
@@ -538,8 +570,21 @@ function SceneControls({
     {
       title: 'Clouds',
       sliders: [
-        { key: 'cloudAmount', label: 'Cloud amount', min: 0, max: 100, step: 1, valueLabel: (v) => `${Math.round(v)}%` },
+        { key: 'cloudAmount', label: 'Cloud amount', min: 0, max: 400, step: 1, valueLabel: (v) => `${Math.round(v)}%` },
+        { key: 'cloudSize', label: 'Cloud size', min: 0.25, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
         { key: 'cloudSpeed', label: 'Cloud speed', min: 0, max: 5, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'lowerFogOpacity', label: 'Lower fog opacity', min: 0, max: 1, step: 0.01, valueLabel: (v) => `${Math.round(v * 100)}%` },
+      ],
+    },
+    {
+      title: 'Dirt & plaza edge',
+      description: 'Edge changes apply to the floor, grass, rocks, shadows, and character collision.',
+      sliders: [
+        { key: 'dirtPatchCount', label: 'Dirt patches', min: 0, max: 150, step: 1, valueLabel: (v) => Math.round(v).toString() },
+        { key: 'dirtPatchScale', label: 'Patch size', min: 0.25, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'dirtPatchContrast', label: 'Patch opacity', min: 0, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+        { key: 'plazaEdgeSeed', label: 'Edge seed', min: 0, max: 999, step: 1, valueLabel: (v) => Math.round(v).toString() },
+        { key: 'plazaEdgeAggressiveness', label: 'Edge aggressiveness', min: 0, max: 4, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
       ],
     },
   ]
@@ -1325,7 +1370,6 @@ const HOLD_HEIGHT = 1.8
 const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
 const GRAVITY     = 38
 const FLING_MIN   = 4.0
-const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
 // Thrown off the island: fall into the clouds, despawn, drop back in from the sky
@@ -1377,9 +1421,10 @@ const SHADOW_RINGS = [
   { r: 0.18, o: 0.24 },
 ]
 
-function BlobShadows({ members, charGroups }: {
+function BlobShadows({ members, charGroups, edge }: {
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
+  edge: PlazaEdgeSettings
 }) {
   const shadowMap = useRef<Map<string, THREE.Group>>(new Map())
 
@@ -1392,7 +1437,7 @@ function BlobShadows({ members, charGroups }: {
       // No shadow once the character sails past the island edge
       const overIsland =
         Math.hypot(g.position.x, g.position.z) <=
-        plazaEdgeRadius(Math.atan2(g.position.z, g.position.x))
+        plazaEdgeRadius(Math.atan2(g.position.z, g.position.x), edge)
       shadow.visible = overIsland
       if (!overIsland) continue
 
@@ -1447,6 +1492,7 @@ interface PhysicsUpdaterProps {
   remoteHolds:    React.RefObject<Map<string, RemoteHold>>
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
+  edge:           PlazaEdgeSettings
   setCharMode:    (uid: string, mode: DragMode | null) => void
   onHeldMove:     (pos: THREE.Vector3) => void
   onHoldStale:    (uid: string) => void
@@ -1455,7 +1501,7 @@ interface PhysicsUpdaterProps {
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
   charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, setCharMode,
-  onHeldMove, onHoldStale,
+  edge, onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1489,12 +1535,10 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          const clampedX = THREE.MathUtils.clamp(hitPoint.x, -WALL_BOUND, WALL_BOUND)
-          const clampedZ = THREE.MathUtils.clamp(hitPoint.z, -WALL_BOUND, WALL_BOUND)
-          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, clampedX, 0.14)
+          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, hitPoint.x, 0.14)
           phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
-          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, clampedZ, 0.14)
-          clampToPlazaEdge(phys.pos)
+          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, hitPoint.z, 0.14)
+          clampToPlazaEdge(phys.pos, 0.45, edge)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
@@ -1528,7 +1572,7 @@ function PhysicsUpdater({
           }
           const k = Math.min(1, delta * 9)
           phys.pos.lerp(hold.target, k)
-          clampToPlazaEdge(phys.pos)
+          clampToPlazaEdge(phys.pos, 0.45, edge)
           group.position.copy(phys.pos)
           // Same hauled-weight tilt the dragger sees, from the glide velocity
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  (hold.target.z - phys.pos.z) * 0.35, 0.12)
@@ -1551,7 +1595,7 @@ function PhysicsUpdater({
         // then despawns for a sky respawn.
         const overIsland =
           Math.hypot(phys.pos.x, phys.pos.z) <=
-          plazaEdgeRadius(Math.atan2(phys.pos.z, phys.pos.x))
+          plazaEdgeRadius(Math.atan2(phys.pos.z, phys.pos.x), edge)
 
         if (!overIsland) {
           if (phys.pos.y < FALL_DEPTH) {
@@ -1650,9 +1694,9 @@ function PhysicsUpdater({
         phys.pos.y = capsuleFloorY(group.quaternion)
 
         // Slide position
-        phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
-        phys.pos.z = THREE.MathUtils.clamp(phys.pos.z + phys.vel.z * delta, -WALL_BOUND, WALL_BOUND)
-        clampToPlazaEdge(phys.pos)
+        phys.pos.x += phys.vel.x * delta
+        phys.pos.z += phys.vel.z * delta
+        clampToPlazaEdge(phys.pos, 0.45, edge)
         group.position.copy(phys.pos)
 
         // Hand off once the skid has stopped AND the body has settled
@@ -1874,7 +1918,17 @@ function CloudSprite({ pos, texture, width, speed }: {
   )
 }
 
-function Clouds({ amount, speed }: { amount: number; speed: number }) {
+function Clouds({
+  amount,
+  speed,
+  size,
+  fogOpacity,
+}: {
+  amount: number
+  speed: number
+  size: number
+  fogOpacity: number
+}) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
@@ -1895,16 +1949,52 @@ function Clouds({ amount, speed }: { amount: number; speed: number }) {
   }, [])
 
   const texArr = [tex1, tex2, tex3]
+  const visibleDefs = useMemo(() => {
+    const count = Math.round(SPRITE_DEFS.length * amount / 100)
+    return Array.from({ length: count }, (_, i): SpriteDef => {
+      const source = SPRITE_DEFS[i % SPRITE_DEFS.length]
+      const layer = Math.floor(i / SPRITE_DEFS.length)
+      if (layer === 0) return source
+
+      // Extra density layers reuse the stable base distribution with a
+      // deterministic rotation, lift, and radial offset to avoid overlaps.
+      const [x, y, z] = source.pos
+      const angle = layer * 0.73 + (i % 17) * 0.021
+      const radiusScale = 1 + layer * 0.045
+      const cos = Math.cos(angle)
+      const sin = Math.sin(angle)
+      return {
+        ...source,
+        pos: [
+          (x * cos - z * sin) * radiusScale,
+          y + ((i * 13) % 9 - 4) * 0.18,
+          (x * sin + z * cos) * radiusScale,
+        ],
+      }
+    })
+  }, [amount])
 
   return (
     <>
       {/* Gradient base — opaque under spire, fades to transparent at horizon */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -4, 0]}>
         <planeGeometry args={[700, 700]} />
-        <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
+        <meshStandardMaterial
+          map={fadeTex}
+          transparent
+          opacity={fogOpacity}
+          depthWrite={false}
+          roughness={1}
+        />
       </mesh>
-      {SPRITE_DEFS.slice(0, Math.round(SPRITE_DEFS.length * amount / 100)).map((def, i) => (
-        <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} speed={speed} />
+      {visibleDefs.map((def, i) => (
+        <CloudSprite
+          key={i}
+          pos={def.pos}
+          texture={texArr[def.texIdx]}
+          width={def.width * size}
+          speed={speed}
+        />
       ))}
     </>
   )
@@ -1958,6 +2048,10 @@ function Scene({
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
+  const edge = useMemo<PlazaEdgeSettings>(() => ({
+    seed: tuning.plazaEdgeSeed,
+    aggressiveness: tuning.plazaEdgeAggressiveness,
+  }), [tuning.plazaEdgeAggressiveness, tuning.plazaEdgeSeed])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -2358,12 +2452,23 @@ function Scene({
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        {tuning.cloudAmount > 0 && <Clouds amount={tuning.cloudAmount} speed={tuning.cloudSpeed} />}
+        {(tuning.cloudAmount > 0 || tuning.lowerFogOpacity > 0) && (
+          <Clouds
+            amount={tuning.cloudAmount}
+            speed={tuning.cloudSpeed}
+            size={tuning.cloudSize}
+            fogOpacity={tuning.lowerFogOpacity}
+          />
+        )}
       </Suspense>
       <GrassFloor
         lowerGraphics={lowerGraphics}
         reducedMotion={reducedMotion}
         rockCount={tuning.rockCount}
+        dirtPatchCount={tuning.dirtPatchCount}
+        dirtPatchScale={tuning.dirtPatchScale}
+        dirtPatchContrast={tuning.dirtPatchContrast}
+        edge={edge}
         grass={{
           bladeCount: tuning.grassBladeCount,
           bladeHeight: tuning.grassBladeHeight,
@@ -2374,10 +2479,12 @@ function Scene({
           meadowHeight: tuning.grassMeadowHeight,
           windSpeed: tuning.windSpeed,
           windStrength: tuning.windStrength,
+          edgeSeed: tuning.plazaEdgeSeed,
+          edgeAggressiveness: tuning.plazaEdgeAggressiveness,
         }}
       />
       <group visible={tuning.charactersVisible}>
-        <BlobShadows members={members} charGroups={charGroups} />
+        <BlobShadows members={members} charGroups={charGroups} edge={edge} />
         {members.map((member) => (
           <MiiCharacter
             key={member.uid}
@@ -2405,6 +2512,7 @@ function Scene({
         remoteHolds={remoteHolds}
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
+        edge={edge}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
         onHoldStale={(uid) => {

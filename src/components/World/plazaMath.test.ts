@@ -38,6 +38,21 @@ describe('plazaEdgeRadius', () => {
     const diagonal = plazaEdgeRadius(Math.PI / 4)
     expect(diagonal).toBeGreaterThan(onAxis)
   })
+
+  it('uses the seed deterministically to produce different edge profiles', () => {
+    const theta = 0.37
+    const first = plazaEdgeRadius(theta, { seed: 123, aggressiveness: 1 })
+    expect(plazaEdgeRadius(theta, { seed: 123, aggressiveness: 1 })).toBe(first)
+    expect(plazaEdgeRadius(theta, { seed: 456, aggressiveness: 1 })).not.toBeCloseTo(first, 6)
+  })
+
+  it('removes the organic wobble when aggressiveness is zero', () => {
+    const theta = 0.91
+    expect(plazaEdgeRadius(theta, { seed: 1, aggressiveness: 0 })).toBeCloseTo(
+      plazaEdgeRadius(theta, { seed: 999, aggressiveness: 0 }),
+      10,
+    )
+  })
 })
 
 describe('clampToPlazaEdge', () => {
@@ -66,6 +81,14 @@ describe('clampToPlazaEdge', () => {
   it('does not divide by zero at the exact center', () => {
     const pos = new THREE.Vector3(0, 0, 0)
     expect(clampToPlazaEdge(pos)).toBe(false)
+  })
+
+  it('clamps against the selected edge profile', () => {
+    const edge = { seed: 321, aggressiveness: 2.5 }
+    const theta = 1.2
+    const pos = new THREE.Vector3(Math.cos(theta) * 100, 0, Math.sin(theta) * 100)
+    clampToPlazaEdge(pos, 0.2, edge)
+    expect(Math.hypot(pos.x, pos.z)).toBeCloseTo(plazaEdgeRadius(theta, edge) - 0.2, 8)
   })
 })
 
