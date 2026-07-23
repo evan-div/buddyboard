@@ -68,6 +68,7 @@ export default function GroupPage() {
   const [appearanceDraft, setAppearanceDraft] = useState(DEFAULT_AVATAR)
   const [appearanceSaving, setAppearanceSaving] = useState(false)
   const [appearanceUnlocked, setAppearanceUnlocked] = useState<string[]>([])
+  const [plazaUiVisible, setPlazaUiVisible] = useState(true)
   const [pendingAppeal, setPendingAppeal] = useState<{
     transactionId: string
     fromUid: string
@@ -313,24 +314,28 @@ export default function GroupPage() {
         <div className="min-h-screen bg-[#0f0f13]">
 
           {/* ── App shell: fixed top bar + bottom tab bar ── */}
-          <TopBar
-            unreadCount={notifications.filter((n) => !n.read).length}
-            onBellClick={() => setShowNotifPanel(true)}
-            avatar={userProfile.avatar ?? null}
-            onAvatarClick={() => router.push(`/profile?from=${encodeURIComponent(`/group/${groupId}`)}`)}
-          />
-          <BottomTabBar
-            tabs={[
-              { key: 'plaza', label: 'Plaza', icon: '🌳' },
-              { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
-              { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
-              { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
-              { key: 'info', label: 'Info', icon: 'ℹ️' },
-              { key: 'style', label: 'Style', icon: '🎨' },
-            ] as readonly TabDef<typeof activeTab>[]}
-            active={activeTab}
-            onSelect={switchTab}
-          />
+          {(activeTab !== 'plaza' || plazaUiVisible) && (
+            <>
+              <TopBar
+                unreadCount={notifications.filter((n) => !n.read).length}
+                onBellClick={() => setShowNotifPanel(true)}
+                avatar={userProfile.avatar ?? null}
+                onAvatarClick={() => router.push(`/profile?from=${encodeURIComponent(`/group/${groupId}`)}`)}
+              />
+              <BottomTabBar
+                tabs={[
+                  { key: 'plaza', label: 'Plaza', icon: '🌳' },
+                  { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
+                  { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
+                  { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
+                  { key: 'info', label: 'Info', icon: 'ℹ️' },
+                  { key: 'style', label: 'Style', icon: '🎨' },
+                ] as readonly TabDef<typeof activeTab>[]}
+                active={activeTab}
+                onSelect={switchTab}
+              />
+            </>
+          )}
 
           {/* ── Plaza: full-screen, shell bars float over it ── */}
           {activeTab === 'plaza' && (
@@ -343,6 +348,7 @@ export default function GroupPage() {
               remainingTake={dailyStats.remainingTake}
               presets={group.presets}
               onReady={handlePlazaReady}
+              onUiVisibilityChange={setPlazaUiVisible}
             />
           )}
 

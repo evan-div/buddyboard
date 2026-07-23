@@ -297,21 +297,83 @@ const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
 const DEFAULT_CAM_POS  = new THREE.Vector3(8, 6, 8)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
+type SceneTuning = {
+  cameraDistance: number
+  focalLength: number
+  cameraTilt: number
+  panSpeed: number
+  cameraDecay: number
+  cloudAmount: number
+  charactersVisible: boolean
+  uiVisible: boolean
+  autoOrbit: boolean
+}
+
+const DEFAULT_SCENE_TUNING: SceneTuning = {
+  cameraDistance: DEFAULT_CAM_POS.distanceTo(DEFAULT_CAM_LOOK),
+  focalLength: 30.3,
+  cameraTilt: THREE.MathUtils.radToDeg(Math.asin(
+    (DEFAULT_CAM_POS.y - DEFAULT_CAM_LOOK.y) / DEFAULT_CAM_POS.distanceTo(DEFAULT_CAM_LOOK),
+  )),
+  panSpeed: 1,
+  cameraDecay: 0.08,
+  cloudAmount: 100,
+  charactersVisible: true,
+  uiVisible: true,
+  autoOrbit: false,
+}
+
+const SCENE_TUNING_STORAGE_KEY = 'buddyboard:scene-tuning'
+
+function cameraPositionForTuning(cameraDistance: number, cameraTilt: number, azimuth = Math.PI / 4) {
+  const tilt = THREE.MathUtils.degToRad(cameraTilt)
+  const horizontalDistance = Math.cos(tilt) * cameraDistance
+  return new THREE.Vector3(
+    DEFAULT_CAM_LOOK.x + Math.sin(azimuth) * horizontalDistance,
+    DEFAULT_CAM_LOOK.y + Math.sin(tilt) * cameraDistance,
+    DEFAULT_CAM_LOOK.z + Math.cos(azimuth) * horizontalDistance,
+  )
+}
+
 function CameraController({
   focusPos,
   orbitRef,
   onUnlock,
   mobile,
+  tuning,
 }: {
   focusPos: [number, number, number] | null
   orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
   mobile: boolean
+  tuning: SceneTuning
 }) {
   const { camera } = useThree()
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
   const wasLocked  = useRef(false)
   const unlockSent = useRef(false)
+
+  useEffect(() => {
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.setFocalLength(tuning.focalLength)
+    }
+
+    if (focusPos || wasLocked.current) return
+
+    const offset = camera.position.clone().sub(DEFAULT_CAM_LOOK)
+    const azimuth = Math.atan2(offset.x, offset.z)
+    camera.position.copy(cameraPositionForTuning(
+      tuning.cameraDistance,
+      tuning.cameraTilt,
+      Number.isFinite(azimuth) ? azimuth : Math.PI / 4,
+    ))
+    camera.lookAt(DEFAULT_CAM_LOOK)
+    lookAt.current.copy(DEFAULT_CAM_LOOK)
+    if (orbitRef.current) {
+      orbitRef.current.target.copy(DEFAULT_CAM_LOOK)
+      orbitRef.current.update()
+    }
+  }, [camera, focusPos, orbitRef, tuning.cameraDistance, tuning.cameraTilt, tuning.focalLength])
 
   useFrame(() => {
     if (focusPos) {
@@ -327,14 +389,15 @@ function CameraController({
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
     } else if (wasLocked.current) {
-      camera.position.lerp(DEFAULT_CAM_POS, 0.06)
+      const defaultPosition = cameraPositionForTuning(tuning.cameraDistance, tuning.cameraTilt)
+      camera.position.lerp(defaultPosition, 0.06)
       lookAt.current.lerp(DEFAULT_CAM_LOOK, 0.06)
       camera.lookAt(lookAt.current)
       if (orbitRef.current) orbitRef.current.target.copy(lookAt.current)
-      if (!unlockSent.current && camera.position.distanceTo(DEFAULT_CAM_POS) < 0.4) {
+      if (!unlockSent.current && camera.position.distanceTo(defaultPosition) < 0.4) {
         // Snap exactly to default and force OrbitControls to re-sync from here,
         // so any rotation the user did before zooming in doesn't persist.
-        camera.position.copy(DEFAULT_CAM_POS)
+        camera.position.copy(defaultPosition)
         lookAt.current.copy(DEFAULT_CAM_LOOK)
         camera.lookAt(lookAt.current)
         if (orbitRef.current) {
@@ -349,6 +412,172 @@ function CameraController({
   })
 
   return null
+}
+
+function SceneControls({
+  tuning,
+  onChange,
+  onReset,
+}: {
+  tuning: SceneTuning
+  onChange: (patch: Partial<SceneTuning>) => void
+  onReset: () => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'd' && event.shiftKey && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        setExpanded((value) => !value)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const sliders: {
+    key: keyof Pick<SceneTuning, 'cameraDistance' | 'focalLength' | 'cameraTilt' | 'panSpeed' | 'cameraDecay' | 'cloudAmount'>
+    label: string
+    min: number
+    max: number
+    step: number
+    valueLabel: (value: number) => string
+  }[] = [
+    { key: 'cameraDistance', label: 'Zoom distance', min: 4, max: 24, step: 0.1, valueLabel: (v) => v.toFixed(1) },
+    { key: 'focalLength', label: 'Focal length', min: 12, max: 85, step: 0.5, valueLabel: (v) => `${v.toFixed(1)} mm` },
+    { key: 'cameraTilt', label: 'Camera tilt', min: 12, max: 70, step: 1, valueLabel: (v) => `${Math.round(v)}°` },
+    { key: 'panSpeed', label: 'Pan speed', min: 0.1, max: 3, step: 0.05, valueLabel: (v) => `${v.toFixed(2)}×` },
+    { key: 'cameraDecay', label: 'Pan decay', min: 0.01, max: 0.3, step: 0.01, valueLabel: (v) => v.toFixed(2) },
+    { key: 'cloudAmount', label: 'Cloud amount', min: 0, max: 100, step: 1, valueLabel: (v) => `${Math.round(v)}%` },
+  ]
+
+  const toggles: {
+    key: keyof Pick<SceneTuning, 'charactersVisible' | 'uiVisible' | 'autoOrbit'>
+    label: string
+  }[] = [
+    { key: 'charactersVisible', label: 'Characters' },
+    { key: 'uiVisible', label: 'App UI' },
+    { key: 'autoOrbit', label: 'Auto orbit' },
+  ]
+
+  const stopSceneInput = (event: React.SyntheticEvent) => event.stopPropagation()
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        onPointerDown={stopSceneInput}
+        aria-label="Open scene controls"
+        title="Scene controls · Ctrl/⌘ Shift D"
+        style={{
+          position: 'absolute', top: tuning.uiVisible ? 68 : 12, right: 12, zIndex: 80,
+          border: '1px solid rgba(255,255,255,0.22)', borderRadius: 12,
+          background: 'rgba(15,15,19,0.88)', color: '#fff', padding: '9px 12px',
+          fontSize: 12, fontWeight: 800, cursor: 'pointer', backdropFilter: 'blur(12px)',
+          boxShadow: '0 8px 28px rgba(0,0,0,0.22)', touchAction: 'auto',
+        }}
+      >
+        ⚙ Scene
+      </button>
+    )
+  }
+
+  return (
+    <section
+      aria-label="Scene testing controls"
+      onPointerDown={stopSceneInput}
+      onPointerMove={stopSceneInput}
+      onWheel={stopSceneInput}
+      style={{
+        position: 'absolute', top: tuning.uiVisible ? 68 : 12, right: 12, zIndex: 80,
+        width: 'min(280px, calc(100vw - 24px))', maxHeight: 'calc(100dvh - 92px)',
+        overflowY: 'auto', boxSizing: 'border-box', borderRadius: 18,
+        background: 'rgba(15,15,19,0.90)', color: '#f9fafb',
+        border: '1px solid rgba(255,255,255,0.16)', backdropFilter: 'blur(18px)',
+        WebkitBackdropFilter: 'blur(18px)', boxShadow: '0 16px 44px rgba(0,0,0,0.32)',
+        padding: 14, touchAction: 'auto',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: '-0.01em' }}>Scene controls</div>
+          <div style={{ color: '#8f96a3', fontSize: 10, marginTop: 2 }}>Live testing · saved on this device</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-label="Collapse scene controls"
+          style={{ border: 0, background: 'transparent', color: '#aeb4bf', fontSize: 17, cursor: 'pointer', padding: 4 }}
+        >
+          −
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gap: 11 }}>
+        {sliders.map((slider) => {
+          const value = tuning[slider.key]
+          return (
+            <label key={slider.key} style={{ display: 'grid', gap: 5 }}>
+              <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#d6d9df' }}>{slider.label}</span>
+                <output style={{ fontSize: 10, color: '#8da2ff', fontFamily: 'ui-monospace, monospace' }}>
+                  {slider.valueLabel(value)}
+                </output>
+              </span>
+              <input
+                type="range"
+                min={slider.min}
+                max={slider.max}
+                step={slider.step}
+                value={value}
+                aria-label={slider.label}
+                onChange={(event) => onChange({ [slider.key]: Number(event.target.value) })}
+                style={{ width: '100%', margin: 0, accentColor: '#7c83ff', cursor: 'pointer' }}
+              />
+            </label>
+          )
+        })}
+      </div>
+
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.10)', margin: '13px 0 11px' }} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
+        {toggles.map((toggle) => {
+          const enabled = tuning[toggle.key]
+          return (
+            <button
+              key={toggle.key}
+              type="button"
+              aria-pressed={enabled}
+              onClick={() => onChange({ [toggle.key]: !enabled })}
+              style={{
+                border: enabled ? '1px solid #777fff' : '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10, background: enabled ? 'rgba(99,102,241,0.24)' : 'rgba(255,255,255,0.05)',
+                color: enabled ? '#fff' : '#858b96', padding: '8px 4px',
+                fontSize: 10, fontWeight: 800, cursor: 'pointer',
+              }}
+            >
+              {toggle.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={onReset}
+        style={{
+          width: '100%', marginTop: 10, border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 10, background: 'rgba(255,255,255,0.05)', color: '#c4c8d0',
+          padding: 8, fontSize: 10, fontWeight: 800, cursor: 'pointer',
+        }}
+      >
+        Reset defaults
+      </button>
+    </section>
+  )
 }
 
 // ─── Member Card (DOM overlay) ────────────────────────────────────────────────
@@ -1538,7 +1767,7 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
-function Clouds() {
+function Clouds({ amount }: { amount: number }) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
@@ -1567,7 +1796,7 @@ function Clouds() {
         <planeGeometry args={[700, 700]} />
         <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
-      {SPRITE_DEFS.map((def, i) => (
+      {SPRITE_DEFS.slice(0, Math.round(SPRITE_DEFS.length * amount / 100)).map((def, i) => (
         <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
     </>
@@ -1603,6 +1832,7 @@ function Scene({
   mobile,
   lowerGraphics,
   reducedMotion,
+  tuning,
 }: {
   members: GroupMember[]
   groupId: string
@@ -1617,6 +1847,7 @@ function Scene({
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
+  tuning: SceneTuning
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
@@ -2015,31 +2246,33 @@ function Scene({
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
-      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
+      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} tuning={tuning} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        <Clouds />
+        {tuning.cloudAmount > 0 && <Clouds amount={tuning.cloudAmount} />}
       </Suspense>
       <GrassFloor mobile={mobile} lowerGraphics={lowerGraphics} reducedMotion={reducedMotion} />
-      <BlobShadows members={members} charGroups={charGroups} />
-      {members.map((member) => (
-        <MiiCharacter
-          key={member.uid}
-          member={member}
-          bounds={WANDER_BOUNDS}
-          isSelected={selectedUid === member.uid}
-          celebrationType={member.uid === animatingUid ? animationType : null}
-          dragMode={dragModeMap.get(member.uid) ?? null}
-          heldBy={heldByNames.get(member.uid) ?? null}
-          onPickupStart={() => handlePickupStart(member)}
-          onGroupMount={(uid, g) => {
-            if (g) charGroups.current.set(uid, g)
-            else   charGroups.current.delete(uid)
-          }}
-        />
-      ))}
+      <group visible={tuning.charactersVisible}>
+        <BlobShadows members={members} charGroups={charGroups} />
+        {members.map((member) => (
+          <MiiCharacter
+            key={member.uid}
+            member={member}
+            bounds={WANDER_BOUNDS}
+            isSelected={selectedUid === member.uid}
+            celebrationType={member.uid === animatingUid ? animationType : null}
+            dragMode={dragModeMap.get(member.uid) ?? null}
+            heldBy={heldByNames.get(member.uid) ?? null}
+            onPickupStart={() => handlePickupStart(member)}
+            onGroupMount={(uid, g) => {
+              if (g) charGroups.current.set(uid, g)
+              else   charGroups.current.delete(uid)
+            }}
+          />
+        ))}
+      </group>
       <PhysicsUpdater
         draggingUid={draggingUid}
         dragCursor={dragCursor}
@@ -2065,9 +2298,14 @@ function Scene({
         minDistance={3}
         maxDistance={40}
         enableRotate={true}
-        enablePan={false}
-        minPolarAngle={Math.PI / 3.3}
-        maxPolarAngle={Math.PI / 2.5}
+        enablePan={true}
+        panSpeed={tuning.panSpeed}
+        enableDamping
+        dampingFactor={tuning.cameraDecay}
+        autoRotate={tuning.autoOrbit && !cameraLocked}
+        autoRotateSpeed={0.65}
+        minPolarAngle={THREE.MathUtils.degToRad(10)}
+        maxPolarAngle={THREE.MathUtils.degToRad(80)}
         makeDefault
       />
     </>
@@ -2197,10 +2435,11 @@ interface Props {
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
+  onUiVisibilityChange?: (visible: boolean) => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady, onUiVisibilityChange,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2212,6 +2451,27 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
+  const [tuning, setTuning] = useState<SceneTuning>(() => {
+    try {
+      const saved = window.localStorage.getItem(SCENE_TUNING_STORAGE_KEY)
+      return saved ? { ...DEFAULT_SCENE_TUNING, ...JSON.parse(saved) } : DEFAULT_SCENE_TUNING
+    } catch {
+      return DEFAULT_SCENE_TUNING
+    }
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SCENE_TUNING_STORAGE_KEY, JSON.stringify(tuning))
+    } catch {
+      // Testing controls still work for the current session without storage.
+    }
+    onUiVisibilityChange?.(tuning.uiVisible)
+  }, [onUiVisibilityChange, tuning])
+
+  const updateTuning = useCallback((patch: Partial<SceneTuning>) => {
+    setTuning((current) => ({ ...current, ...patch }))
+  }, [])
 
   useEffect(() => {
     function check() { setIsMobile(window.innerWidth < 768) }
@@ -2285,15 +2545,22 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
+            tuning={tuning}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
 
-      <PresenceTab members={members} currentUid={currentUid} />
+      <SceneControls
+        tuning={tuning}
+        onChange={updateTuning}
+        onReset={() => setTuning(DEFAULT_SCENE_TUNING)}
+      />
+
+      {tuning.uiVisible && <PresenceTab members={members} currentUid={currentUid} />}
 
       {/* Card overlay — avatar editor for self, give/take for others */}
-      {selectedMember && (
+      {tuning.uiVisible && selectedMember && (
         <div className="sheet-rise" style={isMobile ? {
           position: 'absolute',
           bottom: 0, left: 0, right: 0,
@@ -2342,7 +2609,7 @@ export default function MiiPlaza({
       )}
 
       {/* Hint */}
-      {!selectedMember && (
+      {tuning.uiVisible && !selectedMember && (
         <div style={{
           position: 'absolute',
           bottom: 12,
