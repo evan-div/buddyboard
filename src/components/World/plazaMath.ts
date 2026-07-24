@@ -20,6 +20,61 @@ export function plazaEdgeRadius(theta: number): number {
   return base * wobble
 }
 
+// ─── Placement grid (living plaza) ────────────────────────────────────────────
+// Plants are placed on a square grid of tiles snapped to world XZ. Tile (q, r)
+// centers at (q·TILE, r·TILE). A tile is plantable when its center sits inside
+// the rounded plaza edge, inset by TILE_MARGIN so trees never poke off the rim.
+
+export type Tile = { q: number; r: number }
+
+export const TILE = 2.2
+export const TILE_MARGIN = 1.8
+
+export function tileToWorld(tile: Tile): { x: number; z: number } {
+  return { x: tile.q * TILE, z: tile.r * TILE }
+}
+
+export function tileKey(tile: Tile): string {
+  return `${tile.q},${tile.r}`
+}
+
+// Is this tile's center inside the plantable area of the island?
+export function isTileInside(tile: Tile): boolean {
+  const { x, z } = tileToWorld(tile)
+  const r = Math.hypot(x, z)
+  if (r === 0) return true
+  const maxR = plazaEdgeRadius(Math.atan2(z, x)) - TILE_MARGIN
+  return r <= maxR
+}
+
+// All plantable tiles, computed once from the plaza outline.
+let _tilesCache: Tile[] | null = null
+export function tilesInsidePlaza(): Tile[] {
+  if (_tilesCache) return _tilesCache
+  const tiles: Tile[] = []
+  const span = Math.ceil((FSIZE / 2) / TILE)
+  for (let q = -span; q <= span; q++) {
+    for (let r = -span; r <= span; r++) {
+      if (isTileInside({ q, r })) tiles.push({ q, r })
+    }
+  }
+  _tilesCache = tiles
+  return tiles
+}
+
+// Nearest unoccupied plantable tile to a world point; null if the island is full.
+export function nearestFreeTile(point: { x: number; z: number }, taken: Set<string>): Tile | null {
+  let best: Tile | null = null
+  let bestD = Infinity
+  for (const t of tilesInsidePlaza()) {
+    if (taken.has(tileKey(t))) continue
+    const { x, z } = tileToWorld(t)
+    const d = (x - point.x) ** 2 + (z - point.z) ** 2
+    if (d < bestD) { bestD = d; best = t }
+  }
+  return best
+}
+
 // Pull a position back inside the rounded edge; returns true if it was outside
 export function clampToPlazaEdge(pos: THREE.Vector3, margin = 0.45): boolean {
   const r = Math.hypot(pos.x, pos.z)

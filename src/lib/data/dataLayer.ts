@@ -32,6 +32,9 @@ import type {
   NotifCategory,
   NotifPrefs,
   PlazaPreset,
+  Checkin,
+  PlazaObject,
+  PlazaTile,
 } from '../types'
 
 // Subscription callbacks
@@ -227,6 +230,17 @@ export interface IDataLayer {
   subscribeToPlazaHolds(groupId: string, callback: PlazaHoldCallback): UnsubscribeFn
 
   touchPresence(groupId: string, uid: string): void
+
+  // ============ LIVING PLAZA (check-ins, seeds, plants) ============
+  recordCheckin(groupId: string, uid: string, note?: string): Promise<void>
+  subscribeToCheckins(groupId: string, day: string, callback: (checkins: Checkin[]) => void): UnsubscribeFn
+  plantSeed(
+    groupId: string,
+    uid: string,
+    opts: { species: string; tile: PlazaTile; dedication?: string }
+  ): Promise<void>
+  removePlazaObject(groupId: string, objId: string): Promise<void>
+  subscribeToPlazaObjects(groupId: string, callback: (objects: PlazaObject[]) => void): UnsubscribeFn
 
   // ============ BADGES & SHOP ============
   checkAndAwardBadges(

@@ -11,6 +11,12 @@ import {
   CAP_HALF_APPROX,
   RADIUS_APPROX,
   AXIS_X,
+  TILE_MARGIN,
+  tileToWorld,
+  tileKey,
+  isTileInside,
+  tilesInsidePlaza,
+  nearestFreeTile,
 } from './plazaMath'
 
 const TAU = Math.PI * 2
@@ -98,6 +104,47 @@ describe('capsuleFloorY', () => {
     const inverted = new THREE.Quaternion().setFromAxisAngle(AXIS_X, Math.PI)
     const upright  = new THREE.Quaternion()
     expect(capsuleFloorY(inverted)).toBeGreaterThan(capsuleFloorY(upright))
+  })
+})
+
+describe('placement grid', () => {
+  it('every tile reported inside sits within the plaza edge minus the margin', () => {
+    for (const t of tilesInsidePlaza()) {
+      const { x, z } = tileToWorld(t)
+      const r = Math.hypot(x, z)
+      const maxR = plazaEdgeRadius(Math.atan2(z, x)) - TILE_MARGIN
+      // center tile (r === 0) is always allowed
+      if (r > 0) expect(r).toBeLessThanOrEqual(maxR + 1e-9)
+      expect(isTileInside(t)).toBe(true)
+    }
+  })
+
+  it('produces a non-trivial number of plantable tiles', () => {
+    expect(tilesInsidePlaza().length).toBeGreaterThan(20)
+  })
+
+  it('rejects tiles well outside the island', () => {
+    expect(isTileInside({ q: 100, r: 100 })).toBe(false)
+  })
+
+  it('nearestFreeTile returns the closest unoccupied tile', () => {
+    const taken = new Set<string>()
+    const near = nearestFreeTile({ x: 0, z: 0 }, taken)
+    expect(near).not.toBeNull()
+    // With nothing taken, the closest tile to the origin is the origin tile
+    expect(tileKey(near!)).toBe('0,0')
+  })
+
+  it('nearestFreeTile skips occupied tiles', () => {
+    const taken = new Set<string>(['0,0'])
+    const near = nearestFreeTile({ x: 0, z: 0 }, taken)
+    expect(near).not.toBeNull()
+    expect(tileKey(near!)).not.toBe('0,0')
+  })
+
+  it('nearestFreeTile returns null when every tile is taken', () => {
+    const taken = new Set<string>(tilesInsidePlaza().map(tileKey))
+    expect(nearestFreeTile({ x: 0, z: 0 }, taken)).toBeNull()
   })
 })
 

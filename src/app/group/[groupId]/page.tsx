@@ -342,6 +342,9 @@ export default function GroupPage() {
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
               presets={group.presets}
+              timezone={group.timezone}
+              plazaActiveDays={group.plazaActiveDays}
+              plazaLastActiveDay={group.plazaLastActiveDay}
               onReady={handlePlazaReady}
             />
           )}

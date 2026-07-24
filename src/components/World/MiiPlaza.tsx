@@ -7,13 +7,17 @@ import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import StylizedGrassSurface from './StylizedGrassSurface'
+import PlazaGarden from './PlazaGarden'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, type Tile } from './plazaMath'
+import { PLAZA_SPECIES, getSpecies } from './plazaSpecies'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
+import { growthStage, isDormant } from '@/lib/plazaGrowth'
+import { dayKey, timeAgo } from '@/lib/utils'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec, PlazaObject, Checkin } from '@/lib/types'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -1617,6 +1621,14 @@ function Scene({
   mobile,
   lowerGraphics,
   reducedMotion,
+  gardenObjects,
+  groupVitality,
+  nowMs,
+  dormant,
+  plantMode,
+  takenTiles,
+  onPlantSelect,
+  onTileSelect,
 }: {
   members: GroupMember[]
   groupId: string
@@ -1631,6 +1643,14 @@ function Scene({
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
+  gardenObjects: PlazaObject[]
+  groupVitality: number
+  nowMs: number
+  dormant: boolean
+  plantMode: boolean
+  takenTiles: Set<string>
+  onPlantSelect: (o: PlazaObject) => void
+  onTileSelect: (t: Tile) => void
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
@@ -2042,6 +2062,16 @@ function Scene({
         reducedMotion={reducedMotion}
         characterGroups={charGroups}
       />
+      <PlazaGarden
+        objects={gardenObjects}
+        groupVitality={groupVitality}
+        nowMs={nowMs}
+        dormant={dormant}
+        plantMode={plantMode}
+        takenTiles={takenTiles}
+        onPlantSelect={onPlantSelect}
+        onTileSelect={onTileSelect}
+      />
       <BlobShadows members={members} charGroups={charGroups} />
       {members.map((member) => (
         <MiiCharacter
@@ -2186,6 +2216,256 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
   )
 }
 
+// ─── Living plaza overlays ─────────────────────────────────────────────────────
+
+const STAGE_LABELS = ['Seedling', 'Sprout', 'Young', 'Mature']
+
+// Daily check-in card: the heartbeat of the living plaza. Shows how many members
+// have shown up today, and (until you have) a button to check in with an
+// optional note.
+function CheckinCard({
+  checkedIn, checkedInCount, memberCount, streak, dormant, busy, onCheckin,
+}: {
+  checkedIn: boolean
+  checkedInCount: number
+  memberCount: number
+  streak: number
+  dormant: boolean
+  busy: boolean
+  onCheckin: (note?: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'stretch',
+      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cdd6df' }}>
+        <span style={{ fontSize: 15 }}>{dormant ? '🌫️' : '🌱'}</span>
+        <strong style={{ color: '#fff' }}>{checkedInCount}/{memberCount}</strong>
+        <span>checked in today</span>
+      </div>
+
+      {checkedIn ? (
+        <div style={{ fontSize: 12, color: '#8fd19e', display: 'flex', alignItems: 'center', gap: 6 }}>
+          ✅ You&apos;re in{streak > 1 ? ` · ${streak}-day streak 🔥` : ''}
+        </div>
+      ) : (
+        <>
+          {open && (
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value.slice(0, 140))}
+              placeholder="What did you show up for? (optional)"
+              rows={2}
+              style={{
+                width: '100%', resize: 'none', borderRadius: 8, padding: '6px 8px',
+                fontSize: 12, background: 'rgba(255,255,255,0.06)', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.12)', outline: 'none',
+              }}
+            />
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => onCheckin(note.trim() || undefined)}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '8px 10px', borderRadius: 10, border: 'none',
+                background: busy ? '#3a6b45' : '#43b05f', color: '#fff', fontWeight: 700,
+                fontSize: 13, cursor: busy ? 'default' : 'pointer',
+              }}
+            >
+              {busy ? '…' : '✅ Check in for today'}
+            </button>
+            {!open && (
+              <button
+                onClick={() => setOpen(true)}
+                style={{
+                  padding: '8px 10px', borderRadius: 10, fontSize: 13, cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.08)', color: '#cdd6df',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                }}
+                title="Add a note"
+              >
+                ✏️
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Choose a species and (optionally) a dedication for a tapped tile.
+function SpeciesPicker({
+  busy, onCancel, onConfirm,
+}: {
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (species: string, dedication?: string) => void
+}) {
+  const [species, setSpecies] = useState(PLAZA_SPECIES[0].id)
+  const [dedication, setDedication] = useState('')
+  const chosen = getSpecies(species)
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 30, display: 'flex',
+      alignItems: 'flex-end', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.45)', pointerEvents: 'auto',
+    }} onClick={onCancel}>
+      <div
+        className="sheet-rise"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 460, background: '#14181f',
+          borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18,
+          border: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
+        <div style={{ color: '#fff', fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Plant a seed 🌱</div>
+        <div style={{ color: '#9aa6b1', fontSize: 12, marginBottom: 14 }}>{chosen.blurb}</div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+          {PLAZA_SPECIES.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSpecies(s.id)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                width: 72, padding: '10px 4px', borderRadius: 12, cursor: 'pointer',
+                background: s.id === species ? 'rgba(67,176,95,0.22)' : 'rgba(255,255,255,0.05)',
+                border: s.id === species ? '2px solid #43b05f' : '2px solid transparent',
+                color: '#e6ecf1',
+              }}
+            >
+              <span style={{ fontSize: 24 }}>{s.emoji}</span>
+              <span style={{ fontSize: 11 }}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <input
+          value={dedication}
+          onChange={(e) => setDedication(e.target.value.slice(0, 80))}
+          placeholder="Dedication (optional) — e.g. “For our first 30-day streak”"
+          style={{
+            width: '100%', borderRadius: 10, padding: '10px 12px', fontSize: 13,
+            background: 'rgba(255,255,255,0.06)', color: '#fff', marginBottom: 14,
+            border: '1px solid rgba(255,255,255,0.12)', outline: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, padding: '11px', borderRadius: 12, fontSize: 14, cursor: 'pointer',
+              background: 'rgba(255,255,255,0.08)', color: '#cdd6df', border: 'none',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(species, dedication.trim() || undefined)}
+            disabled={busy}
+            style={{
+              flex: 2, padding: '11px', borderRadius: 12, fontSize: 14, fontWeight: 800,
+              cursor: busy ? 'default' : 'pointer', border: 'none',
+              background: busy ? '#3a6b45' : '#43b05f', color: '#fff',
+            }}
+          >
+            {busy ? 'Planting…' : `Plant ${chosen.label}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The "shared artifact" payoff: tap a plant to read its history.
+function PlantPlaque({
+  obj, groupVitality, nowMs, canRemove, busy, mobile, onClose, onRemove,
+}: {
+  obj: PlazaObject
+  groupVitality: number
+  nowMs: number
+  canRemove: boolean
+  busy: boolean
+  mobile: boolean
+  onClose: () => void
+  onRemove: (o: PlazaObject) => void
+}) {
+  const species = getSpecies(obj.species)
+  const stage = growthStage(obj.plantedAt.getTime(), obj.plantedAtVitality, nowMs, groupVitality)
+  const grownThrough = Math.max(0, groupVitality - obj.plantedAtVitality)
+
+  return (
+    <div
+      className="sheet-rise"
+      style={mobile ? {
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20, pointerEvents: 'auto',
+      } : {
+        position: 'absolute', left: 16, bottom: 16, zIndex: 20, width: 280, pointerEvents: 'auto',
+      }}
+    >
+      <div style={{
+        background: '#14181f', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: mobile ? '20px 20px 0 0' : 16, padding: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 30 }}>{species.emoji}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{species.label}</div>
+            <div style={{ color: '#8fd19e', fontSize: 12 }}>{STAGE_LABELS[stage]}</div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#7c8894', fontSize: 20, cursor: 'pointer' }}
+          >
+            ×
+          </button>
+        </div>
+
+        {obj.dedication && (
+          <div style={{
+            fontStyle: 'italic', color: '#e6ecf1', fontSize: 13, marginBottom: 10,
+            padding: '8px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: 10,
+            borderLeft: '3px solid #43b05f',
+          }}>
+            “{obj.dedication}”
+          </div>
+        )}
+
+        <div style={{ fontSize: 12, color: '#b6c0ca', lineHeight: 1.7 }}>
+          <div>🌱 Planted by <strong style={{ color: '#fff' }}>{obj.plantedByName}</strong></div>
+          <div>🕰️ {timeAgo(obj.plantedAt)}</div>
+          <div>🌤️ Grown through {grownThrough} active group-{grownThrough === 1 ? 'day' : 'days'}</div>
+        </div>
+
+        {canRemove && (
+          <button
+            onClick={() => onRemove(obj)}
+            disabled={busy}
+            style={{
+              marginTop: 12, width: '100%', padding: '9px', borderRadius: 10, fontSize: 13,
+              cursor: busy ? 'default' : 'pointer', border: '1px solid rgba(255,120,120,0.3)',
+              background: 'rgba(255,80,80,0.12)', color: '#ff9a9a',
+            }}
+          >
+            {busy ? '…' : 'Remove plant'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
 // Fires onReady after N rendered frames — guarantees WebGL has actually painted.
@@ -2213,13 +2493,16 @@ interface Props {
   lowerGraphics?: boolean
   reducedMotion?: boolean
   presets?: PlazaPreset[]
+  timezone?: string
+  plazaActiveDays?: number
+  plazaLastActiveDay?: string
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, timezone, plazaActiveDays = 0, plazaLastActiveDay, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2231,6 +2514,84 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
+
+  // ── Living plaza state ──
+  const [gardenObjects, setGardenObjects] = useState<PlazaObject[]>([])
+  const [todayCheckins, setTodayCheckins] = useState<Checkin[]>([])
+  const [plantMode, setPlantMode]         = useState(false)
+  const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
+  const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
+  const [busy, setBusy]                   = useState(false)
+  // A slowly-advancing clock so growth stages recompute without calling the
+  // impure Date.now() during render. Refreshed once a minute.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const today = useMemo(() => dayKey(timezone), [timezone])
+  const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
+  const seeds = currentMember?.seeds ?? 0
+  const checkedInToday = currentMember?.lastCheckinDate === today
+  const isMayor = currentMember?.isAdmin === true
+
+  const takenTiles = useMemo(
+    () => new Set(gardenObjects.map((o) => tileKey(o.tile))),
+    [gardenObjects],
+  )
+  const dormant = useMemo(
+    () => isDormant(plazaLastActiveDay, [today, dayKey(timezone, -1)]),
+    [plazaLastActiveDay, today, timezone],
+  )
+  // Derive the open plaque from live data — if the plant is removed, it vanishes.
+  const selectedPlant = useMemo(
+    () => gardenObjects.find((o) => o.id === selectedPlantId) ?? null,
+    [gardenObjects, selectedPlantId],
+  )
+
+  // Subscribe to the garden and to today's check-ins
+  useEffect(() => subscribeToPlazaObjects(groupId, setGardenObjects), [groupId])
+  useEffect(() => subscribeToCheckins(groupId, today, setTodayCheckins), [groupId, today])
+
+  async function handleCheckin(note?: string) {
+    if (busy || checkedInToday) return
+    setBusy(true)
+    try {
+      await recordCheckin(groupId, currentUid, note)
+    } catch (err) {
+      console.warn('[plaza] check-in failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handlePlant(species: string, dedication?: string) {
+    if (busy || !pendingTile) return
+    setBusy(true)
+    try {
+      await plantSeed(groupId, currentUid, { species, tile: pendingTile, dedication })
+      setPendingTile(null)
+      setPlantMode(false)
+    } catch (err) {
+      console.warn('[plaza] plant failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemovePlant(obj: PlazaObject) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await removePlazaObject(groupId, obj.id)
+      setSelectedPlantId(null)
+    } catch (err) {
+      console.warn('[plaza] remove failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     function check() { setIsMobile(window.innerWidth < 768) }
@@ -2304,12 +2665,99 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
+            gardenObjects={gardenObjects}
+            groupVitality={plazaActiveDays}
+            nowMs={nowMs}
+            dormant={dormant}
+            plantMode={plantMode}
+            takenTiles={takenTiles}
+            onPlantSelect={(o) => { setSelectedPlantId(o.id); handleClose() }}
+            onTileSelect={(t) => setPendingTile(t)}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
 
       <PresenceTab members={members} currentUid={currentUid} />
+
+      {/* Living plaza: daily check-in heartbeat (top-right) */}
+      <div style={{ position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto' }}>
+        <CheckinCard
+          checkedIn={checkedInToday}
+          checkedInCount={todayCheckins.length}
+          memberCount={members.length}
+          streak={currentMember?.checkinStreak ?? 0}
+          dormant={dormant}
+          busy={busy}
+          onCheckin={handleCheckin}
+        />
+      </div>
+
+      {/* Plant controls (hidden while another card or picker is open) */}
+      {!selectedMember && !selectedPlant && !pendingTile && (
+        <div style={{
+          position: 'absolute', right: 12, bottom: 52, zIndex: 12,
+          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+          pointerEvents: 'auto',
+        }}>
+          {plantMode && (
+            <div style={{
+              background: 'rgba(67,176,95,0.9)', color: '#fff', fontSize: 12, fontWeight: 700,
+              padding: '6px 12px', borderRadius: 20,
+            }}>
+              Tap a glowing spot to plant
+            </div>
+          )}
+          {plantMode ? (
+            <button
+              onClick={() => setPlantMode(false)}
+              style={{
+                padding: '10px 16px', borderRadius: 22, border: 'none', cursor: 'pointer',
+                background: 'rgba(20,24,31,0.85)', color: '#cdd6df', fontWeight: 700, fontSize: 13,
+              }}
+            >
+              ✕ Cancel
+            </button>
+          ) : (
+            <button
+              onClick={() => { if (seeds > 0) { handleClose(); setPlantMode(true) } }}
+              disabled={seeds < 1}
+              title={seeds < 1 ? 'Check in to earn seeds' : 'Plant a seed'}
+              style={{
+                padding: '10px 16px', borderRadius: 22, border: 'none',
+                cursor: seeds < 1 ? 'default' : 'pointer', opacity: seeds < 1 ? 0.5 : 1,
+                background: '#43b05f', color: '#fff', fontWeight: 800, fontSize: 14,
+                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+              }}
+            >
+              🌱 Plant{seeds > 0 ? ` · ${seeds}` : ''}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Species picker (after tapping a tile) */}
+      {pendingTile && (
+        <SpeciesPicker
+          busy={busy}
+          onCancel={() => setPendingTile(null)}
+          onConfirm={handlePlant}
+        />
+      )}
+
+      {/* Plant history plaque */}
+      {selectedPlant && (
+        <PlantPlaque
+          obj={selectedPlant}
+          groupVitality={plazaActiveDays}
+          nowMs={nowMs}
+          canRemove={selectedPlant.plantedBy === currentUid || isMayor}
+          busy={busy}
+          mobile={isMobile}
+          onClose={() => setSelectedPlantId(null)}
+          onRemove={handleRemovePlant}
+        />
+      )}
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
