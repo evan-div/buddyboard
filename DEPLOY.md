@@ -100,29 +100,36 @@ If either fails with a `permission-denied`, the rules didn't publish. The app
 also logs a throttled `[plaza] … permission-denied` warning in the browser
 console pointing back to this step.
 
-## Previewing plaza growth without waiting days (dev only)
+## Previewing plaza growth without waiting days
 
 Plants grow on `min(elapsed time, group activity)`, so watching a tree mature
-normally takes a week of real check-ins. In a **dev build** (`npm run dev`) two
-query params fast-forward the *rendering* only — they write nothing to Firestore
-and are ignored in production builds:
+normally takes a week of real check-ins. **Preview mode** fast-forwards the
+*rendering* so you can see every stage immediately.
 
-| Param | Effect |
-| --- | --- |
-| `?plazaDays=N` | Pretend `N` days have passed since planting |
-| `?plazaVitality=N` | Pretend the group has banked `N` active days |
-
-Growth is the **minimum** of the two, so set both to reach a stage:
+Add `?preview=1` to the plaza URL:
 
 ```
-http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=1&plazaVitality=1   # Sprout
-http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=3&plazaVitality=2   # Young
-http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=7&plazaVitality=4   # Mature
+/group/YOUR_GROUP_ID?preview=1
 ```
 
-An orange `⏩ preview` badge appears while an override is active so you never
-mistake it for real growth. The thresholds themselves live in
-`src/lib/plazaGrowth.ts` (`TIME_DAYS` / `NOURISH_DAYS`) and are unit-tested.
+An orange **⏩ preview** panel appears at the top-left. Tap it to expand, then:
+
+- Tap **Seedling / Sprout / Young / Mature** to jump straight to that stage.
+- Nudge **Days** and **Vitality** separately to watch the `min(time, care)` rule
+  in action — raising Days alone will *not* grow anything, which is the whole
+  point of the growth model.
+- Tap **Exit preview** to return to real values.
+
+This works on any build (including a deployed one), which matters when testing
+on a phone — you type the short URL once and everything after that is tap-driven.
+It is **render-only**: nothing is written to Firestore, no other member sees it,
+and reloading without the param returns to reality.
+
+Optional shortcuts if you prefer to start at a specific point:
+`?preview=1&plazaDays=7&plazaVitality=4`.
+
+Stage thresholds live in `src/lib/plazaGrowth.ts` (`TIME_DAYS` / `NOURISH_DAYS`)
+and are unit-tested; the preset buttons derive from them, so they can't drift.
 
 ## What each Firebase config file is
 

@@ -14,7 +14,7 @@ import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, rea
 import { PLAZA_SPECIES, getSpecies } from './plazaSpecies'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
-import { growthStage, isDormant } from '@/lib/plazaGrowth'
+import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
 import { dayKey, timeAgo } from '@/lib/utils'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -2221,29 +2221,122 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
 
 const STAGE_LABELS = ['Seedling', 'Sprout', 'Young', 'Mature']
 
-// Dev-only time travel, for eyeballing growth without waiting days:
-//   ?plazaDays=7        pretend 7 days have passed
-//   ?plazaVitality=4    pretend the group has banked 4 active days
-// Growth is min(time, vitality), so both are usually needed to reach a stage.
-// Purely a rendering override — it writes nothing and is ignored in production
-// builds. Read once in a lazy initializer so render stays pure.
-export type PlazaDebug = { dayOffsetMs: number; vitality: number | null }
+// ── Growth preview ────────────────────────────────────────────────────────────
+// Watching a plant mature normally takes a week of real check-ins, so preview
+// mode fast-forwards the *rendering* — it writes nothing and never touches
+// Firestore. Opt in by adding `?preview=1` to the plaza URL (short enough to
+// type on a phone); everything after that is tap-driven, which matters when
+// testing on mobile where editing query strings is painful.
+export type PlazaPreview = { on: boolean; days: number; vitality: number }
 
-export function readPlazaDebug(): PlazaDebug {
-  const none: PlazaDebug = { dayOffsetMs: 0, vitality: null }
-  if (process.env.NODE_ENV === 'production') return none
-  if (typeof window === 'undefined') return none
+export const PREVIEW_OFF: PlazaPreview = { on: false, days: 0, vitality: 0 }
+
+export function readPlazaPreview(): PlazaPreview {
+  if (typeof window === 'undefined') return PREVIEW_OFF
   try {
     const p = new URLSearchParams(window.location.search)
+    if (p.get('preview') !== '1') return PREVIEW_OFF
     const days = Number(p.get('plazaDays'))
-    const vit = p.get('plazaVitality')
+    const vit = Number(p.get('plazaVitality'))
     return {
-      dayOffsetMs: Number.isFinite(days) ? days * 86_400_000 : 0,
-      vitality: vit !== null && Number.isFinite(Number(vit)) ? Number(vit) : null,
+      on: true,
+      days: Number.isFinite(days) && days > 0 ? days : 0,
+      vitality: Number.isFinite(vit) && vit > 0 ? vit : 0,
     }
   } catch {
-    return none
+    return PREVIEW_OFF
   }
+}
+
+// Smallest (days, vitality) that reaches each stage, derived from the real
+// thresholds so the presets can't drift out of sync with the growth rules.
+export function presetForStage(stage: number): { days: number; vitality: number } {
+  const i = Math.max(0, Math.min(stage, TIME_DAYS.length - 1))
+  return { days: TIME_DAYS[i], vitality: NOURISH_DAYS[i] }
+}
+
+// Tap-driven growth preview: jump straight to a stage, or nudge days/vitality
+// independently to check the min(time, care) rule behaves.
+function PreviewPanel({
+  preview, onChange, onExit,
+}: {
+  preview: PlazaPreview
+  onChange: (p: PlazaPreview) => void
+  onExit: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const stage = growthStage(0, 0, preview.days * 86_400_000, preview.vitality)
+
+  const btn = (label: string, onClick: () => void, wide = false): React.ReactElement => (
+    <button
+      onClick={onClick}
+      style={{
+        minWidth: wide ? 0 : 30, flex: wide ? 1 : undefined,
+        padding: '6px 8px', borderRadius: 8, cursor: 'pointer',
+        background: 'rgba(255,255,255,0.12)', color: '#fff',
+        border: '1px solid rgba(255,255,255,0.18)', fontSize: 12, fontWeight: 700,
+      }}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div style={{
+      background: 'rgba(150,95,15,0.94)', color: '#fff', borderRadius: 12,
+      padding: open ? 10 : '5px 10px', maxWidth: 250,
+      border: '1px solid rgba(255,255,255,0.2)',
+    }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, cursor: 'pointer' }}
+      >
+        ⏩ preview · +{preview.days}d · vit {preview.vitality}
+        <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 10, opacity: 0.85, lineHeight: 1.4 }}>
+            Render-only — nothing is saved. Showing <strong>{STAGE_LABELS[stage]}</strong>.
+          </div>
+
+          <div style={{ display: 'flex', gap: 5 }}>
+            {STAGE_LABELS.map((label, i) => (
+              <button
+                key={label}
+                onClick={() => onChange({ on: true, ...presetForStage(i) })}
+                style={{
+                  flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer', fontSize: 10,
+                  fontWeight: 800, border: '1px solid rgba(255,255,255,0.18)',
+                  background: i === stage ? '#fff' : 'rgba(255,255,255,0.12)',
+                  color: i === stage ? '#8a5a10' : '#fff',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <span style={{ width: 52 }}>Days</span>
+            {btn('−', () => onChange({ ...preview, days: Math.max(0, preview.days - 1) }))}
+            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 800 }}>{preview.days}</span>
+            {btn('+', () => onChange({ ...preview, days: preview.days + 1 }))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <span style={{ width: 52 }}>Vitality</span>
+            {btn('−', () => onChange({ ...preview, vitality: Math.max(0, preview.vitality - 1) }))}
+            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 800 }}>{preview.vitality}</span>
+            {btn('+', () => onChange({ ...preview, vitality: preview.vitality + 1 }))}
+          </div>
+
+          {btn('Exit preview', onExit, true)}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Daily check-in card: the heartbeat of the living plaza. Shows how many members
@@ -2548,16 +2641,18 @@ export default function MiiPlaza({
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
   const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
   const [busy, setBusy]                   = useState(false)
-  // Dev-only ?plazaDays / ?plazaVitality overrides for previewing growth.
-  const [debug] = useState<PlazaDebug>(readPlazaDebug)
+  // Tap-driven growth preview (opt in with ?preview=1). Render-only.
+  const [preview, setPreview] = useState<PlazaPreview>(readPlazaPreview)
   // A slowly-advancing clock so growth stages recompute without calling the
-  // impure Date.now() during render. Refreshed once a minute.
-  const [nowMs, setNowMs] = useState(() => Date.now() + debug.dayOffsetMs)
+  // impure Date.now() during render. Ticks once a minute; the preview offset is
+  // applied as a derived value so tapping updates the scene immediately.
+  const [clockMs, setClockMs] = useState(() => Date.now())
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now() + debug.dayOffsetMs), 60_000)
+    const id = setInterval(() => setClockMs(Date.now()), 60_000)
     return () => clearInterval(id)
-  }, [debug.dayOffsetMs])
-  const effectiveVitality = debug.vitality ?? plazaActiveDays
+  }, [])
+  const nowMs = clockMs + (preview.on ? preview.days * 86_400_000 : 0)
+  const effectiveVitality = preview.on ? preview.vitality : plazaActiveDays
 
   const today = useMemo(() => dayKey(timezone), [timezone])
   const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
@@ -2767,15 +2862,14 @@ export default function MiiPlaza({
         </div>
       )}
 
-      {/* Dev-only time-travel indicator */}
-      {(debug.dayOffsetMs !== 0 || debug.vitality !== null) && (
-        <div style={{
-          position: 'absolute', top: 64, left: 12, zIndex: 14,
-          background: 'rgba(180,120,20,0.9)', color: '#fff', fontSize: 11, fontWeight: 800,
-          padding: '5px 10px', borderRadius: 8, pointerEvents: 'none',
-        }}>
-          ⏩ preview: +{Math.round(debug.dayOffsetMs / 86_400_000)}d
-          {debug.vitality !== null ? ` · vitality ${debug.vitality}` : ''}
+      {/* Growth preview controls (?preview=1) */}
+      {preview.on && (
+        <div style={{ position: 'absolute', top: 64, left: 12, zIndex: 14, pointerEvents: 'auto' }}>
+          <PreviewPanel
+            preview={preview}
+            onChange={setPreview}
+            onExit={() => setPreview(PREVIEW_OFF)}
+          />
         </div>
       )}
 
