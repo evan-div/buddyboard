@@ -10,7 +10,7 @@ import StylizedGrassSurface from './StylizedGrassSurface'
 import PlazaGarden from './PlazaGarden'
 import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, type Tile } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesInsidePlaza, type Tile } from './plazaMath'
 import { PLAZA_SPECIES, getSpecies } from './plazaSpecies'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
@@ -2258,10 +2258,13 @@ export function presetForStage(stage: number): { days: number; vitality: number 
 // Tap-driven growth preview: jump straight to a stage, or nudge days/vitality
 // independently to check the min(time, care) rule behaves.
 function PreviewPanel({
-  preview, onChange, onExit,
+  preview, previewCount, onChange, onFillOneOfEach, onClearPreviewPlants, onExit,
 }: {
   preview: PlazaPreview
+  previewCount: number
   onChange: (p: PlazaPreview) => void
+  onFillOneOfEach: () => void
+  onClearPreviewPlants: () => void
   onExit: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -2299,6 +2302,12 @@ function PreviewPanel({
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 10, opacity: 0.85, lineHeight: 1.4 }}>
             Render-only — nothing is saved. Showing <strong>{STAGE_LABELS[stage]}</strong>.
+            {' '}Seeds are unlimited here and planting stays on this device.
+          </div>
+
+          <div style={{ display: 'flex', gap: 5 }}>
+            {btn(`🌿 One of each (${PLAZA_SPECIES.length})`, onFillOneOfEach, true)}
+            {previewCount > 0 && btn(`✕ ${previewCount}`, onClearPreviewPlants)}
           </div>
 
           <div style={{ display: 'flex', gap: 5 }}>
@@ -2653,16 +2662,27 @@ export default function MiiPlaza({
   }, [])
   const nowMs = clockMs + (preview.on ? preview.days * 86_400_000 : 0)
   const effectiveVitality = preview.on ? preview.vitality : plazaActiveDays
+  // Plants placed while previewing live only on this device — they are never
+  // written to Firestore, so testing never litters the group's real island.
+  const [previewPlants, setPreviewPlants] = useState<PlazaObject[]>([])
 
   const today = useMemo(() => dayKey(timezone), [timezone])
   const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
   const seeds = currentMember?.seeds ?? 0
   const checkedInToday = currentMember?.lastCheckinDate === today
+  // Preview mode hands out unlimited seeds so every species can be inspected.
+  const canPlant = preview.on || seeds > 0
   const isMayor = currentMember?.isAdmin === true
 
+  // Real plants plus any local preview plants
+  const allObjects = useMemo(
+    () => (preview.on && previewPlants.length ? [...gardenObjects, ...previewPlants] : gardenObjects),
+    [gardenObjects, previewPlants, preview.on],
+  )
+
   const takenTiles = useMemo(
-    () => new Set(gardenObjects.map((o) => tileKey(o.tile))),
-    [gardenObjects],
+    () => new Set(allObjects.map((o) => tileKey(o.tile))),
+    [allObjects],
   )
   const dormant = useMemo(
     () => isDormant(plazaLastActiveDay, [today, dayKey(timezone, -1)]),
@@ -2670,8 +2690,8 @@ export default function MiiPlaza({
   )
   // Derive the open plaque from live data — if the plant is removed, it vanishes.
   const selectedPlant = useMemo(
-    () => gardenObjects.find((o) => o.id === selectedPlantId) ?? null,
-    [gardenObjects, selectedPlantId],
+    () => allObjects.find((o) => o.id === selectedPlantId) ?? null,
+    [allObjects, selectedPlantId],
   )
 
   // Subscribe to the garden and to today's check-ins
@@ -2690,8 +2710,31 @@ export default function MiiPlaza({
     }
   }
 
+  // Build a local-only plant. Planted "now" against the base clock and at zero
+  // vitality, so the preview's Days/Vitality controls drive its growth directly.
+  function makePreviewPlant(species: string, tile: Tile, dedication?: string): PlazaObject {
+    return {
+      id: `preview_${species}_${tileKey(tile)}_${clockMs}`,
+      kind: 'plant',
+      species,
+      tile,
+      plantedBy: currentUid,
+      plantedByName: currentMember?.displayName ?? 'You',
+      plantedAt: new Date(clockMs),
+      plantedAtVitality: 0,
+      dedication,
+    }
+  }
+
   async function handlePlant(species: string, dedication?: string) {
     if (busy || !pendingTile) return
+    // In preview, planting is local and seeds are unlimited — nothing is saved.
+    if (preview.on) {
+      setPreviewPlants((prev) => [...prev, makePreviewPlant(species, pendingTile, dedication)])
+      setPendingTile(null)
+      setPlantMode(false)
+      return
+    }
     setBusy(true)
     try {
       await plantSeed(groupId, currentUid, { species, tile: pendingTile, dedication })
@@ -2704,8 +2747,32 @@ export default function MiiPlaza({
     }
   }
 
+  // Drop one of every species on the free tiles closest to the middle, so all
+  // the forms can be compared side by side at any growth stage.
+  function handleFillOneOfEach() {
+    const free = tilesInsidePlaza()
+      .filter((t) => !takenTiles.has(tileKey(t)))
+      .sort((a, b) => {
+        const wa = tileToWorld(a), wb = tileToWorld(b)
+        return Math.hypot(wa.x, wa.z) - Math.hypot(wb.x, wb.z)
+      })
+    setPreviewPlants((prev) => [
+      ...prev,
+      ...PLAZA_SPECIES.flatMap((s, i) =>
+        free[i] ? [makePreviewPlant(s.id, free[i], `Preview · ${s.label}`)] : [],
+      ),
+    ])
+    setPlantMode(false)
+  }
+
   async function handleRemovePlant(obj: PlazaObject) {
     if (busy) return
+    // Preview plants only exist locally — drop them without touching Firestore.
+    if (obj.id.startsWith('preview_')) {
+      setPreviewPlants((prev) => prev.filter((p) => p.id !== obj.id))
+      setSelectedPlantId(null)
+      return
+    }
     setBusy(true)
     try {
       await removePlazaObject(groupId, obj.id)
@@ -2789,7 +2856,7 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
-            gardenObjects={gardenObjects}
+            gardenObjects={allObjects}
             groupVitality={effectiveVitality}
             nowMs={nowMs}
             dormant={dormant}
@@ -2846,17 +2913,17 @@ export default function MiiPlaza({
             </button>
           ) : (
             <button
-              onClick={() => { if (seeds > 0) { handleClose(); setPlantMode(true) } }}
-              disabled={seeds < 1}
-              title={seeds < 1 ? 'Check in to earn seeds' : 'Plant a seed'}
+              onClick={() => { if (canPlant) { handleClose(); setPlantMode(true) } }}
+              disabled={!canPlant}
+              title={canPlant ? 'Plant a seed' : 'Check in to earn seeds'}
               style={{
                 padding: '10px 16px', borderRadius: 22, border: 'none',
-                cursor: seeds < 1 ? 'default' : 'pointer', opacity: seeds < 1 ? 0.5 : 1,
+                cursor: canPlant ? 'pointer' : 'default', opacity: canPlant ? 1 : 0.5,
                 background: '#43b05f', color: '#fff', fontWeight: 800, fontSize: 14,
                 boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
               }}
             >
-              🌱 Plant{seeds > 0 ? ` · ${seeds}` : ''}
+              🌱 Plant{preview.on ? ' · ∞' : seeds > 0 ? ` · ${seeds}` : ''}
             </button>
           )}
         </div>
@@ -2867,8 +2934,11 @@ export default function MiiPlaza({
         <div style={{ position: 'absolute', top: 64, left: 12, zIndex: 14, pointerEvents: 'auto' }}>
           <PreviewPanel
             preview={preview}
+            previewCount={previewPlants.length}
             onChange={setPreview}
-            onExit={() => setPreview(PREVIEW_OFF)}
+            onFillOneOfEach={handleFillOneOfEach}
+            onClearPreviewPlants={() => { setPreviewPlants([]); setSelectedPlantId(null) }}
+            onExit={() => { setPreview(PREVIEW_OFF); setPreviewPlants([]); setSelectedPlantId(null) }}
           />
         </div>
       )}

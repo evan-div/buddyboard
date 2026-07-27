@@ -115,6 +115,12 @@ Add `?preview=1` to the plaza URL:
 An orange **⏩ preview** panel appears at the top-left. Tap it to expand, then:
 
 - Tap **Seedling / Sprout / Young / Mature** to jump straight to that stage.
+- Tap **🌿 One of each** to drop every species on the tiles nearest the middle —
+  combined with the stage buttons, that shows all plant forms at any maturity.
+- Seeds are **unlimited** in preview (the Plant button reads `🌱 Plant · ∞`), and
+  anything planted while previewing is **local to your device only** — it is
+  never written to Firestore, so testing never litters the group's real island.
+  The `✕ N` button clears them; exiting preview clears them too.
 - Nudge **Days** and **Vitality** separately to watch the `min(time, care)` rule
   in action — raising Days alone will *not* grow anything, which is the whole
   point of the growth model.
