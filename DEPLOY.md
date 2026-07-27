@@ -100,6 +100,30 @@ If either fails with a `permission-denied`, the rules didn't publish. The app
 also logs a throttled `[plaza] … permission-denied` warning in the browser
 console pointing back to this step.
 
+## Previewing plaza growth without waiting days (dev only)
+
+Plants grow on `min(elapsed time, group activity)`, so watching a tree mature
+normally takes a week of real check-ins. In a **dev build** (`npm run dev`) two
+query params fast-forward the *rendering* only — they write nothing to Firestore
+and are ignored in production builds:
+
+| Param | Effect |
+| --- | --- |
+| `?plazaDays=N` | Pretend `N` days have passed since planting |
+| `?plazaVitality=N` | Pretend the group has banked `N` active days |
+
+Growth is the **minimum** of the two, so set both to reach a stage:
+
+```
+http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=1&plazaVitality=1   # Sprout
+http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=3&plazaVitality=2   # Young
+http://localhost:3000/group/YOUR_GROUP_ID?plazaDays=7&plazaVitality=4   # Mature
+```
+
+An orange `⏩ preview` badge appears while an override is active so you never
+mistake it for real growth. The thresholds themselves live in
+`src/lib/plazaGrowth.ts` (`TIME_DAYS` / `NOURISH_DAYS`) and are unit-tested.
+
 ## What each Firebase config file is
 
 | File | Purpose | Deploy command |

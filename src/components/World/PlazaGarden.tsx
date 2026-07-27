@@ -9,9 +9,11 @@ import { growthStage } from '@/lib/plazaGrowth'
 import { tileToWorld, tileKey, tilesInsidePlaza, type Tile } from './plazaMath'
 import { getSpecies, type PlazaSpecies } from './plazaSpecies'
 
-// Overall scale per growth stage (0 seedling … 3 mature).
-const STAGE_SCALE = [0.34, 0.6, 0.82, 1.0]
+// Scale per growth stage. Stage 0 draws the Sprout (its own small form) at full
+// size; stages 1-3 draw the species form, growing into it.
+const STAGE_SCALE = [1.0, 0.62, 0.82, 1.0]
 const DORMANT_TINT = new THREE.Color('#6f7f8c')
+const SOIL_COLOR = '#6b4b32'
 
 type Palette = { foliage: string; foliageAlt: string; trunk: string }
 
@@ -22,22 +24,40 @@ function mute(hex: string, dormant: boolean): string {
 
 // ─── Plant forms (procedural, low-poly to match the grass/rocks aesthetic) ─────
 
+// A freshly planted seed: a small but clearly readable sapling. Sized so it is
+// visible from the default camera distance — a just-planted seed must never look
+// like nothing happened.
 function Sprout({ colors }: { colors: Palette }) {
   return (
     <group>
-      <mesh position={[0, 0.12, 0]}>
-        <cylinderGeometry args={[0.03, 0.045, 0.24, 5]} />
-        <meshStandardMaterial color={colors.trunk} />
+      <mesh position={[0, 0.26, 0]}>
+        <cylinderGeometry args={[0.045, 0.07, 0.52, 6]} />
+        <meshStandardMaterial color={colors.trunk} flatShading />
       </mesh>
-      <mesh position={[0.06, 0.26, 0]} rotation={[0, 0, -0.6]} scale={[1, 0.55, 1]}>
-        <sphereGeometry args={[0.08, 8, 6]} />
+      <mesh position={[0.15, 0.5, 0]} rotation={[0, 0, -0.7]} scale={[1, 0.5, 1]}>
+        <sphereGeometry args={[0.19, 8, 6]} />
         <meshStandardMaterial color={colors.foliage} flatShading />
       </mesh>
-      <mesh position={[-0.06, 0.24, 0.02]} rotation={[0, 0, 0.6]} scale={[1, 0.55, 1]}>
-        <sphereGeometry args={[0.07, 8, 6]} />
+      <mesh position={[-0.14, 0.44, 0.03]} rotation={[0, 0, 0.7]} scale={[1, 0.5, 1]}>
+        <sphereGeometry args={[0.17, 8, 6]} />
         <meshStandardMaterial color={colors.foliageAlt} flatShading />
       </mesh>
+      <mesh position={[0, 0.62, 0]} scale={[1, 0.7, 1]}>
+        <sphereGeometry args={[0.12, 8, 6]} />
+        <meshStandardMaterial color={colors.foliage} flatShading />
+      </mesh>
     </group>
+  )
+}
+
+// Turned soil under every plant — the persistent "something is planted here"
+// marker, so a tile never reads as empty.
+function SoilMound({ dormant }: { dormant: boolean }) {
+  return (
+    <mesh position={[0, 0.03, 0]}>
+      <cylinderGeometry args={[0.32, 0.4, 0.08, 12]} />
+      <meshStandardMaterial color={mute(SOIL_COLOR, dormant)} flatShading />
+    </mesh>
   )
 }
 
@@ -161,6 +181,8 @@ function PlantMesh({
       position={[x, 0, z]}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(object) }}
     >
+      {/* Soil stays put and unscaled — a stable marker for the planted tile */}
+      <SoilMound dormant={dormant} />
       <group ref={swayRef} scale={STAGE_SCALE[stage]}>
         {stage === 0 ? <Sprout colors={colors} /> : <Form species={species} colors={colors} />}
       </group>
@@ -176,7 +198,7 @@ function TileMarker({ x, z, onSelect }: { x: number; z: number; onSelect: () => 
   useFrame((state) => {
     if (!ref.current) return
     const mat = ref.current.material as THREE.MeshBasicMaterial
-    mat.opacity = 0.22 + (hover ? 0.4 : 0) + Math.sin(state.clock.elapsedTime * 2) * 0.05
+    mat.opacity = 0.24 + (hover ? 0.4 : 0) + Math.sin(state.clock.elapsedTime * 5) * 0.1
   })
   return (
     <mesh

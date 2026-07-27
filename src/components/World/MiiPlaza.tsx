@@ -8,6 +8,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import StylizedGrassSurface from './StylizedGrassSurface'
 import PlazaGarden from './PlazaGarden'
+import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, type Tile } from './plazaMath'
 import { PLAZA_SPECIES, getSpecies } from './plazaSpecies'
@@ -2220,6 +2221,31 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
 
 const STAGE_LABELS = ['Seedling', 'Sprout', 'Young', 'Mature']
 
+// Dev-only time travel, for eyeballing growth without waiting days:
+//   ?plazaDays=7        pretend 7 days have passed
+//   ?plazaVitality=4    pretend the group has banked 4 active days
+// Growth is min(time, vitality), so both are usually needed to reach a stage.
+// Purely a rendering override — it writes nothing and is ignored in production
+// builds. Read once in a lazy initializer so render stays pure.
+export type PlazaDebug = { dayOffsetMs: number; vitality: number | null }
+
+export function readPlazaDebug(): PlazaDebug {
+  const none: PlazaDebug = { dayOffsetMs: 0, vitality: null }
+  if (process.env.NODE_ENV === 'production') return none
+  if (typeof window === 'undefined') return none
+  try {
+    const p = new URLSearchParams(window.location.search)
+    const days = Number(p.get('plazaDays'))
+    const vit = p.get('plazaVitality')
+    return {
+      dayOffsetMs: Number.isFinite(days) ? days * 86_400_000 : 0,
+      vitality: vit !== null && Number.isFinite(Number(vit)) ? Number(vit) : null,
+    }
+  } catch {
+    return none
+  }
+}
+
 // Daily check-in card: the heartbeat of the living plaza. Shows how many members
 // have shown up today, and (until you have) a button to check in with an
 // optional note.
@@ -2522,13 +2548,16 @@ export default function MiiPlaza({
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
   const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
   const [busy, setBusy]                   = useState(false)
+  // Dev-only ?plazaDays / ?plazaVitality overrides for previewing growth.
+  const [debug] = useState<PlazaDebug>(readPlazaDebug)
   // A slowly-advancing clock so growth stages recompute without calling the
   // impure Date.now() during render. Refreshed once a minute.
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const [nowMs, setNowMs] = useState(() => Date.now() + debug.dayOffsetMs)
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 60_000)
+    const id = setInterval(() => setNowMs(Date.now() + debug.dayOffsetMs), 60_000)
     return () => clearInterval(id)
-  }, [])
+  }, [debug.dayOffsetMs])
+  const effectiveVitality = debug.vitality ?? plazaActiveDays
 
   const today = useMemo(() => dayKey(timezone), [timezone])
   const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
@@ -2666,7 +2695,7 @@ export default function MiiPlaza({
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
             gardenObjects={gardenObjects}
-            groupVitality={plazaActiveDays}
+            groupVitality={effectiveVitality}
             nowMs={nowMs}
             dormant={dormant}
             plantMode={plantMode}
@@ -2696,7 +2725,9 @@ export default function MiiPlaza({
       {/* Plant controls (hidden while another card or picker is open) */}
       {!selectedMember && !selectedPlant && !pendingTile && (
         <div style={{
-          position: 'absolute', right: 12, bottom: 52, zIndex: 12,
+          // Clear the fixed bottom tab bar (plus any home-indicator inset)
+          position: 'absolute', right: 12, zIndex: 12,
+          bottom: `calc(${TAB_BAR_HEIGHT + 16}px + env(safe-area-inset-bottom))`,
           display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
           pointerEvents: 'auto',
         }}>
@@ -2736,6 +2767,18 @@ export default function MiiPlaza({
         </div>
       )}
 
+      {/* Dev-only time-travel indicator */}
+      {(debug.dayOffsetMs !== 0 || debug.vitality !== null) && (
+        <div style={{
+          position: 'absolute', top: 64, left: 12, zIndex: 14,
+          background: 'rgba(180,120,20,0.9)', color: '#fff', fontSize: 11, fontWeight: 800,
+          padding: '5px 10px', borderRadius: 8, pointerEvents: 'none',
+        }}>
+          ⏩ preview: +{Math.round(debug.dayOffsetMs / 86_400_000)}d
+          {debug.vitality !== null ? ` · vitality ${debug.vitality}` : ''}
+        </div>
+      )}
+
       {/* Species picker (after tapping a tile) */}
       {pendingTile && (
         <SpeciesPicker
@@ -2749,7 +2792,7 @@ export default function MiiPlaza({
       {selectedPlant && (
         <PlantPlaque
           obj={selectedPlant}
-          groupVitality={plazaActiveDays}
+          groupVitality={effectiveVitality}
           nowMs={nowMs}
           canRemove={selectedPlant.plantedBy === currentUid || isMayor}
           busy={busy}
@@ -2812,7 +2855,8 @@ export default function MiiPlaza({
       {!selectedMember && (
         <div style={{
           position: 'absolute',
-          bottom: 12,
+          // Sits just above the fixed bottom tab bar
+          bottom: `calc(${TAB_BAR_HEIGHT + 8}px + env(safe-area-inset-bottom))`,
           left: '50%',
           transform: 'translateX(-50%)',
           background: 'rgba(0,0,0,0.5)',
