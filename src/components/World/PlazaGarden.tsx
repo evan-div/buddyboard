@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -23,20 +23,29 @@ const DORMANT_TINT = new THREE.Color('#6f7f8c')
 const SOIL_COLOR = '#6b4b32'
 
 // Soil footprint and sway amplitude per stage — big trees barely move.
-const SOIL_R = [0.42, 0.55, 0.78, 1.05]
-const SWAY = [0.07, 0.055, 0.03, 0.016]
+const SOIL_R = [0.42, 0.58, 0.85, 1.25]
+const SWAY = [0.07, 0.055, 0.028, 0.013]
 
-type Palette = { foliage: string; foliageAlt: string; trunk: string }
+type Palette = { foliage: string; foliageAlt: string; trunk: string; shade: string; bark: string }
 
 function mute(hex: string, dormant: boolean): string {
   if (!dormant) return hex
   return new THREE.Color(hex).lerp(DORMANT_TINT, 0.55).getStyle()
 }
 
+function darken(hex: string, amount: number): string {
+  return new THREE.Color(hex).multiplyScalar(1 - amount).getStyle()
+}
+
+// Subdivision level for canopy spheres. 1 gives ~80 faces per lobe (rounded but
+// still faceted); dropped to 0 on low-graphics devices to keep mobile smooth.
+const DetailCtx = createContext(1)
+const useDetail = () => useContext(DetailCtx)
+
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function Trunk({
-  h, rb, rt, color, y = 0, seg = 7,
+  h, rb, rt, color, y = 0, seg = 8,
 }: { h: number; rb: number; rt: number; color: string; y?: number; seg?: number }) {
   return (
     <mesh position={[0, y + h / 2, 0]}>
@@ -46,38 +55,111 @@ function Trunk({
   )
 }
 
-// Flared root collar — makes a mature trunk sit in the ground instead of on it.
-function RootFlare({ r, color }: { r: number; color: string }) {
-  return (
-    <mesh position={[0, 0.22, 0]}>
-      <cylinderGeometry args={[r * 0.62, r, 0.44, 8]} />
-      <meshStandardMaterial color={color} flatShading />
-    </mesh>
-  )
-}
+// A trunk built from stacked, slightly offset and rotated sections. The kinks
+// between sections read as an organic, leaning bole rather than a plain cone.
+function TaperedTrunk({
+  h, rb, rt, color, bark, y = 0, sections = 4, lean = 0.05,
+}: {
+  h: number; rb: number; rt: number; color: string; bark: string
+  y?: number; sections?: number; lean?: number
+}) {
+  const segs = useMemo(() => {
+    const out: { y: number; h: number; rb: number; rt: number; tilt: number; yaw: number; dark: boolean }[] = []
+    const segH = h / sections
+    for (let i = 0; i < sections; i++) {
+      const t0 = i / sections
+      const t1 = (i + 1) / sections
+      out.push({
+        y: y + i * segH,
+        h: segH * 1.06,          // slight overlap hides the seams
+        rb: rb + (rt - rb) * t0,
+        rt: rb + (rt - rb) * t1,
+        tilt: Math.sin(i * 1.7) * lean,
+        yaw: i * 1.1,
+        dark: i % 2 === 1,
+      })
+    }
+    return out
+  }, [h, rb, rt, y, sections, lean])
 
-function Branch({
-  from, len, tilt, yaw, r, color,
-}: { from: number; len: number; tilt: number; yaw: number; r: number; color: string }) {
   return (
-    <group position={[0, from, 0]} rotation={[0, yaw, tilt]}>
-      <mesh position={[0, len / 2, 0]}>
-        <cylinderGeometry args={[r * 0.6, r, len, 5]} />
-        <meshStandardMaterial color={color} flatShading />
-      </mesh>
+    <group>
+      {segs.map((s, i) => (
+        <group key={i} position={[0, s.y, 0]} rotation={[0, s.yaw, s.tilt]}>
+          <mesh position={[0, s.h / 2, 0]}>
+            <cylinderGeometry args={[s.rt, s.rb, s.h, 9]} />
+            <meshStandardMaterial color={s.dark ? bark : color} flatShading />
+          </mesh>
+        </group>
+      ))}
     </group>
   )
 }
 
-type Blob = { p: [number, number, number]; r: number; alt?: boolean; flat?: number }
+// Flared root collar plus buttress roots spreading into the soil.
+function RootFlare({ r, color, buttresses = 5 }: { r: number; color: string; buttresses?: number }) {
+  const roots = useMemo(
+    () => Array.from({ length: buttresses }, (_, i) => (i / buttresses) * Math.PI * 2 + 0.3),
+    [buttresses],
+  )
+  return (
+    <group>
+      <mesh position={[0, 0.24, 0]}>
+        <cylinderGeometry args={[r * 0.6, r, 0.48, 10]} />
+        <meshStandardMaterial color={color} flatShading />
+      </mesh>
+      {roots.map((a, i) => (
+        <mesh
+          key={i}
+          position={[Math.cos(a) * r * 0.78, 0.13, Math.sin(a) * r * 0.78]}
+          rotation={[Math.PI / 2 - 0.32, 0, -a + Math.PI / 2]}
+          scale={[1, 1, 0.55]}
+        >
+          <coneGeometry args={[r * 0.3, r * 0.95, 5]} />
+          <meshStandardMaterial color={color} flatShading />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+// A branch, optionally sprouting finer twigs at its tip.
+function Branch({
+  from, len, tilt, yaw, r, color, twigs = 0,
+}: {
+  from: number; len: number; tilt: number; yaw: number; r: number; color: string; twigs?: number
+}) {
+  return (
+    <group position={[0, from, 0]} rotation={[0, yaw, tilt]}>
+      <mesh position={[0, len / 2, 0]}>
+        <cylinderGeometry args={[r * 0.55, r, len, 6]} />
+        <meshStandardMaterial color={color} flatShading />
+      </mesh>
+      {Array.from({ length: twigs }, (_, i) => (
+        <group key={i} position={[0, len * (0.62 + i * 0.16), 0]} rotation={[0, i * 2.1, (i % 2 ? 1 : -1) * 0.6]}>
+          <mesh position={[0, len * 0.16, 0]}>
+            <cylinderGeometry args={[r * 0.2, r * 0.38, len * 0.32, 5]} />
+            <meshStandardMaterial color={color} flatShading />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+type Blob = { p: [number, number, number]; r: number; alt?: boolean; flat?: number; dark?: boolean }
 
 function Canopy({ blobs, colors }: { blobs: Blob[]; colors: Palette }) {
+  const detail = useDetail()
   return (
     <group>
       {blobs.map((b, i) => (
-        <mesh key={i} position={b.p} scale={[1, b.flat ?? 1, 1]}>
-          <icosahedronGeometry args={[b.r, 0]} />
-          <meshStandardMaterial color={b.alt ? colors.foliageAlt : colors.foliage} flatShading />
+        <mesh key={i} position={b.p} scale={[1, b.flat ?? 1, 1]} rotation={[i * 0.7, i * 1.3, 0]}>
+          <icosahedronGeometry args={[b.r, detail]} />
+          <meshStandardMaterial
+            color={b.dark ? colors.shade : b.alt ? colors.foliageAlt : colors.foliage}
+            flatShading
+          />
         </mesh>
       ))}
     </group>
@@ -188,14 +270,17 @@ function Young({ colors, species }: { colors: Palette; species: PlazaSpecies }) 
     case 'blossom':
       return (
         <group>
-          <Trunk h={1.7} rb={0.24} rt={0.16} color={colors.trunk} />
-          <Branch from={1.25} len={0.7} tilt={0.7} yaw={0.6} r={0.09} color={colors.trunk} />
+          <TaperedTrunk h={2.4} rb={0.28} rt={0.17} color={colors.trunk} bark={colors.bark} sections={3} lean={0.06} />
+          <Branch from={1.75} len={1.1} tilt={0.75} yaw={0.6} r={0.1} color={colors.bark} twigs={1} />
+          <Branch from={2.0} len={0.95} tilt={-0.8} yaw={2.8} r={0.09} color={colors.bark} twigs={1} />
           <Canopy
             colors={colors}
             blobs={[
-              { p: [0, 2.5, 0], r: 0.95, flat: 0.8 },
-              { p: [0.75, 2.1, 0.25], r: 0.6, alt: true, flat: 0.8 },
-              { p: [-0.6, 2.2, -0.3], r: 0.55, flat: 0.8 },
+              { p: [0, 3.5, 0], r: 1.2, flat: 0.72 },
+              { p: [0.9, 3.05, 0.3], r: 0.78, alt: true, flat: 0.74 },
+              { p: [-0.85, 3.1, -0.35], r: 0.72, flat: 0.74 },
+              { p: [0.25, 3.0, 0.9], r: 0.6, dark: true, flat: 0.74 },
+              { p: [0.1, 4.15, 0.05], r: 0.66, alt: true, flat: 0.8 },
             ]}
           />
         </group>
@@ -205,23 +290,27 @@ function Young({ colors, species }: { colors: Palette; species: PlazaSpecies }) 
       if (species.id === 'pine') {
         return (
           <group>
-            <Trunk h={2.6} rb={0.2} rt={0.13} color={colors.trunk} seg={6} />
-            <PineTier y={1.0} r={0.95} h={1.15} color={colors.foliage} />
-            <PineTier y={1.85} r={0.72} h={1.0} color={colors.foliageAlt} />
-            <PineTier y={2.6} r={0.48} h={0.85} color={colors.foliage} />
+            <TaperedTrunk h={3.6} rb={0.24} rt={0.12} color={colors.trunk} bark={colors.bark} sections={3} lean={0.03} />
+            <PineTier y={1.0} r={1.15} h={1.4} color={colors.foliage} />
+            <PineTier y={1.95} r={0.9} h={1.25} color={colors.foliageAlt} />
+            <PineTier y={2.85} r={0.62} h={1.1} color={colors.foliage} />
+            <PineTier y={3.6} r={0.38} h={0.9} color={colors.foliageAlt} />
           </group>
         )
       }
       return (
         <group>
-          <Trunk h={1.9} rb={0.26} rt={0.17} color={colors.trunk} />
-          <Branch from={1.35} len={0.75} tilt={-0.75} yaw={2.1} r={0.09} color={colors.trunk} />
+          <TaperedTrunk h={2.7} rb={0.3} rt={0.18} color={colors.trunk} bark={colors.bark} sections={3} lean={0.05} />
+          <Branch from={1.9} len={1.0} tilt={-0.75} yaw={2.1} r={0.1} color={colors.bark} twigs={1} />
+          <Branch from={2.2} len={0.85} tilt={0.7} yaw={0.5} r={0.09} color={colors.bark} twigs={1} />
           <Canopy
             colors={colors}
             blobs={[
-              { p: [0, 2.7, 0], r: 0.95 },
-              { p: [0.7, 2.3, 0.3], r: 0.62, alt: true },
-              { p: [-0.65, 2.35, -0.25], r: 0.58 },
+              { p: [0, 3.85, 0], r: 1.15 },
+              { p: [0.85, 3.35, 0.35], r: 0.78, alt: true },
+              { p: [-0.8, 3.4, -0.3], r: 0.72 },
+              { p: [0.2, 3.3, 0.85], r: 0.6, dark: true },
+              { p: [0.15, 4.6, 0.1], r: 0.68, alt: true },
             ]}
           />
         </group>
@@ -234,9 +323,10 @@ function Young({ colors, species }: { colors: Palette; species: PlazaSpecies }) 
 // species commits to its own outline — round, conical, weeping, or low+wide.
 
 function PineTier({ y, r, h, color }: { y: number; r: number; h: number; color: string }) {
+  const detail = useDetail()
   return (
-    <mesh position={[0, y + h / 2, 0]}>
-      <coneGeometry args={[r, h, 8]} />
+    <mesh position={[0, y + h / 2, 0]} rotation={[0, y * 0.9, 0]}>
+      <coneGeometry args={[r, h, detail > 0 ? 11 : 7]} />
       <meshStandardMaterial color={color} flatShading />
     </mesh>
   )
@@ -313,24 +403,34 @@ function Mature({ colors, species }: { colors: Palette; species: PlazaSpecies })
     case 'blossom':
       return (
         <group>
-          <RootFlare r={0.72} color={colors.trunk} />
-          <Trunk h={2.7} rb={0.46} rt={0.3} color={colors.trunk} y={0.3} />
-          <Branch from={2.3} len={1.5} tilt={0.85} yaw={0.5} r={0.16} color={colors.trunk} />
-          <Branch from={2.5} len={1.35} tilt={-0.9} yaw={2.6} r={0.15} color={colors.trunk} />
+          <RootFlare r={0.8} color={colors.bark} />
+          <TaperedTrunk h={4.6} rb={0.5} rt={0.28} color={colors.trunk} bark={colors.bark} y={0.36} sections={4} lean={0.07} />
+          <Branch from={3.5} len={2.3} tilt={0.9} yaw={0.5} r={0.17} color={colors.bark} twigs={2} />
+          <Branch from={3.9} len={2.1} tilt={-0.95} yaw={2.6} r={0.16} color={colors.bark} twigs={2} />
+          <Branch from={4.3} len={1.8} tilt={0.8} yaw={4.5} r={0.14} color={colors.bark} twigs={1} />
           <Canopy
             colors={colors}
             blobs={[
-              { p: [0, 4.05, 0], r: 1.95, flat: 0.72 },
-              { p: [1.65, 3.6, 0.5], r: 1.35, alt: true, flat: 0.72 },
-              { p: [-1.55, 3.7, -0.45], r: 1.3, flat: 0.72 },
-              { p: [0.35, 3.65, 1.6], r: 1.2, alt: true, flat: 0.72 },
-              { p: [-0.4, 3.6, -1.65], r: 1.15, flat: 0.72 },
-              { p: [0.3, 4.85, 0.1], r: 1.0, alt: true, flat: 0.8 },
+              { p: [0, 6.5, 0], r: 2.15, flat: 0.66 },
+              { p: [1.75, 5.9, 0.55], r: 1.5, alt: true, flat: 0.68 },
+              { p: [-1.7, 6.0, -0.5], r: 1.45, flat: 0.68 },
+              { p: [0.4, 5.95, 1.7], r: 1.35, alt: true, flat: 0.68 },
+              { p: [-0.45, 5.85, -1.75], r: 1.3, flat: 0.68 },
+              { p: [1.2, 5.4, -1.25], r: 1.05, dark: true, flat: 0.7 },
+              { p: [-1.15, 5.35, 1.2], r: 1.0, dark: true, flat: 0.7 },
+              { p: [0.35, 7.45, 0.15], r: 1.25, alt: true, flat: 0.75 },
+              { p: [-0.7, 7.1, 0.7], r: 0.95 },
+              { p: [0.75, 7.05, -0.65], r: 0.9, alt: true },
             ]}
           />
-          {[0.4, 1.6, 2.9, 4.2, 5.4].map((a, i) => (
-            <mesh key={i} position={[Math.cos(a) * (1.1 + i * 0.15), 0.09, Math.sin(a) * (1.1 + i * 0.15)]} scale={[1, 0.18, 1]}>
-              <icosahedronGeometry args={[0.17, 0]} />
+          {/* fallen petals drifted around the base */}
+          {[0.4, 1.6, 2.9, 4.2, 5.4, 0.9, 3.6].map((a, i) => (
+            <mesh
+              key={i}
+              position={[Math.cos(a) * (1.2 + (i % 3) * 0.4), 0.09, Math.sin(a) * (1.2 + (i % 3) * 0.4)]}
+              scale={[1, 0.16, 1]}
+            >
+              <icosahedronGeometry args={[0.19, 0]} />
               <meshStandardMaterial color={colors.foliageAlt} flatShading />
             </mesh>
           ))}
@@ -343,34 +443,47 @@ function Mature({ colors, species }: { colors: Palette; species: PlazaSpecies })
       if (species.id === 'pine') {
         return (
           <group>
-            <RootFlare r={0.6} color={colors.trunk} />
-            <Trunk h={5.6} rb={0.36} rt={0.16} color={colors.trunk} y={0.3} seg={6} />
-            <PineTier y={1.15} r={1.85} h={2.1} color={colors.foliage} />
-            <PineTier y={2.55} r={1.5} h={1.9} color={colors.foliageAlt} />
-            <PineTier y={3.85} r={1.15} h={1.7} color={colors.foliage} />
-            <PineTier y={5.0} r={0.8} h={1.5} color={colors.foliageAlt} />
-            <PineTier y={6.0} r={0.5} h={1.3} color={colors.foliage} />
+            <RootFlare r={0.66} color={colors.bark} buttresses={4} />
+            <TaperedTrunk h={8.4} rb={0.42} rt={0.14} color={colors.trunk} bark={colors.bark} y={0.34} sections={5} lean={0.03} />
+            <PineTier y={1.15} r={2.15} h={2.3} color={colors.shade} />
+            <PineTier y={2.15} r={1.98} h={2.2} color={colors.foliage} />
+            <PineTier y={3.25} r={1.72} h={2.1} color={colors.foliageAlt} />
+            <PineTier y={4.35} r={1.45} h={1.95} color={colors.foliage} />
+            <PineTier y={5.4} r={1.18} h={1.8} color={colors.foliageAlt} />
+            <PineTier y={6.4} r={0.92} h={1.6} color={colors.foliage} />
+            <PineTier y={7.3} r={0.66} h={1.4} color={colors.foliageAlt} />
+            <PineTier y={8.15} r={0.42} h={1.25} color={colors.foliage} />
+            {/* leader spike */}
+            <mesh position={[0, 9.55, 0]}>
+              <coneGeometry args={[0.16, 0.7, 6]} />
+              <meshStandardMaterial color={colors.foliage} flatShading />
+            </mesh>
           </group>
         )
       }
-      // Broad, round, deep canopy.
+      // Broad, round, deep canopy on a heavy bole.
       return (
         <group>
-          <RootFlare r={0.85} color={colors.trunk} />
-          <Trunk h={3.4} rb={0.55} rt={0.36} color={colors.trunk} y={0.3} />
-          <Branch from={2.4} len={1.6} tilt={0.8} yaw={0.4} r={0.18} color={colors.trunk} />
-          <Branch from={2.7} len={1.45} tilt={-0.85} yaw={2.4} r={0.17} color={colors.trunk} />
-          <Branch from={3.0} len={1.2} tilt={0.7} yaw={4.3} r={0.15} color={colors.trunk} />
+          <RootFlare r={0.95} color={colors.bark} />
+          <TaperedTrunk h={5.0} rb={0.62} rt={0.34} color={colors.trunk} bark={colors.bark} y={0.38} sections={4} lean={0.05} />
+          <Branch from={3.5} len={2.4} tilt={0.82} yaw={0.4} r={0.2} color={colors.bark} twigs={2} />
+          <Branch from={4.0} len={2.2} tilt={-0.88} yaw={2.4} r={0.19} color={colors.bark} twigs={2} />
+          <Branch from={4.5} len={1.9} tilt={0.72} yaw={4.3} r={0.17} color={colors.bark} twigs={2} />
+          <Branch from={3.9} len={1.6} tilt={-0.7} yaw={5.5} r={0.14} color={colors.bark} twigs={1} />
           <Canopy
             colors={colors}
             blobs={[
-              { p: [0, 4.5, 0], r: 2.0 },
-              { p: [1.6, 4.0, 0.5], r: 1.45, alt: true },
-              { p: [-1.5, 4.15, -0.5], r: 1.4 },
-              { p: [0.4, 4.1, 1.55], r: 1.3, alt: true },
-              { p: [-0.5, 4.05, -1.6], r: 1.25 },
-              { p: [0.25, 5.7, 0.15], r: 1.35, alt: true },
-              { p: [-0.9, 5.3, 0.8], r: 0.95 },
+              { p: [0, 7.0, 0], r: 2.2 },
+              { p: [1.75, 6.35, 0.55], r: 1.55, alt: true },
+              { p: [-1.7, 6.5, -0.55], r: 1.5 },
+              { p: [0.45, 6.4, 1.7], r: 1.42, alt: true },
+              { p: [-0.55, 6.3, -1.75], r: 1.38 },
+              { p: [1.3, 5.75, -1.3], r: 1.1, dark: true },
+              { p: [-1.25, 5.7, 1.25], r: 1.05, dark: true },
+              { p: [0.3, 8.35, 0.15], r: 1.5, alt: true },
+              { p: [-0.95, 7.95, 0.85], r: 1.1 },
+              { p: [0.95, 7.85, -0.8], r: 1.05, alt: true },
+              { p: [0.1, 9.25, -0.1], r: 0.85 },
             ]}
           />
         </group>
@@ -429,6 +542,9 @@ function PlantMesh({
     foliage: mute(species.foliage, dormant),
     foliageAlt: mute(species.foliageAlt, dormant),
     trunk: mute(species.trunk, dormant),
+    // Shaded lobes give the canopy depth; darker bark banding breaks up the bole.
+    shade: mute(darken(species.foliage, 0.3), dormant),
+    bark: mute(darken(species.trunk, 0.22), dormant),
   }), [species, dormant])
 
   useFrame((state) => {
@@ -492,7 +608,8 @@ function PlacementTiles({ taken, onSelect }: { taken: Set<string>; onSelect: (t:
 // ─── Garden ────────────────────────────────────────────────────────────────────
 
 export default function PlazaGarden({
-  objects, groupVitality, nowMs, dormant, plantMode, takenTiles, onPlantSelect, onTileSelect,
+  objects, groupVitality, nowMs, dormant, plantMode, takenTiles, lowerGraphics = false,
+  onPlantSelect, onTileSelect,
 }: {
   objects: PlazaObject[]
   groupVitality: number
@@ -500,22 +617,25 @@ export default function PlazaGarden({
   dormant: boolean
   plantMode: boolean
   takenTiles: Set<string>
+  lowerGraphics?: boolean
   onPlantSelect: (o: PlazaObject) => void
   onTileSelect: (t: Tile) => void
 }) {
   return (
-    <group>
-      {objects.map((o) => (
-        <PlantMesh
-          key={o.id}
-          object={o}
-          groupVitality={groupVitality}
-          nowMs={nowMs}
-          dormant={dormant}
-          onSelect={onPlantSelect}
-        />
-      ))}
-      {plantMode && <PlacementTiles taken={takenTiles} onSelect={onTileSelect} />}
-    </group>
+    <DetailCtx.Provider value={lowerGraphics ? 0 : 1}>
+      <group>
+        {objects.map((o) => (
+          <PlantMesh
+            key={o.id}
+            object={o}
+            groupVitality={groupVitality}
+            nowMs={nowMs}
+            dormant={dormant}
+            onSelect={onPlantSelect}
+          />
+        ))}
+        {plantMode && <PlacementTiles taken={takenTiles} onSelect={onTileSelect} />}
+      </group>
+    </DetailCtx.Provider>
   )
 }

@@ -2070,6 +2070,7 @@ function Scene({
         dormant={dormant}
         plantMode={plantMode}
         takenTiles={takenTiles}
+        lowerGraphics={lowerGraphics}
         onPlantSelect={onPlantSelect}
         onTileSelect={onTileSelect}
       />
