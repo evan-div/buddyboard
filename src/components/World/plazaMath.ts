@@ -27,8 +27,10 @@ export function plazaEdgeRadius(theta: number): number {
 
 export type Tile = { q: number; r: number }
 
-export const TILE = 2.2
-export const TILE_MARGIN = 1.8
+// Spacing is set by the widest mature canopy (~2 units of radius) so grown
+// trees stand clear of each other; the margin keeps them off the rounded rim.
+export const TILE = 3.2
+export const TILE_MARGIN = 2.8
 
 export function tileToWorld(tile: Tile): { x: number; z: number } {
   return { x: tile.q * TILE, z: tile.r * TILE }
