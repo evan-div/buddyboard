@@ -27,6 +27,12 @@ import {
   SHOULDER,
   SHOULDER_LOOK,
   INTERACT_RANGE,
+  placeCardBeside,
+  charHalfWidthPx,
+  CARD_GAP,
+  CARD_RISE,
+  CARD_MARGIN,
+  CHAR_HALF_WIDTH_PX_MAX,
   type MoveInput,
 } from './thirdPerson'
 import { plazaEdgeRadius } from './plazaMath'
@@ -436,6 +442,110 @@ describe('cameraPlacement', () => {
     cam.pivot.set(0, 1, 0)
     cameraPlacement(cam, pos, look)
     expect(pos.y).toBeGreaterThan(look.y)
+  })
+})
+
+describe('placeCardBeside', () => {
+  const VIEW = { width: 1280, height: 800 }
+  const CARD = { width: 270, height: 420 }
+
+  it('sits to the right of the character, clear of them, when there is room', () => {
+    const { left, top, side } = placeCardBeside(400, 300, CARD, VIEW)
+    expect(side).toBe('right')
+    expect(left).toBe(400 + CARD_GAP)
+    expect(left).toBeGreaterThan(400)          // never covers the character
+    expect(top).toBe(300 - CARD_RISE)
+  })
+
+  it('flips to the left when the character is near the right edge', () => {
+    const { left, side } = placeCardBeside(1150, 300, CARD, VIEW)
+    expect(side).toBe('left')
+    expect(left + CARD.width).toBeLessThan(1150)   // still clear of the character
+    expect(left).toBeGreaterThanOrEqual(CARD_MARGIN)
+  })
+
+  it('keeps the card fully on screen wherever the character is', () => {
+    for (let x = -200; x <= VIEW.width + 200; x += 37)
+      for (let y = -200; y <= VIEW.height + 200; y += 41) {
+        const { left, top } = placeCardBeside(x, y, CARD, VIEW)
+        expect(left).toBeGreaterThanOrEqual(CARD_MARGIN)
+        expect(top).toBeGreaterThanOrEqual(CARD_MARGIN)
+        expect(left + CARD.width).toBeLessThanOrEqual(VIEW.width - CARD_MARGIN)
+        expect(top + CARD.height).toBeLessThanOrEqual(VIEW.height - CARD_MARGIN)
+      }
+  })
+
+  it('does not overlap the character horizontally in either orientation', () => {
+    // Anywhere there's room on one side or the other, the card clears the anchor
+    for (let x = 320; x <= VIEW.width - 320; x += 23) {
+      const { left, side } = placeCardBeside(x, 400, CARD, VIEW)
+      if (side === 'right') expect(left).toBeGreaterThanOrEqual(x)
+      else expect(left + CARD.width).toBeLessThanOrEqual(x)
+    }
+  })
+
+  // The bug this fixes: standing right next to someone makes them fill a big
+  // chunk of the screen, and a gap measured from their head point alone left
+  // the card sitting on top of their body.
+  it('clears the character silhouette, not just the anchor point', () => {
+    const halfW = 190     // a bean seen from ~2 units away
+    const { left, side } = placeCardBeside(400, 400, CARD, VIEW, halfW)
+    expect(side).toBe('right')
+    expect(left).toBeGreaterThanOrEqual(400 + halfW)
+  })
+
+  it('flips to the left when a wide silhouette leaves no room on the right', () => {
+    const { left, side } = placeCardBeside(820, 400, CARD, VIEW, 190)
+    expect(side).toBe('left')
+    expect(left + CARD.width).toBeLessThanOrEqual(820 - 190)
+  })
+
+  it('stays on screen for every anchor position and silhouette width', () => {
+    for (const halfW of [0, 40, 120, 220])
+      for (let x = -100; x <= VIEW.width + 100; x += 29) {
+        const { left, top } = placeCardBeside(x, 400, CARD, VIEW, halfW)
+        expect(left).toBeGreaterThanOrEqual(CARD_MARGIN)
+        expect(left + CARD.width).toBeLessThanOrEqual(VIEW.width - CARD_MARGIN)
+        expect(top).toBeGreaterThanOrEqual(CARD_MARGIN)
+      }
+  })
+
+  it('clamps rather than overflowing when the card cannot fit the viewport', () => {
+    const tiny = { width: 320, height: 300 }
+    const { left, top } = placeCardBeside(160, 150, { width: 400, height: 500 }, tiny)
+    expect(left).toBe(CARD_MARGIN)
+    expect(top).toBe(CARD_MARGIN)
+  })
+
+  it('tracks the character as they move across the screen', () => {
+    const a = placeCardBeside(300, 400, CARD, VIEW)
+    const b = placeCardBeside(500, 400, CARD, VIEW)
+    expect(b.left).toBeGreaterThan(a.left)     // card follows, not pinned
+    const up = placeCardBeside(300, 250, CARD, VIEW)
+    expect(up.top).toBeLessThan(a.top)
+  })
+})
+
+describe('charHalfWidthPx', () => {
+  it('grows as the character gets closer to the camera', () => {
+    const near = charHalfWidthPx(60, 800, 2)
+    const far  = charHalfWidthPx(60, 800, 8)
+    expect(near).toBeGreaterThan(far)
+    expect(far).toBeGreaterThan(0)
+  })
+
+  it('shrinks as the FOV widens (same character, more world on screen)', () => {
+    expect(charHalfWidthPx(74, 800, 4)).toBeLessThan(charHalfWidthPx(60, 800, 4))
+  })
+
+  it('is capped so a character against the lens cannot demand the whole screen', () => {
+    expect(charHalfWidthPx(60, 800, 0.01)).toBe(CHAR_HALF_WIDTH_PX_MAX)
+  })
+
+  it('matches the perspective projection at a known configuration', () => {
+    // fov 60°, 800px tall → focal = 400 / tan(30°) ≈ 692.8 px per world unit at
+    // depth 1, so a 0.55u half-width at 4u reads as ≈95px.
+    expect(charHalfWidthPx(60, 800, 4)).toBeCloseTo((0.55 * 400) / Math.tan(Math.PI / 6) / 4, 6)
   })
 })
 

@@ -304,6 +304,81 @@ export function cameraPlacement(cam: CamState, outPos: THREE.Vector3, outLook: T
   )
 }
 
+// ─── Member card placement ────────────────────────────────────────────────────
+// The orbit-mode card can live at a fixed offset from screen centre, because
+// zooming to a character always parks them in the same spot. In walk mode the
+// spring arm can be anywhere, so the card has to be placed from the target's
+// actual projected screen position — otherwise it lands on top of them.
+
+// Height up the character's body to anchor the card against — roughly head
+// level, so the card reads as attached to them rather than to their feet.
+export const CARD_ANCHOR_Y = 1.6
+
+export const CARD_GAP    = 28   // px between the character's silhouette and the card
+export const CARD_RISE   = 40   // px the card sits above the anchor, matching
+                                // orbit mode's `headScreenY - 40`
+export const CARD_MARGIN = 16   // px minimum gap to the viewport edge
+
+// Half-width of a bean in world units, arms included — used to convert the
+// character's distance from the camera into how wide they look on screen.
+export const CHAR_HALF_WIDTH = 0.55
+// Cap so a character pressed right up against the camera doesn't demand an
+// absurd offset (the viewport clamp would fight it anyway).
+export const CHAR_HALF_WIDTH_PX_MAX = 220
+
+export interface Size { width: number; height: number }
+
+// Pixels per world unit at a given depth, for a perspective camera.
+export function projectedScale(fovDeg: number, viewportHeight: number, dist: number): number {
+  const focal = viewportHeight / (2 * Math.tan((fovDeg * Math.PI) / 360))
+  return focal / Math.max(0.2, dist)
+}
+
+// How wide the character looks on screen, in px, at this depth.
+export function charHalfWidthPx(fovDeg: number, viewportHeight: number, dist: number): number {
+  return Math.min(
+    CHAR_HALF_WIDTH_PX_MAX,
+    CHAR_HALF_WIDTH * projectedScale(fovDeg, viewportHeight, dist),
+  )
+}
+
+// Place the card beside the anchor: to its right by preference, flipped to the
+// left when there isn't room, and always fully inside the viewport. Clears the
+// character's silhouette rather than just the anchor point — standing next to
+// someone makes them huge on screen, which is exactly when a fixed gap fails.
+export function placeCardBeside(
+  anchorX: number,
+  anchorY: number,
+  card: Size,
+  view: Size,
+  anchorHalfWidth = 0,
+): { left: number; top: number; side: 'right' | 'left' } {
+  const clearance = anchorHalfWidth + CARD_GAP
+  const rightLeft = anchorX + clearance
+  const leftLeft  = anchorX - clearance - card.width
+
+  let side: 'right' | 'left'
+  let left: number
+  if (rightLeft + card.width <= view.width - CARD_MARGIN) {
+    side = 'right'; left = rightLeft
+  } else if (leftLeft >= CARD_MARGIN) {
+    side = 'left';  left = leftLeft
+  } else {
+    // Neither side fits — keep it on the roomier side and clamp.
+    const roomRight = view.width - anchorX
+    side = roomRight >= anchorX ? 'right' : 'left'
+    left = side === 'right' ? rightLeft : leftLeft
+  }
+  left = clamp(left, CARD_MARGIN, Math.max(CARD_MARGIN, view.width - card.width - CARD_MARGIN))
+
+  const top = clamp(
+    anchorY - CARD_RISE,
+    CARD_MARGIN,
+    Math.max(CARD_MARGIN, view.height - card.height - CARD_MARGIN),
+  )
+  return { left, top, side }
+}
+
 // ─── Animator handoff ─────────────────────────────────────────────────────────
 
 // Written by the controller every frame and read by MiiCharacter's animator.

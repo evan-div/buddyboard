@@ -11,7 +11,7 @@ import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import ThirdPersonController from './ThirdPersonController'
-import { makeLocomotion } from './thirdPerson'
+import { makeLocomotion, placeCardBeside } from './thirdPerson'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -1641,6 +1641,7 @@ function Scene({
   onWalkInteract,
   onWalkTargetChange,
   onWalkLockChange,
+  onWalkCardAnchor,
   onWalkExit,
 }: {
   members: GroupMember[]
@@ -1662,6 +1663,7 @@ function Scene({
   onWalkInteract: (uid: string) => void
   onWalkTargetChange: (uid: string | null) => void
   onWalkLockChange: (locked: boolean) => void
+  onWalkCardAnchor: (anchor: { x: number; y: number; halfWidth: number } | null) => void
   onWalkExit: () => void
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
@@ -2120,6 +2122,7 @@ function Scene({
         onInteract={onWalkInteract}
         onTargetChange={onWalkTargetChange}
         onLockChange={onWalkLockChange}
+        onCardAnchor={onWalkCardAnchor}
         onExit={onWalkExit}
       />
       <PhysicsUpdater
@@ -2301,10 +2304,18 @@ export default function MiiPlaza({
   const [walkTarget, setWalkTarget]         = useState<string | null>(null)
   const [pointerLocked, setPointerLocked]   = useState(false)
   const [returnNonce, setReturnNonce]       = useState(0)
+  // Where the card's character is on screen, and how big the card currently is
+  // — both needed to place the card beside them instead of over them.
+  const [walkCardAnchor, setWalkCardAnchor] = useState<{ x: number; y: number; halfWidth: number } | null>(null)
+  const [walkCardSize, setWalkCardSize]     = useState({ width: 270, height: 420 })
+  const [viewSize, setViewSize]             = useState({ width: 0, height: 0 })
+  const walkCardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function check() {
       setIsMobile(window.innerWidth < 768)
+      const el = containerRef.current
+      if (el) setViewSize({ width: el.clientWidth, height: el.clientHeight })
       // A fine pointer rules out touch-only devices regardless of viewport, and
       // pointer lock is what mouse-look depends on.
       setIsDesktop(
@@ -2322,6 +2333,23 @@ export default function MiiPlaza({
   useEffect(() => {
     if (!isDesktop && walkMode) exitWalkMode()
   }, [isDesktop, walkMode])
+
+  // The card's height changes as you page through presets / confirm / stats, and
+  // the placement clamp needs the live value to keep it on screen.
+  useEffect(() => {
+    const el = walkCardRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      setWalkCardSize((prev) =>
+        Math.abs(prev.width - width) > 1 || Math.abs(prev.height - height) > 1
+          ? { width, height }
+          : prev,
+      )
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [walkMode, selectedMember])
 
   function enterWalkMode() {
     setSelectedMember(null)
@@ -2344,12 +2372,9 @@ export default function MiiPlaza({
 
   function handleSelect(member: GroupMember, pos: [number, number, number]) {
     // In walk mode the spring arm stays put — no zoom-to-focus, no camera lock.
-    // The card opens beside the character you walked up to. Anchor it at a
-    // fixed comfortable height rather than projecting a head position, since
-    // the camera isn't about to move to a known framing.
+    // The card is positioned from the target's live projected screen position
+    // (see walkPlacement), so there's no framing to precompute here.
     if (walkMode) {
-      const container = containerRef.current
-      if (container) setHeadScreenY(container.clientHeight * 0.34)
       setSelectedMember(member)
       return
     }
@@ -2378,6 +2403,29 @@ export default function MiiPlaza({
   }
 
   const cardTop = Math.max(16, headScreenY - 40)
+
+  // Orbit mode can hard-code the card's offset from centre because zooming to a
+  // character always frames them identically. Walk mode can't — the spring arm
+  // could have the character anywhere — so place it against their live
+  // projected screen position instead.
+  const walkPlacement = walkMode && walkCardAnchor && viewSize.width > 0
+    ? placeCardBeside(walkCardAnchor.x, walkCardAnchor.y, walkCardSize, viewSize, walkCardAnchor.halfWidth)
+    : null
+
+  const cardWrapperStyle: React.CSSProperties = isMobile
+    ? { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, pointerEvents: 'auto' }
+    : walkMode
+      ? {
+          position: 'absolute',
+          left: walkPlacement?.left ?? 0,
+          top:  walkPlacement?.top  ?? 0,
+          zIndex: 10,
+          pointerEvents: 'auto',
+          // The anchor lands on the first frame after E; stay hidden until then
+          // rather than flashing the card in the top-left corner.
+          visibility: walkPlacement ? 'visible' : 'hidden',
+        }
+      : { position: 'absolute', left: 'calc(50% + 150px)', top: cardTop, zIndex: 10, pointerEvents: 'auto' }
 
   return (
     <div
@@ -2426,6 +2474,7 @@ export default function MiiPlaza({
             }}
             onWalkTargetChange={setWalkTarget}
             onWalkLockChange={setPointerLocked}
+            onWalkCardAnchor={setWalkCardAnchor}
             onWalkExit={exitWalkMode}
           />
         </Suspense>
@@ -2436,18 +2485,7 @@ export default function MiiPlaza({
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
-        <div className="sheet-rise" style={isMobile ? {
-          position: 'absolute',
-          bottom: 0, left: 0, right: 0,
-          zIndex: 10,
-          pointerEvents: 'auto',
-        } : {
-          position: 'absolute',
-          left: 'calc(50% + 150px)',
-          top: cardTop,
-          zIndex: 10,
-          pointerEvents: 'auto',
-        }}>
+        <div ref={walkCardRef} className="sheet-rise" style={cardWrapperStyle}>
           {selectedMember.uid === currentUid ? (
             <SelfCard
               member={selectedMember}

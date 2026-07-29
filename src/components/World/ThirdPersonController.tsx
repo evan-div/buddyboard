@@ -21,7 +21,7 @@ import {
   nearestInteractable,
   clamp, smoothFactor,
   CAM_PIVOT_Y, CAM_START_DIST, CAM_MIN_DIST, CAM_MAX_DIST,
-  PITCH_MIN, PITCH_MAX, FOV_BASE,
+  PITCH_MIN, PITCH_MAX, FOV_BASE, CARD_ANCHOR_Y, charHalfWidthPx,
   type MoveInput, type InteractCandidate, type Locomotion,
 } from './thirdPerson'
 import type { GroupMember } from '@/lib/types'
@@ -44,12 +44,16 @@ interface Props {
   onInteract: (uid: string) => void
   onTargetChange: (uid: string | null) => void
   onLockChange: (locked: boolean) => void
+  /** Screen position (CSS px) of the character whose card is open, plus how wide
+      they look on screen, so the DOM overlay can sit clear of them. Null when no
+      card is open. */
+  onCardAnchor: (anchor: { x: number; y: number; halfWidth: number } | null) => void
   onExit: () => void
 }
 
 export default function ThirdPersonController({
   active, paused, playerUid, members, charGroups, locomotion,
-  onInteract, onTargetChange, onLockChange, onExit,
+  onInteract, onTargetChange, onLockChange, onCardAnchor, onExit,
 }: Props) {
   const { camera, gl } = useThree()
 
@@ -64,11 +68,13 @@ export default function ThirdPersonController({
 
   const camPos  = useRef(new THREE.Vector3())
   const camLook = useRef(new THREE.Vector3())
+  const projected  = useRef(new THREE.Vector3())
+  const lastAnchor = useRef({ x: -1e9, y: -1e9, halfWidth: -1 })
 
   // Latest props for the window-level listeners, which are registered once and
   // must not be torn down and rebuilt every time `members` changes identity.
-  const live = useRef({ active, paused, members, onInteract, onExit, onLockChange })
-  live.current = { active, paused, members, onInteract, onExit, onLockChange }
+  const live = useRef({ active, paused, members, onInteract, onExit, onLockChange, onCardAnchor })
+  live.current = { active, paused, members, onInteract, onExit, onLockChange, onCardAnchor }
 
   // ── Reset on entry ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -85,6 +91,16 @@ export default function ThirdPersonController({
     // THREE.Group may not be registered in charGroups yet on this tick.
     seeded.current = false
   }, [active, gl.domElement, onTargetChange])
+
+  // No card open: drop the anchor so the overlay stops positioning against a
+  // character it's no longer showing.
+  useEffect(() => {
+    if (active && paused) return
+    lastAnchor.current.x = -1e9
+    lastAnchor.current.y = -1e9
+    lastAnchor.current.halfWidth = -1
+    onCardAnchor(null)
+  }, [active, paused, onCardAnchor])
 
   // A card is open: give the cursor back. While the pointer is locked the
   // browser routes every click to the canvas, so the card's buttons would be
@@ -308,6 +324,42 @@ export default function ThirdPersonController({
     if (found !== target.current) {
       target.current = found
       onTargetChange(found)
+    }
+
+    // ── Card anchor ─────────────────────────────────────────────────────────
+    // While a card is open, keep reporting where its character actually is on
+    // screen. Tracking rather than sampling once matters because the camera is
+    // still easing for a few hundred ms after E — the walker decelerates and
+    // the spring arm settles — so a one-shot projection would drift out of
+    // alignment right as the card appears.
+    if (paused && target.current) {
+      const g = charGroups.current?.get(target.current)
+      if (g) {
+        // camera.lookAt() above only touched rotation; matrixWorld is stale
+        // until the renderer runs, and project() reads its inverse.
+        camera.updateMatrixWorld()
+        projected.current.set(g.position.x, g.position.y + CARD_ANCHOR_Y, g.position.z)
+        const dist = camera.position.distanceTo(projected.current)
+        projected.current.project(camera)
+        const el = gl.domElement
+        const sx = ((projected.current.x + 1) / 2) * el.clientWidth
+        const sy = ((1 - projected.current.y) / 2) * el.clientHeight
+        // Report how wide they look, so the card can clear their silhouette
+        // instead of a bare point — up close a bean fills a lot of screen.
+        const halfWidth = charHalfWidthPx(
+          persp.isPerspectiveCamera ? persp.fov : FOV_BASE,
+          el.clientHeight,
+          dist,
+        )
+        if (Math.abs(sx - lastAnchor.current.x) > 1.5 ||
+            Math.abs(sy - lastAnchor.current.y) > 1.5 ||
+            Math.abs(halfWidth - lastAnchor.current.halfWidth) > 2) {
+          lastAnchor.current.x = sx
+          lastAnchor.current.y = sy
+          lastAnchor.current.halfWidth = halfWidth
+          live.current.onCardAnchor({ x: sx, y: sy, halfWidth })
+        }
+      }
     }
   })
 
