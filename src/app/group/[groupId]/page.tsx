@@ -54,6 +54,7 @@ export default function GroupPage() {
   const [membersData, setMembersData] = useState<GroupMember[] | null>(null)
   const [activeTab, setActiveTab] = useState<'plaza' | 'wall' | 'leaderboard' | 'court' | 'info' | 'style'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
+  const [firstPerson, setFirstPerson] = useState(false)
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
   const [unreadWallCount, setUnreadWallCount] = useState(0)
   const [activeCaseCount, setActiveCaseCount] = useState(0)
@@ -312,25 +313,32 @@ export default function GroupPage() {
       {!authLoading && !loading && group && user && userProfile && (
         <div className="min-h-screen bg-[#0f0f13]">
 
-          {/* ── App shell: fixed top bar + bottom tab bar ── */}
-          <TopBar
-            unreadCount={notifications.filter((n) => !n.read).length}
-            onBellClick={() => setShowNotifPanel(true)}
-            avatar={userProfile.avatar ?? null}
-            onAvatarClick={() => router.push(`/profile?from=${encodeURIComponent(`/group/${groupId}`)}`)}
-          />
-          <BottomTabBar
-            tabs={[
-              { key: 'plaza', label: 'Plaza', icon: '🌳' },
-              { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
-              { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
-              { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
-              { key: 'info', label: 'Info', icon: 'ℹ️' },
-              { key: 'style', label: 'Style', icon: '🎨' },
-            ] as readonly TabDef<typeof activeTab>[]}
-            active={activeTab}
-            onSelect={switchTab}
-          />
+          {/* ── App shell: fixed top bar + bottom tab bar ──
+              Both float over the plaza, which is fine for a diorama but breaks
+              the illusion when you're standing inside it — so first-person
+              mode takes the screen. */}
+          {!firstPerson && (
+            <>
+              <TopBar
+                unreadCount={notifications.filter((n) => !n.read).length}
+                onBellClick={() => setShowNotifPanel(true)}
+                avatar={userProfile.avatar ?? null}
+                onAvatarClick={() => router.push(`/profile?from=${encodeURIComponent(`/group/${groupId}`)}`)}
+              />
+              <BottomTabBar
+                tabs={[
+                  { key: 'plaza', label: 'Plaza', icon: '🌳' },
+                  { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
+                  { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
+                  { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
+                  { key: 'info', label: 'Info', icon: 'ℹ️' },
+                  { key: 'style', label: 'Style', icon: '🎨' },
+                ] as readonly TabDef<typeof activeTab>[]}
+                active={activeTab}
+                onSelect={switchTab}
+              />
+            </>
+          )}
 
           {/* ── Plaza: full-screen, shell bars float over it ── */}
           {activeTab === 'plaza' && (
@@ -343,6 +351,7 @@ export default function GroupPage() {
               remainingTake={dailyStats.remainingTake}
               presets={group.presets}
               onReady={handlePlazaReady}
+              onFirstPersonChange={setFirstPerson}
             />
           )}
 

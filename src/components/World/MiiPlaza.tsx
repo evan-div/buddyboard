@@ -6,6 +6,8 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
+import FirstPersonController from './FirstPersonController'
+import { useFirstPersonInput, type FPKeys, type FPLook } from './useFirstPersonInput'
 import StylizedGrassSurface from './StylizedGrassSurface'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
@@ -316,11 +318,13 @@ function CameraController({
   orbitRef,
   onUnlock,
   mobile,
+  firstPerson,
 }: {
   focusPos: [number, number, number] | null
   orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
   mobile: boolean
+  firstPerson: boolean
 }) {
   const { camera } = useThree()
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
@@ -328,6 +332,14 @@ function CameraController({
   const unlockSent = useRef(false)
 
   useFrame(() => {
+    if (firstPerson) {
+      // FirstPersonController owns the camera. Arm the return-home branch so
+      // that the moment the mode ends we lerp back to the isometric view — the
+      // same path a closed member card takes.
+      wasLocked.current  = true
+      unlockSent.current = false
+      return
+    }
     if (focusPos) {
       wasLocked.current  = true
       unlockSent.current = false
@@ -1617,6 +1629,12 @@ function Scene({
   mobile,
   lowerGraphics,
   reducedMotion,
+  firstPerson,
+  fpLocked,
+  fpKeys,
+  fpLook,
+  onNearbyChange,
+  onExitFirstPerson,
 }: {
   members: GroupMember[]
   groupId: string
@@ -1631,6 +1649,12 @@ function Scene({
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
+  firstPerson: boolean
+  fpLocked: boolean
+  fpKeys: React.RefObject<FPKeys>
+  fpLook: React.RefObject<FPLook>
+  onNearbyChange: (member: GroupMember | null, pos: [number, number, number] | null) => void
+  onExitFirstPerson: () => void
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
@@ -1704,7 +1728,9 @@ function Scene({
   }, [])
 
   const handlePickupStart = useCallback((member: GroupMember) => {
-    if (cameraLocked || draggingUid.current) return
+    // In first person you interact with E, not by grabbing with the mouse —
+    // the cursor is captured for looking around.
+    if (cameraLocked || firstPerson || draggingUid.current) return
 
     // Always use the character's live position, not the stale spawn position
     const group = charGroups.current.get(member.uid)
@@ -1759,7 +1785,7 @@ function Scene({
         pos: plazaVec(startPos),
       })
     }, 250)
-  }, [cameraLocked, groupId, currentUid, setHeldBy])
+  }, [cameraLocked, firstPerson, groupId, currentUid, setHeldBy])
 
   const handlePointerUp = useCallback(() => {
     // Clear pending hold timer
@@ -2026,10 +2052,23 @@ function Scene({
     return map
   }, [heldByMap, members, currentUid])
 
+  const selfMember = useMemo(
+    () => members.find((m) => m.uid === currentUid) ?? null,
+    [members, currentUid],
+  )
+
+  // Someone across the group can grab you while you're walking around. Rather
+  // than have PhysicsUpdater and FirstPersonController fight over the same
+  // transform, being picked up drops you out of first person.
+  const selfDragMode = dragModeMap.get(currentUid) ?? null
+  useEffect(() => {
+    if (firstPerson && selfDragMode) onExitFirstPerson()
+  }, [firstPerson, selfDragMode, onExitFirstPerson])
+
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
-      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
+      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} firstPerson={firstPerson} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
@@ -2052,6 +2091,7 @@ function Scene({
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
           heldBy={heldByNames.get(member.uid) ?? null}
+          playerControlled={firstPerson && member.uid === currentUid}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -2077,9 +2117,20 @@ function Scene({
           clearPlazaHold(groupId, uid)
         }}
       />
+      <FirstPersonController
+        active={firstPerson}
+        locked={fpLocked}
+        keys={fpKeys}
+        look={fpLook}
+        playerMember={selfMember}
+        members={members}
+        charGroups={charGroups}
+        dragModeMap={dragModeMap}
+        onNearbyChange={onNearbyChange}
+      />
       <OrbitControls
         ref={orbitRef}
-        enabled={!cameraLocked}
+        enabled={!cameraLocked && !firstPerson}
         target={[0, 0.6, 0]}
         minDistance={3}
         maxDistance={40}
@@ -2216,13 +2267,18 @@ interface Props {
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
+  // Lets the group page hide its fixed shell bars while you're walking around
+  onFirstPersonChange?: (active: boolean) => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady, onFirstPersonChange,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // State, not a ref: the pointer-lock listeners have to re-bind once the
+  // <Canvas> actually mounts its DOM element.
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
 
   const [selectedMember, setSelectedMember] = useState<GroupMember | null>(null)
   const [focusPos, setFocusPos]             = useState<[number, number, number] | null>(null)
@@ -2232,6 +2288,19 @@ export default function MiiPlaza({
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
 
+  // ── First-person mode ──────────────────────────────────────────────────────
+  // Two independent flags: `firstPerson` is "am I in the mode", `fpLocked` is
+  // "does the browser currently have my cursor". They come apart whenever the
+  // points card is open, which is exactly what makes E usable.
+  const [firstPerson, setFirstPerson] = useState(false)
+  const [fpLocked, setFpLocked]       = useState(false)
+  const [nearby, setNearby]           = useState<{ member: GroupMember; pos: [number, number, number] } | null>(null)
+  // Set immediately before an intentional exitPointerLock() so the resulting
+  // pointerlockchange is understood as "paused for the card", not "user hit Esc".
+  const interactPause = useRef(false)
+  const nearbyRef     = useRef<typeof nearby>(null)
+  const selectedRef   = useRef<GroupMember | null>(null)
+
   useEffect(() => {
     function check() { setIsMobile(window.innerWidth < 768) }
     check()
@@ -2240,6 +2309,75 @@ export default function MiiPlaza({
   }, [])
 
   useEffect(() => () => { if (animTimerRef.current) clearTimeout(animTimerRef.current) }, [])
+
+  useEffect(() => { onFirstPersonChange?.(firstPerson) }, [firstPerson, onFirstPersonChange])
+
+  const requestLock = useCallback(() => {
+    // Pointer lock needs a user gesture and can be refused (Chrome throttles a
+    // re-lock shortly after an exit). Failure is fine — the "Click to resume"
+    // overlay renders off `fpLocked`, so it's already the fallback.
+    const p = canvasEl?.requestPointerLock?.() as unknown
+    if (p instanceof Promise) p.catch(() => {})
+  }, [canvasEl])
+
+  const exitFirstPerson = useCallback(() => {
+    setFirstPerson(false)
+    setFpLocked(false)
+    setNearby(null)
+    interactPause.current = false
+    if (document.pointerLockElement) document.exitPointerLock()
+  }, [])
+
+  const handleNearbyChange = useCallback(
+    (member: GroupMember | null, pos: [number, number, number] | null) => {
+      setNearby(member && pos ? { member, pos } : null)
+    },
+    [],
+  )
+
+  const handleLockChange = useCallback((locked: boolean) => {
+    setFpLocked(locked)
+    if (locked) return
+    // Lock released. Unless we released it ourselves to open the card, the
+    // user pressed Esc — leave the mode.
+    if (interactPause.current) {
+      interactPause.current = false
+      return
+    }
+    setFirstPerson(false)
+    setNearby(null)
+  }, [])
+
+  // A plain declaration, not a useCallback: it calls handleSelect, which is
+  // rebuilt every render, and useFirstPersonInput keeps callbacks in a ref — so
+  // memoizing here would buy nothing and risk capturing a stale handleSelect.
+  function handleInteract() {
+    const target = nearbyRef.current
+    if (!target || selectedRef.current) return
+    // Release the cursor so the DOM card is actually usable, but stay in the
+    // mode — interactPause tells handleLockChange this wasn't an Esc.
+    interactPause.current = true
+    document.exitPointerLock()
+    handleSelect(target.member, target.pos)
+  }
+
+  const { keys: fpKeys, look: fpLook } = useFirstPersonInput({
+    enabled: firstPerson,
+    canvas: canvasEl,
+    onLockChange: handleLockChange,
+    onInteract: handleInteract,
+  })
+
+  // Esc still means "leave" once the browser has no lock left to release
+  // (paused with the card open, or waiting on "Click to resume").
+  useEffect(() => {
+    if (!firstPerson || fpLocked) return
+    function onKey(e: KeyboardEvent) {
+      if (e.code === 'Escape') exitFirstPerson()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [firstPerson, fpLocked, exitFirstPerson])
 
   function handleSelect(member: GroupMember, pos: [number, number, number]) {
     const [fx, fy, fz] = pos
@@ -2264,7 +2402,13 @@ export default function MiiPlaza({
     setSelectedMember(null)
     setFocusPos(null)
     // cameraLocked stays true until CameraController lerps back and calls onUnlock
+    // Closing is a click, which is a fresh user gesture — the one moment we can
+    // legally ask for the cursor back and drop straight into walking again.
+    if (firstPerson) requestLock()
   }
+
+  useEffect(() => { nearbyRef.current = nearby }, [nearby])
+  useEffect(() => { selectedRef.current = selectedMember }, [selectedMember])
 
   const cardTop = Math.max(16, headScreenY - 40)
 
@@ -2283,6 +2427,7 @@ export default function MiiPlaza({
       }}
     >
       <Canvas
+        ref={setCanvasEl}
         camera={{ position: [8, 6, 8], fov: 60 }}
         dpr={lowerGraphics ? 1 : [1, 2]}
         gl={{ antialias: !lowerGraphics, alpha: true, powerPreference: lowerGraphics ? 'low-power' : 'high-performance' }}
@@ -2304,12 +2449,27 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
+            firstPerson={firstPerson}
+            fpLocked={fpLocked}
+            fpKeys={fpKeys}
+            fpLook={fpLook}
+            onNearbyChange={handleNearbyChange}
+            onExitFirstPerson={exitFirstPerson}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
       </Canvas>
 
-      <PresenceTab members={members} currentUid={currentUid} />
+      {!firstPerson && <PresenceTab members={members} currentUid={currentUid} />}
+
+      <FirstPersonHud
+        active={firstPerson}
+        locked={fpLocked}
+        cardOpen={!!selectedMember}
+        nearbyName={nearby?.member.displayName ?? null}
+        onResume={requestLock}
+        onExit={exitFirstPerson}
+      />
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
@@ -2320,9 +2480,12 @@ export default function MiiPlaza({
           pointerEvents: 'auto',
         } : {
           position: 'absolute',
-          left: 'calc(50% + 150px)',
-          top: cardTop,
-          zIndex: 10,
+          // In first person the head-projection math above doesn't apply — the
+          // camera is inside the plaza, not looking at it from outside.
+          left: firstPerson ? '50%' : 'calc(50% + 150px)',
+          transform: firstPerson ? 'translateX(-50%)' : undefined,
+          top: firstPerson ? 72 : cardTop,
+          zIndex: 20,
           pointerEvents: 'auto',
         }}>
           {selectedMember.uid === currentUid ? (
@@ -2361,32 +2524,175 @@ export default function MiiPlaza({
       )}
 
       {/* Hint */}
-      {!selectedMember && (
+      {!selectedMember && !firstPerson && (
         <div style={{
           position: 'absolute',
           bottom: 12,
           left: '50%',
           transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.5)',
-          color: '#ccc',
-          fontSize: 11,
-          padding: '4px 12px',
-          borderRadius: 20,
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
         }}>
-          {isMobile ? 'Hold to carry · Pinch to zoom · Swipe to rotate' : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
-          {inviteCode && (
-            <>
-              <span style={{ opacity: 0.4 }}>·</span>
-              <span>Code: <strong style={{ color: '#fff', letterSpacing: 1 }}>{inviteCode}</strong></span>
-            </>
+          <div style={{
+            background: 'rgba(0,0,0,0.5)',
+            color: '#ccc',
+            fontSize: 11,
+            padding: '4px 12px',
+            borderRadius: 20,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            {isMobile ? 'Hold to carry · Pinch to zoom · Swipe to rotate' : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
+            {inviteCode && (
+              <>
+                <span style={{ opacity: 0.4 }}>·</span>
+                <span>Code: <strong style={{ color: '#fff', letterSpacing: 1 }}>{inviteCode}</strong></span>
+              </>
+            )}
+          </div>
+
+          {/* Pointer lock needs a real user gesture, and there's no keyboard on
+              a phone — so this is the one way in, desktop only. */}
+          {!isMobile && (
+            <button
+              onClick={() => { setFirstPerson(true); requestLock() }}
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                font: 'inherit',
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: 0.3,
+                padding: '5px 13px',
+                borderRadius: 20,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}
+            >
+              🚶 Walk around
+            </button>
           )}
         </div>
       )}
     </div>
+  )
+}
+
+// ─── First-person HUD ─────────────────────────────────────────────────────────
+
+// Crosshair, control legend, interact prompt, and the resume overlay. Purely
+// presentational — it reads the two mode flags and nothing else.
+function FirstPersonHud({
+  active, locked, cardOpen, nearbyName, onResume, onExit,
+}: {
+  active: boolean
+  locked: boolean
+  cardOpen: boolean
+  nearbyName: string | null
+  onResume: () => void
+  onExit: () => void
+}) {
+  if (!active) return null
+
+  const pill: React.CSSProperties = {
+    background: 'rgba(0,0,0,0.5)',
+    color: '#ddd',
+    fontSize: 11,
+    padding: '5px 12px',
+    borderRadius: 20,
+    whiteSpace: 'nowrap',
+  }
+
+  return (
+    <>
+      {locked && (
+        <>
+          {/* Crosshair */}
+          <div style={{
+            position: 'absolute',
+            left: '50%', top: '50%',
+            width: 6, height: 6,
+            marginLeft: -3, marginTop: -3,
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.85)',
+            boxShadow: '0 0 3px rgba(0,0,0,0.8)',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }} />
+
+          {nearbyName && (
+            <div style={{
+              position: 'absolute',
+              left: '50%', top: 'calc(50% + 28px)',
+              transform: 'translateX(-50%)',
+              pointerEvents: 'none',
+              zIndex: 10,
+              ...pill,
+              background: 'rgba(0,0,0,0.62)',
+              color: '#fff',
+              fontWeight: 700,
+            }}>
+              Press <strong style={{ color: 'var(--accent)' }}>E</strong> to interact with {nearbyName}
+            </div>
+          )}
+
+          <div style={{
+            position: 'absolute',
+            bottom: 12, left: '50%',
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
+            zIndex: 10,
+            ...pill,
+          }}>
+            WASD move · Shift sprint · Space jump · E interact · Esc exit
+          </div>
+        </>
+      )}
+
+      {/* Lost the cursor but still in the mode: either the card is open, or a
+          re-lock was refused. Either way, one click puts you back in. */}
+      {!locked && !cardOpen && (
+        <div
+          onClick={onResume}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 14,
+            background: 'rgba(10,10,20,0.45)',
+            backdropFilter: 'blur(2px)',
+            WebkitBackdropFilter: 'blur(2px)',
+            cursor: 'pointer',
+          }}
+        >
+          <div style={{ color: '#fff', fontSize: 16, fontWeight: 800 }}>Click to resume walking</div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onExit() }}
+            style={{
+              ...pill,
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.25)',
+              font: 'inherit',
+              fontSize: 12,
+              fontWeight: 700,
+              padding: '6px 16px',
+              cursor: 'pointer',
+            }}
+          >
+            Leave first person
+          </button>
+        </div>
+      )}
+    </>
   )
 }

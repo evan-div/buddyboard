@@ -148,6 +148,11 @@ export interface MiiCharacterProps {
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   heldBy?: string | null   // display name of whoever is carrying this character
+  // This is the local player walking around in first person. The group's
+  // position is driven externally by FirstPersonController, so the shared
+  // wander schedule is suppressed, and the body isn't drawn — you'd be looking
+  // at the inside of your own head.
+  playerControlled?: boolean
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -155,7 +160,8 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, heldBy = null, onPickupStart, onGroupMount,
+  dragMode = null, heldBy = null, playerControlled = false,
+  onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -368,6 +374,14 @@ export default function MiiCharacter({
     ;[rd.byZ.r, rd.byZ.v] = rdClamp(r, v, -0.45, 0.45)
     if (bodyGroupRef.current) { bodyGroupRef.current.rotation.x = rd.byX.r; bodyGroupRef.current.rotation.z = rd.byZ.r }
   }
+
+  // Leaving first person: walk to the current shared waypoint so this client
+  // re-converges with everyone else's simulation — the same recovery the
+  // physics path does when a throw finishes (dragMode back to null).
+  useEffect(() => {
+    if (!playerControlled) syncTarget(Date.now())
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerControlled])
 
   // Aim at the current shared waypoint for this character's time slot. Every
   // client computes the same target from the wall clock, so wandering stays in
@@ -653,6 +667,11 @@ export default function MiiCharacter({
       return
     }
 
+    // ── first-person: the player drives this body ─────────────────────────────
+    // FirstPersonController owns group.position/rotation.y, so bail out before
+    // the wander schedule below would fight it for the same transform.
+    if (playerControlled) return
+
     // ── normal walk / idle ────────────────────────────────────────────────────
     phase.current += delta
     const t    = phase.current
@@ -707,15 +726,19 @@ export default function MiiCharacter({
   return (
     <group
       ref={groupRef}
+      visible={!playerControlled}
       onPointerDown={e => {
         e.stopPropagation()
-        if (!dragMode) onPickupStart?.()
+        if (!dragMode && !playerControlled) onPickupStart?.()
       }}
     >
       <SelectionRing visible={isSelected && !dragMode} />
 
       {celebrationType === 'celebrate' && <CelebrationParticles bodyTop={dims.bodyTop} />}
 
+      {/* drei's <Html> renders into the DOM and ignores the group's `visible`,
+          so the first-person self needs an explicit gate for the overlays. */}
+      {!playerControlled && (<>
       {!dragMode && (() => {
         const badge  = highestBadge(member.badges ?? [])
         const streak = member.currentStreak ?? 0
@@ -767,6 +790,7 @@ export default function MiiCharacter({
           <div style={{ fontSize: 36, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>😤</div>
         </Html>
       )}
+      </>)}
 
       <group ref={bodyGroupRef}>
         {/* Ground contact shadow lives in MiiPlaza's BlobShadows — a shadow
