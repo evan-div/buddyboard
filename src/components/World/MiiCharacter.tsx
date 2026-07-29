@@ -11,6 +11,7 @@ import { highestBadge } from '@/lib/badges'
 import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
 import { BeanBody, BeanHair, BeanAccessory, outlineShade } from '@/components/Avatar/BeanParts'
 import { hashUid, slotIndex, currentWaypoint, idleVariant } from './plazaWalk'
+import { SPRINT_SPEED, type Locomotion } from './thirdPerson'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
@@ -148,6 +149,11 @@ export interface MiiCharacterProps {
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   heldBy?: string | null   // display name of whoever is carrying this character
+  /** Third-person walk mode: ThirdPersonController owns this character's
+      transform, so the shared wander schedule is suspended and the limbs
+      animate off `locomotion` instead. */
+  controlled?: boolean
+  locomotion?: React.RefObject<Locomotion>
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -155,7 +161,8 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, heldBy = null, onPickupStart, onGroupMount,
+  dragMode = null, heldBy = null, controlled = false, locomotion,
+  onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -302,6 +309,13 @@ export default function MiiCharacter({
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Leaving walk mode: rejoin the shared wander schedule from wherever the
+  // player parked, so this client re-converges with every other viewer.
+  useEffect(() => {
+    if (!controlled) syncTarget(Date.now())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controlled])
+
   // Seed every ragdoll spring from the limbs' current pose with random impulses
   function seedRagdoll(sMin: number, sMax: number) {
     const s  = sMin + Math.random() * (sMax - sMin)
@@ -420,6 +434,65 @@ export default function MiiCharacter({
           ? 1 - Math.sin(Math.PI * Math.min(1, b.t / 0.16)) * 0.92
           : 1
       }
+    }
+
+    // ── locally driven (third-person walk mode) ──────────────────────────────
+    // Takes priority over every other state: the controller owns position and
+    // yaw, and nothing should be able to strand the player mid-pose while
+    // they're steering. Position/rotation are already set by the controller —
+    // this branch only poses the limbs.
+    if (controlled) {
+      const loco     = locomotion?.current
+      const sp       = loco?.speed ?? 0
+      const airborne = loco?.airborne ?? false
+      const norm     = Math.min(1, sp / SPRINT_SPEED)
+      const bodyG    = bodyGroupRef.current
+      const la = leftArmRef.current,  ra = rightArmRef.current
+      const ll = leftLegRef.current,  rl = rightLegRef.current
+
+      if (airborne) {
+        // Tuck — arms swung back, legs gathered — held until landing
+        const k = Math.min(1, delta * 12)
+        if (la) { la.rotation.x = THREE.MathUtils.lerp(la.rotation.x, -1.9, k); la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, -0.34, k) }
+        if (ra) { ra.rotation.x = THREE.MathUtils.lerp(ra.rotation.x, -1.9, k); ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z,  0.34, k) }
+        if (ll) ll.rotation.x = THREE.MathUtils.lerp(ll.rotation.x, -0.55, k)
+        if (rl) rl.rotation.x = THREE.MathUtils.lerp(rl.rotation.x,  0.30, k)
+        if (bodyG) {
+          bodyG.position.y = THREE.MathUtils.lerp(bodyG.position.y,  0.04, k)
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, -0.10, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z,  0,    k)
+        }
+      } else if (sp > 0.08) {
+        // Stride rate AND swing both scale with speed, so a walk reads as a
+        // different gait from a sprint without a second animation.
+        phase.current += delta * (5.2 + norm * 7.5)
+        const sw = Math.sin(phase.current) * (0.22 + norm * 0.62)
+        const k  = Math.min(1, delta * 6)
+        if (la) { la.rotation.x =  sw; la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, -0.05 - norm * 0.12, k) }
+        if (ra) { ra.rotation.x = -sw; ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z,  0.05 + norm * 0.12, k) }
+        if (ll) ll.rotation.x = -sw
+        if (rl) rl.rotation.x =  sw
+        if (bodyG) {
+          bodyG.position.y = Math.abs(Math.sin(phase.current)) * (0.03 + norm * 0.06)
+          // Lean into the run
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, norm * 0.20, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z, 0, k)
+        }
+      } else {
+        // Standing: settle to neutral and breathe
+        phase.current += delta
+        const k = Math.min(1, delta * 8)
+        if (la) { la.rotation.x = THREE.MathUtils.lerp(la.rotation.x, 0, k); la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, 0, k) }
+        if (ra) { ra.rotation.x = THREE.MathUtils.lerp(ra.rotation.x, 0, k); ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z, 0, k) }
+        if (ll) ll.rotation.x = THREE.MathUtils.lerp(ll.rotation.x, 0, k)
+        if (rl) rl.rotation.x = THREE.MathUtils.lerp(rl.rotation.x, 0, k)
+        if (bodyG) {
+          bodyG.position.y = Math.sin(phase.current * 2.6) * 0.03
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, 0, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z, 0, k)
+        }
+      }
+      return
     }
 
     // ── fallen (off the island, hidden until respawn) ────────────────────────
