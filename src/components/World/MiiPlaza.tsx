@@ -14,6 +14,7 @@ import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, rea
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
+import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
 import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec } from '@/lib/types'
 
@@ -2523,16 +2524,21 @@ export default function MiiPlaza({
         </div>
       )}
 
-      {/* Hint */}
+      {/* Hint + first-person entry. The group page's tab bar is fixed at the
+          bottom with z-index 40, so this row has to clear it or it renders
+          underneath and is unreachable. */}
       {!selectedMember && !firstPerson && (
         <div style={{
           position: 'absolute',
-          bottom: 12,
+          bottom: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom) + 12px)`,
           left: '50%',
           transform: 'translateX(-50%)',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
+          maxWidth: '100%',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
         }}>
           <div style={{
             background: 'rgba(0,0,0,0.5)',
