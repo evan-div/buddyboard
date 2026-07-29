@@ -11,7 +11,7 @@ import PlazaGarden from './PlazaGarden'
 import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesInsidePlaza, type Tile } from './plazaMath'
-import { PLAZA_SPECIES, getSpecies } from './plazaSpecies'
+import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
 import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
@@ -2220,7 +2220,6 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
 
 // ─── Living plaza overlays ─────────────────────────────────────────────────────
 
-const STAGE_LABELS = ['Seedling', 'Sprout', 'Young', 'Mature']
 
 // ── Growth preview ────────────────────────────────────────────────────────────
 // Watching a plant mature normally takes a week of real check-ins, so preview
@@ -2551,7 +2550,7 @@ function PlantPlaque({
           <span style={{ fontSize: 30 }}>{species.emoji}</span>
           <div style={{ flex: 1 }}>
             <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{species.label}</div>
-            <div style={{ color: '#8fd19e', fontSize: 12 }}>{STAGE_LABELS[stage]}</div>
+            <div style={{ color: '#8fd19e', fontSize: 12 }}>{stageLabel(species.form, stage)}</div>
           </div>
           <button
             onClick={onClose}

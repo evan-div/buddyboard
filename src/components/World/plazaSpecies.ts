@@ -71,6 +71,29 @@ export const PLAZA_SPECIES: PlazaSpecies[] = [
   },
 ]
 
+// Ground cover and flowers are small enough that four distinct silhouettes read
+// as noise — they use just two: seedling, then mature once the plant is
+// established (growth stage 2). Trees keep the full four-stage arc.
+export function isTwoStage(form: PlantForm): boolean {
+  return form === 'bush' || form === 'flower'
+}
+
+export const STAGE_LABELS = ['Seedling', 'Sprout', 'Young', 'Mature']
+
+// The stage name to show for a given species — two-stage plants only ever read
+// as "Seedling" or "Mature".
+export function stageLabel(form: PlantForm, stage: number): string {
+  if (isTwoStage(form)) return stage >= 2 ? 'Mature' : 'Seedling'
+  return STAGE_LABELS[Math.max(0, Math.min(stage, STAGE_LABELS.length - 1))]
+}
+
+// Footprint of the turned soil under each form, relative to a tree's.
+export function soilScale(form: PlantForm): number {
+  if (form === 'flower') return 0.42
+  if (form === 'bush') return 0.5
+  return 1
+}
+
 export const SPECIES_MAP: Record<string, PlazaSpecies> = Object.fromEntries(
   PLAZA_SPECIES.map((s) => [s.id, s]),
 )

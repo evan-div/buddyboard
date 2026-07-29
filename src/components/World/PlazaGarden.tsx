@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import type { PlazaObject } from '@/lib/types'
 import { growthStage } from '@/lib/plazaGrowth'
 import { tileToWorld, tileKey, tilesInsidePlaza, type Tile } from './plazaMath'
-import { getSpecies, type PlazaSpecies } from './plazaSpecies'
+import { getSpecies, isTwoStage, soilScale, type PlazaSpecies } from './plazaSpecies'
 
 /**
  * Each growth stage is its own model, not a scaled copy of the mature plant —
@@ -359,43 +359,43 @@ function FlowerHead({
 
 function Mature({ colors, species }: { colors: Palette; species: PlazaSpecies }) {
   switch (species.form) {
-    // Low and wide — reads as ground cover next to the tall species.
+    // Low ground cover — knee-high beside a 10-unit tree.
     case 'bush':
       return (
         <group>
           <Canopy
             colors={colors}
             blobs={[
-              { p: [0, 1.35, 0], r: 1.15 },
-              { p: [1.25, 0.95, 0.3], r: 0.95, alt: true },
-              { p: [-1.2, 0.9, -0.25], r: 0.9 },
-              { p: [0.2, 0.95, -1.2], r: 0.88, alt: true },
-              { p: [-0.35, 1.0, 1.2], r: 0.82 },
-              { p: [0.6, 1.85, 0.2], r: 0.6, alt: true },
+              { p: [0, 0.5, 0], r: 0.42 },
+              { p: [0.44, 0.35, 0.11], r: 0.34, alt: true },
+              { p: [-0.42, 0.33, -0.09], r: 0.32 },
+              { p: [0.07, 0.34, -0.43], r: 0.31, alt: true },
+              { p: [-0.12, 0.36, 0.42], r: 0.29 },
+              { p: [0.21, 0.68, 0.07], r: 0.22, alt: true },
             ]}
           />
           {[0.5, 1.9, 3.3, 4.7, 5.9].map((a, i) => (
             <Leaf
               key={i}
-              p={[Math.cos(a) * 0.9, 1.5 + (i % 2) * 0.3, Math.sin(a) * 0.9]}
+              p={[Math.cos(a) * 0.32, 0.54 + (i % 2) * 0.11, Math.sin(a) * 0.32]}
               yaw={a}
               tilt={0.5}
-              size={0.5}
+              size={0.19}
               color={i % 2 ? colors.foliageAlt : colors.foliage}
             />
           ))}
         </group>
       )
 
-    // A single towering bloom on a thick stalk.
+    // A single bloom on a slim stalk — waist-high, not tree-scale.
     case 'flower':
       return (
         <group>
-          <Trunk h={4.1} rb={0.19} rt={0.13} color={colors.trunk} seg={7} />
-          <Leaf p={[0, 1.5, 0]} yaw={0.4} tilt={0.36} size={0.62} color={colors.trunk} />
-          <Leaf p={[0, 2.3, 0]} yaw={Math.PI + 0.25} tilt={0.32} size={0.56} color={colors.trunk} />
-          <Leaf p={[0, 3.05, 0]} yaw={2.4} tilt={0.3} size={0.45} color={colors.trunk} />
-          <FlowerHead y={4.35} r={0.95} colors={colors} petals={16} />
+          <Trunk h={1.35} rb={0.062} rt={0.045} color={colors.trunk} seg={7} />
+          <Leaf p={[0, 0.5, 0]} yaw={0.4} tilt={0.36} size={0.21} color={colors.trunk} />
+          <Leaf p={[0, 0.78, 0]} yaw={Math.PI + 0.25} tilt={0.32} size={0.19} color={colors.trunk} />
+          <Leaf p={[0, 1.02, 0]} yaw={2.4} tilt={0.3} size={0.15} color={colors.trunk} />
+          <FlowerHead y={1.45} r={0.32} colors={colors} petals={14} />
         </group>
       )
 
@@ -491,8 +491,15 @@ function Mature({ colors, species }: { colors: Palette; species: PlazaSpecies })
   }
 }
 
+// Two-stage plants (ferns, flowers) show a seedling until they are established,
+// then their full form; the intermediate silhouettes are too small to read.
+function visualStage(species: PlazaSpecies, stage: number): number {
+  if (isTwoStage(species.form)) return stage >= 2 ? 3 : 0
+  return stage
+}
+
 function StageForm({ stage, species, colors }: { stage: number; species: PlazaSpecies; colors: Palette }) {
-  switch (stage) {
+  switch (visualStage(species, stage)) {
     case 0:  return <Seedling colors={colors} />
     case 1:  return <Sapling colors={colors} species={species} />
     case 2:  return <Young colors={colors} species={species} />
@@ -504,8 +511,8 @@ function StageForm({ stage, species, colors }: { stage: number; species: PlazaSp
 // Turned earth under every plant — the persistent "something is planted here"
 // marker, so a tile never reads as empty even at seedling.
 
-function SoilMound({ stage, dormant }: { stage: number; dormant: boolean }) {
-  const r = SOIL_R[stage]
+function SoilMound({ stage, scale, dormant }: { stage: number; scale: number; dormant: boolean }) {
+  const r = SOIL_R[stage] * scale
   return (
     <mesh position={[0, 0.03, 0]}>
       <cylinderGeometry args={[r * 0.8, r, 0.09, 12]} />
@@ -547,10 +554,14 @@ function PlantMesh({
     bark: mute(darken(species.trunk, 0.22), dormant),
   }), [species, dormant])
 
+  // Soil and sway follow the silhouette actually drawn, not the raw stage.
+  const vStage = visualStage(species, stage)
+  const soil = soilScale(species.form)
+
   useFrame((state) => {
     if (!swayRef.current) return
     const t = state.clock.elapsedTime
-    swayRef.current.rotation.z = Math.sin(t * (1.3 - stage * 0.2) + seed * 6.28) * (dormant ? SWAY[stage] * 0.25 : SWAY[stage])
+    swayRef.current.rotation.z = Math.sin(t * (1.3 - vStage * 0.2) + seed * 6.28) * (dormant ? SWAY[vStage] * 0.25 : SWAY[vStage])
   })
 
   return (
@@ -560,7 +571,7 @@ function PlantMesh({
       scale={0.92 + seed * 0.16}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(object) }}
     >
-      <SoilMound stage={stage} dormant={dormant} />
+      <SoilMound stage={vStage} scale={soil} dormant={dormant} />
       <group ref={swayRef}>
         <StageForm stage={stage} species={species} colors={colors} />
       </group>
