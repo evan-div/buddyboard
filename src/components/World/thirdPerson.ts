@@ -12,7 +12,7 @@
 // units of "per second" and yields the equivalent alpha for this frame's dt.
 
 import * as THREE from 'three'
-import { clampToPlazaEdge } from './plazaMath'
+import { plazaEdgeRadius } from './plazaMath'
 
 // ─── Easing ───────────────────────────────────────────────────────────────────
 
@@ -45,9 +45,38 @@ export const AIR_ACCEL    = 9      // reduced authority mid-jump
 export const TURN_RATE    = 13     // yaw easing rate toward the travel direction
 export const JUMP_SPEED   = 7.0    // ≈0.98u apex, ≈0.56s airtime under JUMP_GRAVITY
 export const JUMP_GRAVITY = 25
-// Keep the walker inside the rounded island edge. Wider than the physics margin
-// so the camera behind them doesn't hang out over the void.
-export const EDGE_MARGIN  = 0.7
+
+// ─── The island edge ──────────────────────────────────────────────────────────
+// The walker is NOT fenced in: ground exists only over the island, so stepping
+// past the rim drops you into the clouds exactly as a thrown character would.
+// Once you've fallen this far below the surface the plaza's own physics takes
+// the body over (tumble → despawn → sky respawn), which is why walk mode
+// carries no fall or respawn code of its own.
+export const FALL_HANDOFF_Y = -0.4
+
+export function isOverIsland(x: number, z: number): boolean {
+  return Math.hypot(x, z) <= plazaEdgeRadius(Math.atan2(z, x))
+}
+
+// ─── Backflip ─────────────────────────────────────────────────────────────────
+// A second Space tap in quick succession, while still on the way up, converts
+// the jump into a backflip. Buffering the first tap to wait and see would add
+// input latency to every ordinary jump, so the flip is a mid-air conversion.
+export const DOUBLE_TAP_MS = 280
+// Top the jump back up so there's reliably time to come all the way round.
+export const FLIP_BOOST = 0.92
+export const FLIP_MIN_DURATION = 0.42
+// Beans rotate about their middle, not their feet — flipping about the group
+// origin would swing the whole body through the floor.
+export const FLIP_PIVOT_Y = 0.7
+
+// When a body at height y0 rising at vy will next reach the ground. Used to fit
+// exactly one rotation into the airtime that's left, so the flip always lands
+// upright instead of finishing early or planting the character on their head.
+export function timeToLand(y0: number, vy: number, g = JUMP_GRAVITY): number {
+  const disc = vy * vy + 2 * g * Math.max(0, y0)
+  return (vy + Math.sqrt(Math.max(0, disc))) / g
+}
 
 // ─── Facing ───────────────────────────────────────────────────────────────────
 // Movement is camera-relative, so the character's facing deviates from the
@@ -77,6 +106,7 @@ export interface MoveInput {
   strafe:  number   // -1..1  (D = +1, A = -1)
   sprint:  boolean
   jump:    boolean  // edge-triggered by the caller — held space must not re-fire
+  flip:    boolean  // second Space tap inside DOUBLE_TAP_MS, also edge-triggered
 }
 
 export interface MoveState {
@@ -86,6 +116,11 @@ export interface MoveState {
   grounded: boolean
   speed: number           // |horizontal velocity|, cached for the animator
   accel: THREE.Vector3    // horizontal dv/dt, drives the camera's lag and FOV
+  /** 0 = upright, 1 = one full backward rotation. Never rests part-way. */
+  flip: number
+  flipping: boolean
+  flipT: number
+  flipDur: number
 }
 
 export function makeMoveState(x = 0, z = 0, yaw = 0): MoveState {
@@ -96,6 +131,10 @@ export function makeMoveState(x = 0, z = 0, yaw = 0): MoveState {
     grounded: true,
     speed: 0,
     accel: new THREE.Vector3(),
+    flip: 0,
+    flipping: false,
+    flipT: 0,
+    flipDur: 0,
   }
 }
 
@@ -146,35 +185,48 @@ export function stepMovement(s: MoveState, input: MoveInput, cameraYaw: number, 
     s.vel.z += (dvz / dlen) * maxDelta
   }
 
-  // ── Jump / gravity ──────────────────────────────────────────────────────────
+  // ── Horizontal integration first ────────────────────────────────────────────
+  // Ground support is decided from where the step actually landed, which is
+  // what lets a walker stride off the rim rather than being fenced in.
+  s.pos.x += s.vel.x * dt
+  s.pos.z += s.vel.z * dt
+  const supported = isOverIsland(s.pos.x, s.pos.z)
+
+  // Walked past the edge: nothing underneath any more.
+  if (s.grounded && !supported) s.grounded = false
+
+  // ── Jump / backflip / gravity ───────────────────────────────────────────────
   if (input.jump && s.grounded) {
     s.vel.y = JUMP_SPEED
     s.grounded = false
   }
+  // Convert an in-flight jump into a backflip. Only on the way up, so a late
+  // second tap near the ground can't start a rotation there's no room for.
+  if (input.flip && !s.grounded && !s.flipping && s.vel.y > 0) {
+    s.vel.y = Math.max(s.vel.y, JUMP_SPEED * FLIP_BOOST)
+    s.flipping = true
+    s.flipT = 0
+    s.flipDur = Math.max(FLIP_MIN_DURATION, timeToLand(s.pos.y, s.vel.y))
+  }
   if (!s.grounded) {
     s.vel.y -= JUMP_GRAVITY * dt
     s.pos.y += s.vel.y * dt
-    if (s.pos.y <= 0) {
+    // Only the island catches you.
+    if (supported && s.pos.y <= 0) {
       s.pos.y = 0
       s.vel.y = 0
       s.grounded = true
     }
   }
 
-  // ── Horizontal integration, then the island edge ────────────────────────────
-  s.pos.x += s.vel.x * dt
-  s.pos.z += s.vel.z * dt
-  if (clampToPlazaEdge(s.pos, EDGE_MARGIN)) {
-    // Strip the outward velocity component so you slide along the rim instead
-    // of juddering against it frame after frame.
-    const r = Math.hypot(s.pos.x, s.pos.z)
-    if (r > 1e-6) {
-      const nx = s.pos.x / r, nz = s.pos.z / r
-      const outward = s.vel.x * nx + s.vel.z * nz
-      if (outward > 0) {
-        s.vel.x -= nx * outward
-        s.vel.z -= nz * outward
-      }
+  if (s.flipping) {
+    s.flipT += dt
+    s.flip = clamp(s.flipT / s.flipDur, 0, 1)
+    // Landing always ends it upright — flipDur was fitted to the airtime, so
+    // by here the rotation has come the whole way round anyway.
+    if (s.grounded) {
+      s.flipping = false
+      s.flip = 0
     }
   }
 

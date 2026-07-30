@@ -16,7 +16,10 @@ import {
   SPRINT_SPEED,
   JUMP_SPEED,
   JUMP_GRAVITY,
-  EDGE_MARGIN,
+  isOverIsland,
+  timeToLand,
+  FALL_HANDOFF_Y,
+  FLIP_MIN_DURATION,
   CAM_MIN_DIST,
   CAM_MAX_DIST,
   CAM_PIVOT_Y,
@@ -41,7 +44,7 @@ import {
 import { plazaEdgeRadius } from './plazaMath'
 
 const DT = 1 / 60
-const STILL: MoveInput = { forward: 0, strafe: 0, sprint: false, jump: false }
+const STILL: MoveInput = { forward: 0, strafe: 0, sprint: false, jump: false, flip: false }
 const input = (o: Partial<MoveInput>): MoveInput => ({ ...STILL, ...o })
 
 // Run n frames of movement with a constant input
@@ -221,34 +224,165 @@ describe('stepMovement — jumping', () => {
   })
 })
 
-describe('stepMovement — island edge', () => {
-  it('never walks off the plaza, from any heading', () => {
-    for (let camYaw = -Math.PI; camYaw < Math.PI; camYaw += Math.PI / 6) {
-      const s = makeMoveState()
-      run(s, input({ forward: 1, sprint: true }), 600, camYaw)
-      const r = Math.hypot(s.pos.x, s.pos.z)
-      const maxR = plazaEdgeRadius(Math.atan2(s.pos.z, s.pos.x)) - EDGE_MARGIN
-      expect(r).toBeLessThanOrEqual(maxR + 1e-6)
+describe('isOverIsland', () => {
+  it('agrees with the plaza outline in every direction', () => {
+    for (let th = -Math.PI; th < Math.PI; th += 0.3) {
+      const r = plazaEdgeRadius(th)
+      const inside = { x: Math.cos(th) * (r - 0.2), z: Math.sin(th) * (r - 0.2) }
+      const outside = { x: Math.cos(th) * (r + 0.2), z: Math.sin(th) * (r + 0.2) }
+      expect(isOverIsland(inside.x, inside.z)).toBe(true)
+      expect(isOverIsland(outside.x, outside.z)).toBe(false)
     }
   })
 
-  it('slides along the rim instead of juddering against it', () => {
-    const s = makeMoveState()
-    run(s, input({ forward: 1, sprint: true }), 600, 0)   // pinned on the -Z rim
-    expect(s.speed).toBeCloseTo(0, 6)                     // dead stop into the edge
+  it('treats the centre as solid ground', () => {
+    expect(isOverIsland(0, 0)).toBe(true)
+  })
+})
 
-    // Now push diagonally. The outward component is absorbed and the tangential
-    // component carries us along the rim — the walker keeps moving, and stays
-    // inside the boundary the whole way. (The plaza is a squircle, not a circle,
-    // so "inside" is checked against the local edge radius, not a fixed one.)
-    for (let f = 0; f < 120; f++) {
-      stepMovement(s, input({ forward: 1, strafe: 1, sprint: true }), 0, DT)
-      const r = Math.hypot(s.pos.x, s.pos.z)
-      const maxR = plazaEdgeRadius(Math.atan2(s.pos.z, s.pos.x)) - EDGE_MARGIN
-      expect(r).toBeLessThanOrEqual(maxR + 1e-6)
+// The walker used to be fenced in. Now the rim is a cliff: ground only exists
+// over the island, so you can walk off and fall.
+describe('stepMovement — walking off the island', () => {
+  it('crosses the rim and starts falling instead of stopping', () => {
+    const s = makeMoveState()
+    run(s, input({ forward: 1, sprint: true }), 600, 0)
+    expect(isOverIsland(s.pos.x, s.pos.z)).toBe(false)   // out past the edge
+    expect(s.grounded).toBe(false)
+    expect(s.pos.y).toBeLessThan(0)                      // and dropping
+    expect(s.vel.y).toBeLessThan(0)
+  })
+
+  it('falls from any heading, not just one', () => {
+    for (let camYaw = -Math.PI; camYaw < Math.PI; camYaw += Math.PI / 5) {
+      const s = makeMoveState()
+      run(s, input({ forward: 1, sprint: true }), 700, camYaw)
+      expect(s.pos.y).toBeLessThan(FALL_HANDOFF_Y)
     }
-    expect(s.pos.x).toBeGreaterThan(0.5)                  // slid along the edge
-    expect(s.speed).toBeGreaterThan(0.5)                  // and kept moving
+  })
+
+  it('keeps accelerating downward once clear of the island', () => {
+    const s = makeMoveState()
+    run(s, input({ forward: 1, sprint: true }), 600, 0)
+    const firstY = s.pos.y
+    const firstVy = s.vel.y
+    run(s, input({ forward: 1, sprint: true }), 60, 0)
+    expect(s.pos.y).toBeLessThan(firstY)
+    expect(s.vel.y).toBeLessThan(firstVy)   // gravity still applies out there
+  })
+
+  it('still walks normally well inside the island', () => {
+    const s = makeMoveState()
+    run(s, input({ forward: 1 }), 60, 0)
+    expect(isOverIsland(s.pos.x, s.pos.z)).toBe(true)
+    expect(s.grounded).toBe(true)
+    expect(s.pos.y).toBe(0)
+  })
+
+  it('lands back on the island when a jump comes down inside it', () => {
+    const s = makeMoveState()
+    stepMovement(s, input({ jump: true }), 0, DT)
+    for (let f = 0; f < 200 && !s.grounded; f++) stepMovement(s, STILL, 0, DT)
+    expect(s.grounded).toBe(true)
+    expect(s.pos.y).toBe(0)
+  })
+})
+
+describe('timeToLand', () => {
+  it('matches the analytic airtime from the ground', () => {
+    expect(timeToLand(0, JUMP_SPEED)).toBeCloseTo((2 * JUMP_SPEED) / JUMP_GRAVITY, 10)
+  })
+
+  it('grows with height and with upward speed', () => {
+    expect(timeToLand(2, 0)).toBeGreaterThan(timeToLand(1, 0))
+    expect(timeToLand(1, 5)).toBeGreaterThan(timeToLand(1, 0))
+  })
+
+  it('is never negative, even falling from the floor', () => {
+    expect(timeToLand(0, -5)).toBeGreaterThanOrEqual(0)
+    expect(timeToLand(0, 0)).toBe(0)
+  })
+})
+
+describe('stepMovement — backflip', () => {
+  const jumpThenFlip = () => {
+    const s = makeMoveState()
+    stepMovement(s, input({ jump: true }), 0, DT)     // first tap
+    stepMovement(s, input({ flip: true }), 0, DT)     // second tap, mid-rise
+    return s
+  }
+
+  it('starts a flip on the second tap while rising', () => {
+    const s = jumpThenFlip()
+    expect(s.flipping).toBe(true)
+    expect(s.flip).toBeGreaterThan(0)
+  })
+
+  it('does nothing on the ground — a flip needs air', () => {
+    const s = makeMoveState()
+    stepMovement(s, input({ flip: true }), 0, DT)
+    expect(s.flipping).toBe(false)
+    expect(s.flip).toBe(0)
+    expect(s.grounded).toBe(true)
+  })
+
+  it('will not start once you are already falling', () => {
+    const s = makeMoveState()
+    stepMovement(s, input({ jump: true }), 0, DT)
+    while (s.vel.y > 0) stepMovement(s, STILL, 0, DT)   // past the apex
+    stepMovement(s, input({ flip: true }), 0, DT)
+    expect(s.flipping).toBe(false)
+  })
+
+  it('completes exactly one rotation and lands upright', () => {
+    const s = jumpThenFlip()
+    let maxFlip = 0
+    for (let f = 0; f < 400 && !s.grounded; f++) {
+      stepMovement(s, STILL, 0, DT)
+      maxFlip = Math.max(maxFlip, s.flip)
+    }
+    expect(s.grounded).toBe(true)
+    expect(maxFlip).toBeGreaterThan(0.9)   // came all the way round…
+    expect(maxFlip).toBeLessThanOrEqual(1)  // …and no further
+    expect(s.flip).toBe(0)                  // upright again on landing
+    expect(s.flipping).toBe(false)
+  })
+
+  it('never rests part-way through a rotation', () => {
+    const s = jumpThenFlip()
+    for (let f = 0; f < 400 && !s.grounded; f++) stepMovement(s, STILL, 0, DT)
+    for (let f = 0; f < 60; f++) stepMovement(s, STILL, 0, DT)
+    expect(s.flip).toBe(0)
+  })
+
+  it('rotates monotonically — no stutter or reversal', () => {
+    const s = jumpThenFlip()
+    let prev = s.flip
+    while (!s.grounded) {
+      stepMovement(s, STILL, 0, DT)
+      if (s.grounded) break
+      expect(s.flip).toBeGreaterThanOrEqual(prev)
+      prev = s.flip
+    }
+  })
+
+  it('gives enough air for the flip to finish', () => {
+    const s = jumpThenFlip()
+    let frames = 0
+    while (!s.grounded && frames < 400) { stepMovement(s, STILL, 0, DT); frames++ }
+    expect(frames * DT).toBeGreaterThan(FLIP_MIN_DURATION)
+  })
+
+  it('a second flip request mid-flip is ignored', () => {
+    const s = jumpThenFlip()
+    const dur = s.flipDur
+    stepMovement(s, input({ flip: true }), 0, DT)
+    expect(s.flipDur).toBe(dur)
+  })
+
+  it('can still steer during a flip', () => {
+    const s = jumpThenFlip()
+    for (let f = 0; f < 20; f++) stepMovement(s, input({ forward: 1 }), 0, DT)
+    expect(s.speed).toBeGreaterThan(0)
   })
 })
 

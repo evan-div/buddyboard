@@ -19,12 +19,14 @@ import {
   makeMoveState, stepMovement,
   makeCamState, applyLook, applyZoom, stepCamera, cameraPlacement,
   nearestInteractable, resolveCharacterOverlap,
-  clamp, smoothFactor, EDGE_MARGIN,
+  clamp, smoothFactor, isOverIsland,
   CAM_PIVOT_Y, CAM_START_DIST, CAM_MIN_DIST, CAM_MAX_DIST,
   PITCH_MIN, PITCH_MAX, FOV_BASE, CARD_ANCHOR_Y, charHalfWidthPx,
+  DOUBLE_TAP_MS, FLIP_PIVOT_Y, FALL_HANDOFF_Y,
   type MoveInput, type InteractCandidate, type Locomotion,
 } from './thirdPerson'
-import { clampToPlazaEdge } from './plazaMath'
+import { AXIS_X, AXIS_Y } from './plazaMath'
+import { playWhoosh } from './plazaSound'
 import type { GroupMember } from '@/lib/types'
 
 // Drag-to-orbit fallback, used when the pointer isn't locked (after Esc, or if
@@ -33,6 +35,10 @@ import type { GroupMember } from '@/lib/types'
 const DRAG_SCALE = 1.8
 // How fast the FOV eases back to the plaza default after leaving walk mode.
 const RESTORE_RATE = 6
+// How far below the island the camera will ride while the physics carries a
+// fallen walker down. They despawn at -30 and are hidden for over a second;
+// following that far leaves you looking at nothing.
+const FALL_CAM_FLOOR = -3.5
 
 interface Props {
   active: boolean
@@ -40,6 +46,9 @@ interface Props {
   paused: boolean
   /** prefers-reduced-motion: drop the FOV punch and the spring-arm trail. */
   reducedMotion: boolean
+  /** The plaza physics owns the body (falling off the map, respawning). Keep
+      the camera on them, but don't drive them. */
+  suspended: boolean
   playerUid: string
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
@@ -51,12 +60,14 @@ interface Props {
       they look on screen, so the DOM overlay can sit clear of them. Null when no
       card is open. */
   onCardAnchor: (anchor: { x: number; y: number; halfWidth: number } | null) => void
+  /** Walked off the island and dropped clear of it — hand the body over. */
+  onFellOff: (pos: THREE.Vector3, vel: THREE.Vector3) => void
   onExit: () => void
 }
 
 export default function ThirdPersonController({
-  active, paused, reducedMotion, playerUid, members, charGroups, locomotion,
-  onInteract, onTargetChange, onLockChange, onCardAnchor, onExit,
+  active, paused, reducedMotion, suspended, playerUid, members, charGroups, locomotion,
+  onInteract, onTargetChange, onLockChange, onCardAnchor, onFellOff, onExit,
 }: Props) {
   const { camera, gl } = useThree()
 
@@ -64,6 +75,11 @@ export default function ThirdPersonController({
   const cam  = useRef(makeCamState())
   const keys = useRef<Set<string>>(new Set())
   const jumpQueued = useRef(false)
+  const flipQueued = useRef(false)
+  const lastJumpTap = useRef(0)
+  const prevFlipping = useRef(false)
+  const prevSuspended = useRef(false)
+  const fellOffSent = useRef(false)
   const locked   = useRef(false)
   const dragging = useRef(false)
   const seeded   = useRef(false)
@@ -72,12 +88,18 @@ export default function ThirdPersonController({
   const camPos  = useRef(new THREE.Vector3())
   const camLook = useRef(new THREE.Vector3())
   const projected  = useRef(new THREE.Vector3())
+  const flipQuat   = useRef(new THREE.Quaternion())
+  const flipTmpQ   = useRef(new THREE.Quaternion())
+  const flipPivot  = useRef(new THREE.Vector3())
+  const flipRot    = useRef(new THREE.Vector3())
+  const suspAnchor = useRef(new THREE.Vector3())
+  const zeroVec    = useRef(new THREE.Vector3())
   const lastAnchor = useRef({ x: -1e9, y: -1e9, halfWidth: -1 })
 
   // Latest props for the window-level listeners, which are registered once and
   // must not be torn down and rebuilt every time `members` changes identity.
-  const live = useRef({ active, paused, members, onInteract, onExit, onLockChange, onCardAnchor })
-  live.current = { active, paused, members, onInteract, onExit, onLockChange, onCardAnchor }
+  const live = useRef({ active, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff })
+  live.current = { active, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff }
 
   // ── Reset on entry ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -197,7 +219,19 @@ export default function ThirdPersonController({
 
       if (e.code === 'Space') {
         e.preventDefault()          // stop the page scrolling under the canvas
-        if (!live.current.paused) jumpQueued.current = true
+        if (!live.current.paused) {
+          // Two taps in quick succession: the first has already launched the
+          // jump, so the second asks for a backflip rather than a second jump.
+          // Time the gap with the event's own timestamp, not the clock as the
+          // handler runs. They're the same timeline, but a busy main thread can
+          // deliver a keydown long after the key was pressed — measuring on
+          // arrival turns a genuine double-tap into two separate jumps whenever
+          // the scene hitches.
+          const now = e.timeStamp || performance.now()
+          if (now - lastJumpTap.current <= DOUBLE_TAP_MS) flipQueued.current = true
+          else jumpQueued.current = true
+          lastJumpTap.current = now
+        }
       }
       if (e.code === 'KeyE' && !live.current.paused && target.current) {
         live.current.onInteract(target.current)
@@ -220,7 +254,7 @@ export default function ThirdPersonController({
 
   // ── Frame ───────────────────────────────────────────────────────────────────
   // Scratch objects reused every frame — walk mode allocates nothing per frame.
-  const inputRef   = useRef<MoveInput>({ forward: 0, strafe: 0, sprint: false, jump: false })
+  const inputRef   = useRef<MoveInput>({ forward: 0, strafe: 0, sprint: false, jump: false, flip: false })
   const candidates = useRef<InteractCandidate[]>([])
   const blockers   = useRef<{ x: number; z: number }[]>([])
 
@@ -241,6 +275,50 @@ export default function ThirdPersonController({
 
     const group = charGroups.current?.get(playerUid)
     if (!group) return
+
+    // ── Suspended: the plaza physics has the body ───────────────────────────
+    // We fell off the map. Physics is tumbling us into the clouds, despawning
+    // us and dropping us back in from the sky — the same sequence a thrown
+    // character gets. Just keep the camera on the body and stay out of the way.
+    if (suspended) {
+      prevSuspended.current = true
+      suspAnchor.current.copy(group.position)
+      // Don't ride all the way down: the character despawns at -30 and is
+      // invisible for over a second, and following that leaves you staring
+      // into empty sky. Watch them drop away from near the rim instead.
+      suspAnchor.current.y = Math.max(suspAnchor.current.y, FALL_CAM_FLOOR)
+      stepCamera(cam.current, {
+        anchor: suspAnchor.current,
+        vel: zeroVec.current,
+        accel: zeroVec.current,
+        reducedMotion,
+      }, dt)
+      cameraPlacement(cam.current, camPos.current, camLook.current)
+      camera.position.copy(camPos.current)
+      camera.lookAt(camLook.current)
+
+      const loco = locomotion.current
+      if (loco) {
+        loco.speed = 0
+        loco.airborne = true
+        loco.sprinting = false
+        loco.vy = 0
+        loco.pos.copy(group.position)
+      }
+      if (target.current !== null) {
+        target.current = null
+        onTargetChange(null)
+      }
+      return
+    }
+
+    // Physics just handed the body back (respawn finished): pick up from
+    // wherever it put us rather than from the stale pre-fall position.
+    if (prevSuspended.current) {
+      prevSuspended.current = false
+      fellOffSent.current = false
+      seeded.current = false
+    }
 
     // ── Seed from wherever the plaza camera already is, so entering walk mode
     //    is a continuous dolly rather than a cut. ────────────────────────────
@@ -281,7 +359,9 @@ export default function ThirdPersonController({
       input.strafe  = 0
       input.sprint  = false
       input.jump    = false
+      input.flip    = false
       jumpQueued.current = false
+      flipQueued.current = false
     } else {
       input.forward = (k.has('KeyW') || k.has('ArrowUp')   ? 1 : 0) -
                       (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
@@ -289,7 +369,9 @@ export default function ThirdPersonController({
                       (k.has('KeyA') || k.has('ArrowLeft')  ? 1 : 0)
       input.sprint  = k.has('ShiftLeft') || k.has('ShiftRight')
       input.jump    = jumpQueued.current
+      input.flip    = flipQueued.current
       jumpQueued.current = false
+      flipQueued.current = false
     }
 
     // ── Everyone else, gathered once ────────────────────────────────────────
@@ -308,14 +390,42 @@ export default function ThirdPersonController({
     const m = move.current
     stepMovement(m, input, cam.current.yaw, dt)
 
-    // Bump into people rather than through them, then re-clamp: being pushed
-    // off someone standing on the rim must not push us off the island.
-    if (resolveCharacterOverlap(m.pos, m.vel, blockers.current)) {
-      clampToPlazaEdge(m.pos, EDGE_MARGIN)
+    // Bump into people rather than walking through them. No edge clamp after
+    // it: the rim is a cliff now, and everyone else wanders well inside it, so
+    // a 0.68u nudge can't shove you off.
+    resolveCharacterOverlap(m.pos, m.vel, blockers.current)
+
+    if (m.flipping && !prevFlipping.current) playWhoosh(7)
+    prevFlipping.current = m.flipping
+
+    if (m.flip > 0) {
+      // Yaw first, then rotate backwards about the character's own right axis.
+      // Composing quaternions rather than setting Euler angles keeps the flip
+      // on the body's axis instead of a world one once they've turned.
+      const q = flipQuat.current
+      q.setFromAxisAngle(AXIS_Y, m.yaw)
+      q.multiply(flipTmpQ.current.setFromAxisAngle(AXIS_X, -m.flip * Math.PI * 2))
+      group.quaternion.copy(q)
+      // Rotate about the middle of the body, not the group origin at their
+      // feet — otherwise the whole bean swings through the floor.
+      flipPivot.current.set(0, FLIP_PIVOT_Y, 0)
+      flipRot.current.copy(flipPivot.current).applyQuaternion(q)
+      group.position.set(
+        m.pos.x + flipPivot.current.x - flipRot.current.x,
+        m.pos.y + flipPivot.current.y - flipRot.current.y,
+        m.pos.z + flipPivot.current.z - flipRot.current.z,
+      )
+    } else {
+      group.position.set(m.pos.x, m.pos.y, m.pos.z)
+      group.rotation.set(0, m.yaw, 0)
     }
 
-    group.position.set(m.pos.x, m.pos.y, m.pos.z)
-    group.rotation.set(0, m.yaw, 0)
+    // Off the edge and dropping clear of the island: hand the body to the
+    // plaza physics, which already owns tumble → despawn → sky respawn.
+    if (!fellOffSent.current && m.pos.y < FALL_HANDOFF_Y && !isOverIsland(m.pos.x, m.pos.z)) {
+      fellOffSent.current = true
+      live.current.onFellOff(m.pos, m.vel)
+    }
 
     const loco = locomotion.current
     if (loco) {

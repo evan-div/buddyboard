@@ -1803,6 +1803,28 @@ function Scene({
     }, 250)
   }, [walkMode, cameraLocked, groupId, currentUid, setHeldBy])
 
+  // Walked off the island in walk mode. Rather than reimplementing the fall,
+  // put the body into the same 'flying' physics a thrown character gets: it
+  // already tumbles into the clouds, despawns, and drops back in from the sky
+  // at the shared waypoint. When it finishes it sets the mode back to null,
+  // and the controller picks the walker up again.
+  //
+  // Local-only, like the rest of walk mode — no plaza event is broadcast, so
+  // other members keep seeing this character on the wander schedule.
+  const handleFellOff = useCallback((pos: THREE.Vector3, vel: THREE.Vector3) => {
+    setCharMode(currentUid, 'flying')
+    const phys = physicsMap.current.get(currentUid)
+    if (!phys) return
+    phys.pos.copy(pos)
+    phys.vel.set(vel.x, Math.min(vel.y, 0), vel.z)
+    phys.angVel.set(
+      (Math.random() - 0.5) * 3.2,
+      (Math.random() - 0.5) * 2.0,
+      (Math.random() - 0.5) * 3.2,
+    )
+    playWhoosh(6)
+  }, [currentUid, setCharMode])
+
   const handlePointerUp = useCallback(() => {
     // Clear pending hold timer
     if (holdTimer.current) {
@@ -2105,7 +2127,7 @@ function Scene({
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
           heldBy={heldByNames.get(member.uid) ?? null}
-          controlled={walkMode && member.uid === currentUid}
+          controlled={walkMode && member.uid === currentUid && !dragModeMap.get(currentUid)}
           locomotion={locomotion}
           noticing={walkMode && member.uid === walkTargetUid}
           onPickupStart={() => handlePickupStart(member)}
@@ -2119,6 +2141,7 @@ function Scene({
         active={walkMode}
         paused={walkPaused}
         reducedMotion={reducedMotion}
+        suspended={walkMode && !!dragModeMap.get(currentUid)}
         playerUid={currentUid}
         members={members}
         charGroups={charGroups}
@@ -2127,6 +2150,7 @@ function Scene({
         onTargetChange={onWalkTargetChange}
         onLockChange={onWalkLockChange}
         onCardAnchor={onWalkCardAnchor}
+        onFellOff={handleFellOff}
         onExit={onWalkExit}
       />
       <PhysicsUpdater
@@ -2638,8 +2662,8 @@ export default function MiiPlaza({
         }}>
           {walkMode
             ? (pointerLocked
-                ? 'WASD move · Shift sprint · Space jump · E interact · Esc release cursor'
-                : 'Click to look · WASD move · Shift sprint · Space jump · Esc exit')
+                ? 'WASD move · Shift sprint · Space jump (×2 backflip) · E interact · Esc release cursor'
+                : 'Click to look · WASD move · Shift sprint · Space jump (×2 backflip) · Esc exit')
             : isMobile
               ? 'Hold to carry · Pinch to zoom · Swipe to rotate'
               : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
