@@ -79,10 +79,11 @@ service cloud.firestore {
       allow list: if false;
       allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
       // The mayor manages settings; join/leave flows may only bump memberCount;
-      // any member may bump the living-plaza vitality counter (and nothing else)
+      // any member may bump the living-plaza counters (vitality and the
+      // collective points-given tally that unlocks islands) and nothing else
       allow update: if isMayor(gid)
         || (signedIn() && affectedOnly(['memberCount']))
-        || (isMember(gid) && affectedOnly(['plazaActiveDays', 'plazaLastActiveDay']));
+        || (isMember(gid) && affectedOnly(['plazaActiveDays', 'plazaLastActiveDay', 'plazaPointsGiven']));
       allow delete: if false;
 
       match /members/{mid} {

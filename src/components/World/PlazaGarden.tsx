@@ -6,7 +6,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { PlazaObject } from '@/lib/types'
 import { growthStage } from '@/lib/plazaGrowth'
-import { tileToWorld, tileKey, tilesInsidePlaza, type Tile } from './plazaMath'
+import { tileToWorld, tileKey, tileIslandId, tilesOnIsland, HOME_FRAME, type IslandFrame, type Tile } from './plazaMath'
 import { getSpecies, isTwoStage, soilScale, type PlazaSpecies } from './plazaSpecies'
 
 /**
@@ -524,9 +524,10 @@ function SoilMound({ stage, scale, dormant }: { stage: number; scale: number; do
 // ─── One planted object ────────────────────────────────────────────────────────
 
 function PlantMesh({
-  object, groupVitality, nowMs, dormant, onSelect,
+  object, frame, groupVitality, nowMs, dormant, onSelect,
 }: {
   object: PlazaObject
+  frame: IslandFrame
   groupVitality: number
   nowMs: number
   dormant: boolean
@@ -539,7 +540,7 @@ function PlantMesh({
     () => growthStage(object.plantedAt.getTime(), object.plantedAtVitality, nowMs, groupVitality),
     [object.plantedAt, object.plantedAtVitality, nowMs, groupVitality],
   )
-  const { x, z } = tileToWorld(object.tile)
+  const { x, z } = tileToWorld(object.tile, frame)
   // Per-plant offsets so a row of the same species doesn't look stamped out.
   const seed = useMemo(
     () => Math.abs(Math.sin(object.tile.q * 12.9898 + object.tile.r * 78.233) * 43758.5453) % 1,
@@ -604,25 +605,41 @@ function TileMarker({ x, z, onSelect }: { x: number; z: number; onSelect: () => 
   )
 }
 
-function PlacementTiles({ taken, onSelect }: { taken: Set<string>; onSelect: (t: Tile) => void }) {
-  const free = useMemo(() => tilesInsidePlaza().filter((t) => !taken.has(tileKey(t))), [taken])
+function PlacementTiles({ frames, taken, onSelect }: {
+  frames: IslandFrame[]
+  taken: Set<string>
+  onSelect: (t: Tile) => void
+}) {
+  const free = useMemo(
+    () => frames.flatMap((f) =>
+      tilesOnIsland(f).filter((t) => !taken.has(tileKey(t))).map((t) => ({ t, f }))),
+    [frames, taken],
+  )
   return (
     <group>
-      {free.map((t) => {
-        const { x, z } = tileToWorld(t)
+      {free.map(({ t, f }) => {
+        const { x, z } = tileToWorld(t, f)
         return <TileMarker key={tileKey(t)} x={x} z={z} onSelect={() => onSelect(t)} />
       })}
     </group>
   )
 }
 
+// Which island a plant sits on. Plants made before the archipelago existed have
+// no island on their tile and belong to home.
+function frameFor(frames: IslandFrame[], o: PlazaObject): IslandFrame {
+  const id = tileIslandId(o.tile)
+  return frames.find((f) => f.id === id) ?? HOME_FRAME
+}
+
 // ─── Garden ────────────────────────────────────────────────────────────────────
 
 export default function PlazaGarden({
-  objects, groupVitality, nowMs, dormant, plantMode, takenTiles, lowerGraphics = false,
+  objects, frames, groupVitality, nowMs, dormant, plantMode, takenTiles, lowerGraphics = false,
   onPlantSelect, onTileSelect,
 }: {
   objects: PlazaObject[]
+  frames: IslandFrame[]
   groupVitality: number
   nowMs: number
   dormant: boolean
@@ -639,13 +656,14 @@ export default function PlazaGarden({
           <PlantMesh
             key={o.id}
             object={o}
+            frame={frameFor(frames, o)}
             groupVitality={groupVitality}
             nowMs={nowMs}
             dormant={dormant}
             onSelect={onPlantSelect}
           />
         ))}
-        {plantMode && <PlacementTiles taken={takenTiles} onSelect={onTileSelect} />}
+        {plantMode && <PlacementTiles frames={frames} taken={takenTiles} onSelect={onTileSelect} />}
       </group>
     </DetailCtx.Provider>
   )

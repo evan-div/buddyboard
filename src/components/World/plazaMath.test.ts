@@ -14,8 +14,10 @@ import {
   TILE_MARGIN,
   tileToWorld,
   tileKey,
+  tileIslandId,
   isTileInside,
   tilesInsidePlaza,
+  tilesOnIsland,
   nearestFreeTile,
 } from './plazaMath'
 
@@ -132,19 +134,43 @@ describe('placement grid', () => {
     const near = nearestFreeTile({ x: 0, z: 0 }, taken)
     expect(near).not.toBeNull()
     // With nothing taken, the closest tile to the origin is the origin tile
-    expect(tileKey(near!)).toBe('0,0')
+    expect(tileKey(near!)).toBe('home:0,0')
   })
 
   it('nearestFreeTile skips occupied tiles', () => {
-    const taken = new Set<string>(['0,0'])
+    const taken = new Set<string>(['home:0,0'])
     const near = nearestFreeTile({ x: 0, z: 0 }, taken)
     expect(near).not.toBeNull()
-    expect(tileKey(near!)).not.toBe('0,0')
+    expect(tileKey(near!)).not.toBe('home:0,0')
+  })
+
+  it('scopes tile keys by island so the same (q,r) never collides', () => {
+    expect(tileKey({ q: 1, r: 2 })).toBe('home:1,2')
+    expect(tileKey({ q: 1, r: 2, island: 'garden' })).toBe('garden:1,2')
+    expect(tileKey({ q: 1, r: 2 })).not.toBe(tileKey({ q: 1, r: 2, island: 'garden' }))
+  })
+
+  it('treats a tile with no island as belonging to home (back-compat)', () => {
+    expect(tileIslandId({ q: 0, r: 0 })).toBe('home')
+    expect(tileIslandId({ q: 0, r: 0, island: 'orchard' })).toBe('orchard')
   })
 
   it('nearestFreeTile returns null when every tile is taken', () => {
     const taken = new Set<string>(tilesInsidePlaza().map(tileKey))
     expect(nearestFreeTile({ x: 0, z: 0 }, taken)).toBeNull()
+  })
+
+  it('gives a smaller island its own, smaller set of usable tiles', () => {
+    const frame = { id: 'garden', center: { x: 27, z: 0 }, scale: 0.52 }
+    const tiles = tilesOnIsland(frame)
+    expect(tiles.length).toBeGreaterThan(2)
+    expect(tiles.length).toBeLessThan(tilesInsidePlaza().length)
+    // every tile is tagged with its island and sits near that island's centre
+    for (const t of tiles) {
+      expect(t.island).toBe('garden')
+      const { x, z } = tileToWorld(t, frame)
+      expect(Math.hypot(x - frame.center.x, z - frame.center.z)).toBeLessThan(FSIZE / 2)
+    }
   })
 })
 

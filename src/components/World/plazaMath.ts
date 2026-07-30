@@ -25,7 +25,9 @@ export function plazaEdgeRadius(theta: number): number {
 // centers at (q·TILE, r·TILE). A tile is plantable when its center sits inside
 // the rounded plaza edge, inset by TILE_MARGIN so trees never poke off the rim.
 
-export type Tile = { q: number; r: number }
+// A tile is scoped to an island. `island` is optional and absent on plants made
+// before the archipelago existed — those are all on 'home'.
+export type Tile = { q: number; r: number; island?: string }
 
 // Spacing is set by the mature canopies (~3 units of half-width). Trunks stand
 // well clear; the crowns of neighbouring full-grown trees interleave slightly
@@ -33,47 +35,78 @@ export type Tile = { q: number; r: number }
 export const TILE = 4.6
 export const TILE_MARGIN = 3.2
 
-export function tileToWorld(tile: Tile): { x: number; z: number } {
-  return { x: tile.q * TILE, z: tile.r * TILE }
+// An island's placement frame: where it sits and how big it is relative to home.
+export type IslandFrame = { id: string; center: { x: number; z: number }; scale: number }
+
+export const HOME_FRAME: IslandFrame = { id: 'home', center: { x: 0, z: 0 }, scale: 1 }
+
+export function tileIslandId(tile: Tile): string {
+  return tile.island ?? HOME_FRAME.id
 }
 
+// Tile centre in world space. Tiles are laid out in the island's local frame
+// then offset to its position, so every island reuses the same grid math.
+export function tileToWorld(tile: Tile, frame: IslandFrame = HOME_FRAME): { x: number; z: number } {
+  return {
+    x: frame.center.x + tile.q * TILE,
+    z: frame.center.z + tile.r * TILE,
+  }
+}
+
+// Keys are island-scoped so the same (q,r) on two islands never collide.
 export function tileKey(tile: Tile): string {
-  return `${tile.q},${tile.r}`
+  return `${tileIslandId(tile)}:${tile.q},${tile.r}`
 }
 
-// Is this tile's center inside the plantable area of the island?
-export function isTileInside(tile: Tile): boolean {
-  const { x, z } = tileToWorld(tile)
-  const r = Math.hypot(x, z)
+// Is this tile's centre inside the plantable area of its island? Smaller
+// islands get a proportionally smaller margin so they don't lose every tile.
+export function isTileInside(tile: Tile, frame: IslandFrame = HOME_FRAME): boolean {
+  const lx = tile.q * TILE
+  const lz = tile.r * TILE
+  const r = Math.hypot(lx, lz)
   if (r === 0) return true
-  const maxR = plazaEdgeRadius(Math.atan2(z, x)) - TILE_MARGIN
+  const maxR = plazaEdgeRadius(Math.atan2(lz, lx)) * frame.scale - TILE_MARGIN * Math.max(0.6, frame.scale)
   return r <= maxR
 }
 
-// All plantable tiles, computed once from the plaza outline.
-let _tilesCache: Tile[] | null = null
-export function tilesInsidePlaza(): Tile[] {
-  if (_tilesCache) return _tilesCache
+// All plantable tiles on one island, cached per island id.
+const _tilesCache = new Map<string, Tile[]>()
+export function tilesOnIsland(frame: IslandFrame = HOME_FRAME): Tile[] {
+  const hit = _tilesCache.get(frame.id)
+  if (hit) return hit
   const tiles: Tile[] = []
-  const span = Math.ceil((FSIZE / 2) / TILE)
+  const span = Math.ceil(((FSIZE / 2) * frame.scale) / TILE)
   for (let q = -span; q <= span; q++) {
     for (let r = -span; r <= span; r++) {
-      if (isTileInside({ q, r })) tiles.push({ q, r })
+      const t: Tile = frame.id === HOME_FRAME.id ? { q, r } : { q, r, island: frame.id }
+      if (isTileInside(t, frame)) tiles.push(t)
     }
   }
-  _tilesCache = tiles
+  _tilesCache.set(frame.id, tiles)
   return tiles
 }
 
-// Nearest unoccupied plantable tile to a world point; null if the island is full.
-export function nearestFreeTile(point: { x: number; z: number }, taken: Set<string>): Tile | null {
+// Back-compat alias — the home island's tiles.
+export function tilesInsidePlaza(): Tile[] {
+  return tilesOnIsland(HOME_FRAME)
+}
+
+// Nearest unoccupied plantable tile to a world point across the given islands;
+// null if every tile is taken.
+export function nearestFreeTile(
+  point: { x: number; z: number },
+  taken: Set<string>,
+  frames: IslandFrame[] = [HOME_FRAME],
+): Tile | null {
   let best: Tile | null = null
   let bestD = Infinity
-  for (const t of tilesInsidePlaza()) {
-    if (taken.has(tileKey(t))) continue
-    const { x, z } = tileToWorld(t)
-    const d = (x - point.x) ** 2 + (z - point.z) ** 2
-    if (d < bestD) { bestD = d; best = t }
+  for (const frame of frames) {
+    for (const t of tilesOnIsland(frame)) {
+      if (taken.has(tileKey(t))) continue
+      const { x, z } = tileToWorld(t, frame)
+      const d = (x - point.x) ** 2 + (z - point.z) ** 2
+      if (d < bestD) { bestD = d; best = t }
+    }
   }
   return best
 }

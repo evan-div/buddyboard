@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   MAX_STAGE,
   TIME_DAYS,
-  NOURISH_DAYS,
   stageFromThresholds,
   growthStage,
   isDormant,

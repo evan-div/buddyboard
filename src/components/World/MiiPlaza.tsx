@@ -8,10 +8,13 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
 import StylizedGrassSurface from './StylizedGrassSurface'
 import PlazaGarden from './PlazaGarden'
+import PlazaArchipelago from './PlazaArchipelago'
+import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
 import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesInsidePlaza, type Tile } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
 import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
+import { ISLANDS, unlockedIslands, progressToNext, archipelagoRadius } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
 import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
@@ -68,17 +71,6 @@ const DARK_COLOR  = '#246b24'
 // ─── Plaza outline ────────────────────────────────────────────────────────────
 // Edge math lives in plazaMath.ts (unit-tested); this file renders it.
 
-function makePlazaShape(): THREE.Shape {
-  const pts: THREE.Vector2[] = []
-  const N = 96
-  for (let i = 0; i < N; i++) {
-    const th = (i / N) * Math.PI * 2
-    const r = plazaEdgeRadius(th)
-    pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
-  }
-  return new THREE.Shape(pts)
-}
-
 // Registers each compiled shader's uTime uniform into the passed ref so the
 // render loop can advance the sway animation without touching the material.
 function makeBladeMat(
@@ -120,25 +112,7 @@ function GrassFloor({
   const rocksRef = useRef<THREE.InstancedMesh>(null)
   const timeUniforms = useRef<{ value: number }[]>([])
 
-  // Canvas-drawn checkerboard — solid full coverage, no gaps between blades.
-  // Mapped onto the rounded plaza shape via repeat/offset (shape UVs are the
-  // raw XY coordinates).
-  const baseTex = useMemo(() => {
-    const PX = 512, TILES = PATCH_GRID, TW = PX / TILES
-    const cv  = document.createElement('canvas')
-    cv.width  = PX; cv.height = PX
-    const ctx = cv.getContext('2d')!
-    for (let y = 0; y < TILES; y++)
-      for (let x = 0; x < TILES; x++) {
-        ctx.fillStyle = (x + y) % 2 === 0 ? LIGHT_COLOR : DARK_COLOR
-        ctx.fillRect(x * TW, y * TW, TW, TW)
-      }
-    const tex = new THREE.CanvasTexture(cv)
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(1 / FSIZE, 1 / FSIZE)
-    tex.offset.set(0.5, 0.5)
-    return tex
-  }, [])
+  const baseTex = useMemo(() => makeCheckerTexture(PATCH_GRID, LIGHT_COLOR, DARK_COLOR), [])
 
   const plazaShape = useMemo(() => makePlazaShape(), [])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
@@ -147,49 +121,7 @@ function GrassFloor({
     [plazaShape],
   )
 
-  // Noisy dirt texture: soft earth-tone patches, faint strata, and grit so the
-  // column reads as soil instead of a flat brown wall
-  const dirtTex = useMemo(() => {
-    const S = 256
-    const cv = document.createElement('canvas')
-    cv.width = cv.height = S
-    const ctx = cv.getContext('2d')!
-    let seed = 7
-    const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
-
-    ctx.fillStyle = '#6B4226'
-    ctx.fillRect(0, 0, S, S)
-
-    const patchShades = ['#5d3a20', '#7a4d2b', '#63401f', '#54331b', '#7d5533']
-    for (let i = 0; i < 46; i++) {
-      ctx.fillStyle = patchShades[Math.floor(rng() * patchShades.length)]
-      ctx.globalAlpha = 0.15 + rng() * 0.15
-      ctx.beginPath()
-      ctx.ellipse(rng() * S, rng() * S, 16 + rng() * 44, 10 + rng() * 30, rng() * Math.PI, 0, Math.PI * 2)
-      ctx.fill()
-    }
-
-    ctx.globalAlpha = 0.09
-    for (let i = 0; i < 7; i++) {
-      ctx.fillStyle = i % 2 ? '#4a2c16' : '#835832'
-      ctx.fillRect(0, rng() * S, S, 3 + rng() * 9)
-    }
-
-    const gritShades = ['#8a7a68', '#9c8c78', '#55402c', '#3f2a18', '#a3937f']
-    for (let i = 0; i < 400; i++) {
-      ctx.fillStyle = gritShades[Math.floor(rng() * gritShades.length)]
-      ctx.globalAlpha = 0.3 + rng() * 0.45
-      ctx.beginPath()
-      ctx.arc(rng() * S, rng() * S, 0.6 + rng() * 2.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.globalAlpha = 1
-
-    const tex = new THREE.CanvasTexture(cv)
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(0.22, 0.22)
-    return tex
-  }, [])
+  const dirtTex = useMemo(() => makeDirtTexture(), [])
 
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
@@ -1623,7 +1555,9 @@ function Scene({
   lowerGraphics,
   reducedMotion,
   gardenObjects,
+  islandFrames,
   groupVitality,
+  pointsGiven,
   nowMs,
   dormant,
   plantMode,
@@ -1645,7 +1579,9 @@ function Scene({
   lowerGraphics: boolean
   reducedMotion: boolean
   gardenObjects: PlazaObject[]
+  islandFrames: IslandFrame[]
   groupVitality: number
+  pointsGiven: number
   nowMs: number
   dormant: boolean
   plantMode: boolean
@@ -1655,6 +1591,10 @@ function Scene({
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
+
+  // Pull the camera back far enough to hold every unlocked island in one view,
+  // with headroom so the whole archipelago is visible at max zoom-out.
+  const camReach = useMemo(() => Math.max(40, archipelagoRadius(pointsGiven) * 2.1), [pointsGiven])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -2063,8 +2003,10 @@ function Scene({
         reducedMotion={reducedMotion}
         characterGroups={charGroups}
       />
+      <PlazaArchipelago pointsGiven={pointsGiven} />
       <PlazaGarden
         objects={gardenObjects}
+        frames={islandFrames}
         groupVitality={groupVitality}
         nowMs={nowMs}
         dormant={dormant}
@@ -2114,7 +2056,7 @@ function Scene({
         enabled={!cameraLocked}
         target={[0, 0.6, 0]}
         minDistance={3}
-        maxDistance={40}
+        maxDistance={camReach}
         enableRotate={true}
         enablePan={false}
         minPolarAngle={Math.PI / 3.3}
@@ -2227,9 +2169,9 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
 // Firestore. Opt in by adding `?preview=1` to the plaza URL (short enough to
 // type on a phone); everything after that is tap-driven, which matters when
 // testing on mobile where editing query strings is painful.
-export type PlazaPreview = { on: boolean; days: number; vitality: number }
+export type PlazaPreview = { on: boolean; days: number; vitality: number; points: number | null }
 
-export const PREVIEW_OFF: PlazaPreview = { on: false, days: 0, vitality: 0 }
+export const PREVIEW_OFF: PlazaPreview = { on: false, days: 0, vitality: 0, points: null }
 
 export function readPlazaPreview(): PlazaPreview {
   if (typeof window === 'undefined') return PREVIEW_OFF
@@ -2238,10 +2180,13 @@ export function readPlazaPreview(): PlazaPreview {
     if (p.get('preview') !== '1') return PREVIEW_OFF
     const days = Number(p.get('plazaDays'))
     const vit = Number(p.get('plazaVitality'))
+    const pts = p.get('plazaPoints')
+    const ptsN = Number(pts)
     return {
       on: true,
       days: Number.isFinite(days) && days > 0 ? days : 0,
       vitality: Number.isFinite(vit) && vit > 0 ? vit : 0,
+      points: pts !== null && Number.isFinite(ptsN) && ptsN >= 0 ? ptsN : null,
     }
   } catch {
     return PREVIEW_OFF
@@ -2314,7 +2259,7 @@ function PreviewPanel({
             {STAGE_LABELS.map((label, i) => (
               <button
                 key={label}
-                onClick={() => onChange({ on: true, ...presetForStage(i) })}
+                onClick={() => onChange({ ...preview, on: true, ...presetForStage(i) })}
                 style={{
                   flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer', fontSize: 10,
                   fontWeight: 800, border: '1px solid rgba(255,255,255,0.18)',
@@ -2339,6 +2284,28 @@ function PreviewPanel({
             {btn('−', () => onChange({ ...preview, vitality: Math.max(0, preview.vitality - 1) }))}
             <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 800 }}>{preview.vitality}</span>
             {btn('+', () => onChange({ ...preview, vitality: preview.vitality + 1 }))}
+          </div>
+
+          <div style={{ fontSize: 10, opacity: 0.85, paddingTop: 2 }}>
+            Islands — jump the group&apos;s points given:
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {ISLANDS.map((isl) => (
+              <button
+                key={isl.id}
+                onClick={() => onChange({ ...preview, on: true, points: isl.unlockAtPoints })}
+                title={`${isl.label} · ${isl.unlockAtPoints} pts`}
+                style={{
+                  padding: '6px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  background: (preview.points ?? 0) >= isl.unlockAtPoints && preview.points !== null
+                    ? '#fff' : 'rgba(255,255,255,0.12)',
+                }}
+              >
+                {isl.emoji}
+              </button>
+            ))}
+            {preview.points !== null && btn('reset', () => onChange({ ...preview, points: null }), true)}
           </div>
 
           {btn('Exit preview', onExit, true)}
@@ -2424,6 +2391,53 @@ function CheckinCard({
             )}
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+// Collective progress toward the next island. Sits under the check-in card so
+// the two tiers read together: check in to grow life, give to earn land.
+function IslandProgress({ pointsGiven }: { pointsGiven: number }) {
+  const p = progressToNext(pointsGiven)
+  const earned = unlockedIslands(pointsGiven)
+
+  return (
+    <div style={{
+      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#cdd6df' }}>
+        <span style={{ fontSize: 14 }}>🏝️</span>
+        <strong style={{ color: '#fff' }}>{earned.length}</strong>
+        <span>island{earned.length === 1 ? '' : 's'}</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.65, fontSize: 11 }}>
+          {pointsGiven.toLocaleString()} given
+        </span>
+      </div>
+
+      {p.next ? (
+        <>
+          <div style={{
+            height: 6, borderRadius: 999, marginTop: 8, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.1)',
+          }}>
+            <div style={{
+              width: `${Math.round(p.fraction * 100)}%`, height: '100%',
+              background: 'linear-gradient(90deg,#43b05f,#7fd694)', borderRadius: 999,
+              transition: 'width 400ms ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 11, color: '#9aa6b1', marginTop: 6, lineHeight: 1.4 }}>
+            <strong style={{ color: '#e6ecf1' }}>{p.next.emoji} {p.next.label}</strong>
+            {' '}rises in {p.remaining.toLocaleString()} more points given
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: '#8fd19e', marginTop: 6 }}>
+          Every island earned 🎉
+        </div>
       )}
     </div>
   )
@@ -2624,13 +2638,14 @@ interface Props {
   timezone?: string
   plazaActiveDays?: number
   plazaLastActiveDay?: string
+  plazaPointsGiven?: number
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, timezone, plazaActiveDays = 0, plazaLastActiveDay, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, timezone, plazaActiveDays = 0, plazaLastActiveDay, plazaPointsGiven = 0, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2662,6 +2677,12 @@ export default function MiiPlaza({
   }, [])
   const nowMs = clockMs + (preview.on ? preview.days * 86_400_000 : 0)
   const effectiveVitality = preview.on ? preview.vitality : plazaActiveDays
+  const effectivePoints = preview.on && preview.points !== null ? preview.points : plazaPointsGiven
+  // Placement frames for every island the group has earned
+  const islandFrames = useMemo<IslandFrame[]>(
+    () => unlockedIslands(effectivePoints).map((i) => ({ id: i.id, center: i.center, scale: i.scale })),
+    [effectivePoints],
+  )
   // Plants placed while previewing live only on this device — they are never
   // written to Firestore, so testing never litters the group's real island.
   const [previewPlants, setPreviewPlants] = useState<PlazaObject[]>([])
@@ -2750,11 +2771,13 @@ export default function MiiPlaza({
   // Drop one of every species on the free tiles closest to the middle, so all
   // the forms can be compared side by side at any growth stage.
   function handleFillOneOfEach() {
-    const free = tilesInsidePlaza()
+    const home = islandFrames[0]
+    const free = tilesOnIsland(home)
       .filter((t) => !takenTiles.has(tileKey(t)))
       .sort((a, b) => {
-        const wa = tileToWorld(a), wb = tileToWorld(b)
-        return Math.hypot(wa.x, wa.z) - Math.hypot(wb.x, wb.z)
+        const wa = tileToWorld(a, home), wb = tileToWorld(b, home)
+        return Math.hypot(wa.x - home.center.x, wa.z - home.center.z)
+             - Math.hypot(wb.x - home.center.x, wb.z - home.center.z)
       })
     setPreviewPlants((prev) => [
       ...prev,
@@ -2857,7 +2880,9 @@ export default function MiiPlaza({
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
             gardenObjects={allObjects}
+            islandFrames={islandFrames}
             groupVitality={effectiveVitality}
+            pointsGiven={effectivePoints}
             nowMs={nowMs}
             dormant={dormant}
             plantMode={plantMode}
@@ -2871,8 +2896,11 @@ export default function MiiPlaza({
 
       <PresenceTab members={members} currentUid={currentUid} />
 
-      {/* Living plaza: daily check-in heartbeat (top-right) */}
-      <div style={{ position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto' }}>
+      {/* Living plaza: daily check-in heartbeat + island progress (top-right) */}
+      <div style={{
+        position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto',
+        display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+      }}>
         <CheckinCard
           checkedIn={checkedInToday}
           checkedInCount={todayCheckins.length}
@@ -2882,6 +2910,7 @@ export default function MiiPlaza({
           busy={busy}
           onCheckin={handleCheckin}
         />
+        <IslandProgress pointsGiven={effectivePoints} />
       </div>
 
       {/* Plant controls (hidden while another card or picker is open) */}

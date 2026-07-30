@@ -11,6 +11,10 @@ If you add a new collection, change a `match` block, or add a query that needs a
 composite index, you have to deploy these or the app will hit `permission-denied`
 (rules) or `failed-precondition` (missing index) at runtime.
 
+> ⚠️ The rules changed again with the archipelago (members may now bump
+> `plazaPointsGiven` on the group doc). **Redeploy `firestore.rules`** or giving
+> points will fail with `permission-denied` and islands will never unlock.
+
 > Heads up: deploying rules **replaces the entire live ruleset** with the file's
 > contents. That's fine — `firestore.rules` is the source of truth and holds all
 > rules, not a diff — just know it's a full replace, not a merge.
@@ -117,6 +121,9 @@ An orange **⏩ preview** panel appears at the top-left. Tap it to expand, then:
 - Tap **Seedling / Sprout / Young / Mature** to jump straight to that stage.
 - Tap **🌿 One of each** to drop every species on the tiles nearest the middle —
   combined with the stage buttons, that shows all plant forms at any maturity.
+- Tap an **island emoji** to jump the group's points-given to that island's
+  unlock threshold and watch the archipelago rise (`reset` returns to the real
+  number). Or pass `?preview=1&plazaPoints=1500` directly.
 - Seeds are **unlimited** in preview (the Plant button reads `🌱 Plant · ∞`), and
   anything planted while previewing is **local to your device only** — it is
   never written to Firestore, so testing never litters the group's real island.

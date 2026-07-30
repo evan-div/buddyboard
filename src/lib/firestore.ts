@@ -290,6 +290,7 @@ function mapGroupDoc(id: string, data: Record<string, unknown>): Group {
     rules: data.rules,
     plazaActiveDays: (data.plazaActiveDays as number) ?? 0,
     plazaLastActiveDay: data.plazaLastActiveDay as string | undefined,
+    plazaPointsGiven: (data.plazaPointsGiven as number) ?? 0,
   } as Group
 }
 
@@ -651,6 +652,12 @@ export async function giveOrTakePoints(
       longestStreak,
       lastActiveDate: today,
     })
+
+    // Collective tally that unlocks new islands. Only generosity counts —
+    // taking points never buys the group land.
+    if (totalGiving > 0) {
+      transaction.update(groupRef, { plazaPointsGiven: increment(totalGiving) })
+    }
   })
 
   // Push-notify each recipient (fire-and-forget — in-app notifications were

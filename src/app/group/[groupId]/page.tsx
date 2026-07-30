@@ -345,6 +345,7 @@ export default function GroupPage() {
               timezone={group.timezone}
               plazaActiveDays={group.plazaActiveDays}
               plazaLastActiveDay={group.plazaLastActiveDay}
+              plazaPointsGiven={group.plazaPointsGiven}
               onReady={handlePlazaReady}
             />
           )}

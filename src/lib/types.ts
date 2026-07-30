@@ -85,6 +85,9 @@ export type Group = {
   // were planted, so a quiet group's garden stalls (but never dies).
   plazaActiveDays?: number
   plazaLastActiveDay?: string   // dayKey of the most recent active day
+  // Cumulative points the group has GIVEN each other (takes excluded). Drives
+  // island unlocks — collective effort creates space, daily check-ins grow life.
+  plazaPointsGiven?: number
 }
 
 export type GroupMember = {
