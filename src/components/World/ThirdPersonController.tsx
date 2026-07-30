@@ -18,12 +18,13 @@ import * as THREE from 'three'
 import {
   makeMoveState, stepMovement,
   makeCamState, applyLook, applyZoom, stepCamera, cameraPlacement,
-  nearestInteractable,
-  clamp, smoothFactor,
+  nearestInteractable, resolveCharacterOverlap,
+  clamp, smoothFactor, EDGE_MARGIN,
   CAM_PIVOT_Y, CAM_START_DIST, CAM_MIN_DIST, CAM_MAX_DIST,
   PITCH_MIN, PITCH_MAX, FOV_BASE, CARD_ANCHOR_Y, charHalfWidthPx,
   type MoveInput, type InteractCandidate, type Locomotion,
 } from './thirdPerson'
+import { clampToPlazaEdge } from './plazaMath'
 import type { GroupMember } from '@/lib/types'
 
 // Drag-to-orbit fallback, used when the pointer isn't locked (after Esc, or if
@@ -37,6 +38,8 @@ interface Props {
   active: boolean
   /** A member card is open: freeze input, but keep the camera easing. */
   paused: boolean
+  /** prefers-reduced-motion: drop the FOV punch and the spring-arm trail. */
+  reducedMotion: boolean
   playerUid: string
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
@@ -52,7 +55,7 @@ interface Props {
 }
 
 export default function ThirdPersonController({
-  active, paused, playerUid, members, charGroups, locomotion,
+  active, paused, reducedMotion, playerUid, members, charGroups, locomotion,
   onInteract, onTargetChange, onLockChange, onCardAnchor, onExit,
 }: Props) {
   const { camera, gl } = useThree()
@@ -219,6 +222,7 @@ export default function ThirdPersonController({
   // Scratch objects reused every frame — walk mode allocates nothing per frame.
   const inputRef   = useRef<MoveInput>({ forward: 0, strafe: 0, sprint: false, jump: false })
   const candidates = useRef<InteractCandidate[]>([])
+  const blockers   = useRef<{ x: number; z: number }[]>([])
 
   useFrame((_, rawDelta) => {
     const dt = Math.min(rawDelta, 0.1)
@@ -288,8 +292,27 @@ export default function ThirdPersonController({
       jumpQueued.current = false
     }
 
+    // ── Everyone else, gathered once ────────────────────────────────────────
+    // Feeds both the collision pass and the interact search. Anyone off the
+    // ground is being carried or thrown — they're not something to bump into.
+    candidates.current.length = 0
+    blockers.current.length = 0
+    for (const member of live.current.members) {
+      if (member.uid === playerUid) continue
+      const g = charGroups.current?.get(member.uid)
+      if (!g || !g.visible) continue
+      candidates.current.push({ uid: member.uid, x: g.position.x, z: g.position.z })
+      if (Math.abs(g.position.y) < 0.6) blockers.current.push({ x: g.position.x, z: g.position.z })
+    }
+
     const m = move.current
     stepMovement(m, input, cam.current.yaw, dt)
+
+    // Bump into people rather than through them, then re-clamp: being pushed
+    // off someone standing on the rim must not push us off the island.
+    if (resolveCharacterOverlap(m.pos, m.vel, blockers.current)) {
+      clampToPlazaEdge(m.pos, EDGE_MARGIN)
+    }
 
     group.position.set(m.pos.x, m.pos.y, m.pos.z)
     group.rotation.set(0, m.yaw, 0)
@@ -299,10 +322,12 @@ export default function ThirdPersonController({
       loco.speed     = m.speed
       loco.airborne  = !m.grounded
       loco.sprinting = input.sprint && m.speed > 0.1
+      loco.vy        = m.vel.y
+      loco.pos.copy(m.pos)
     }
 
     // ── Camera ──────────────────────────────────────────────────────────────
-    stepCamera(cam.current, { anchor: m.pos, vel: m.vel, accel: m.accel }, dt)
+    stepCamera(cam.current, { anchor: m.pos, vel: m.vel, accel: m.accel, reducedMotion }, dt)
     cameraPlacement(cam.current, camPos.current, camLook.current)
     camera.position.copy(camPos.current)
     camera.lookAt(camLook.current)
@@ -312,13 +337,6 @@ export default function ThirdPersonController({
     }
 
     // ── Interact target ─────────────────────────────────────────────────────
-    candidates.current.length = 0
-    for (const member of live.current.members) {
-      if (member.uid === playerUid) continue
-      const g = charGroups.current?.get(member.uid)
-      if (!g || !g.visible) continue
-      candidates.current.push({ uid: member.uid, x: g.position.x, z: g.position.z })
-    }
     const found = paused ? target.current
       : nearestInteractable(m.pos.x, m.pos.z, m.yaw, candidates.current)
     if (found !== target.current) {

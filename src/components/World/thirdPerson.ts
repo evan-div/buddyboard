@@ -49,6 +49,29 @@ export const JUMP_GRAVITY = 25
 // so the camera behind them doesn't hang out over the void.
 export const EDGE_MARGIN  = 0.7
 
+// ─── Facing ───────────────────────────────────────────────────────────────────
+// Movement is camera-relative, so the character's facing deviates from the
+// camera's forward direction by exactly the input angle: hold D and they turn a
+// full 90°, and you spend the whole time looking at their profile.
+//
+// The tempting fix — rotating the camera to follow the travel direction — does
+// not work here, and not subtly: because the input frame IS the camera, the
+// deviation the camera chases is regenerated every frame. Simulated at 60fps
+// holding W+D, the deviation locks at a constant 42.5° and the camera winds
+// round forever, walking the player in circles. It's a no-op for pure forward
+// (nothing to correct) and unstable for everything else.
+//
+// So compress the facing instead. `s` is the input angle off camera-forward:
+// this leaves straight-ahead untouched, pulls a sideways step back to a
+// three-quarter view, and still lets a backpedal turn all the way around so
+// the character faces you.
+export const FACING_COMPRESS = 0.52   // rad (~30°) removed at full sideways
+
+export function compressFacing(s: number): number {
+  const sn = Math.sin(s)
+  return s - Math.sign(s) * FACING_COMPRESS * sn * sn
+}
+
 export interface MoveInput {
   forward: number   // -1..1  (W = +1, S = -1)
   strafe:  number   // -1..1  (D = +1, A = -1)
@@ -156,10 +179,14 @@ export function stepMovement(s: MoveState, input: MoveInput, cameraYaw: number, 
   }
 
   // ── Facing ──────────────────────────────────────────────────────────────────
-  // Turn toward where we're heading. Eased, so a 180° reversal sweeps around
-  // instead of snapping.
+  // Turn toward where we're heading, but compressed toward camera-forward so a
+  // sideways step doesn't leave us staring at the character's profile (see
+  // compressFacing). Eased, so a 180° reversal sweeps around instead of
+  // snapping.
   if (moving) {
-    const goal = Math.atan2(_desired.x, _desired.z)
+    const travel  = Math.atan2(_desired.x, _desired.z)
+    const forward = cameraYaw + Math.PI          // where the camera is looking
+    const goal    = forward + compressFacing(shortestAngle(forward, travel))
     s.yaw += shortestAngle(s.yaw, goal) * smoothFactor(TURN_RATE, dt)
   }
 
@@ -193,6 +220,7 @@ export const PITCH_MAX =  1.15   // steep, but never straight down
 export const MOUSE_SENS = 0.0026
 
 export const FOLLOW_RATE = 7.5   // pivot chasing the character
+export const FOLLOW_RATE_REDUCED = 20  // near-rigid, for prefers-reduced-motion
 export const LAG_RATE    = 4.5   // how fast the trailing offset itself eases
 export const LAG_PER_ACCEL = 0.020
 export const LAG_MAX       = 0.55
@@ -250,36 +278,94 @@ export interface CamStepOpts {
   anchor: THREE.Vector3   // character position (feet)
   vel:    THREE.Vector3
   accel:  THREE.Vector3
+  /** Honour prefers-reduced-motion: drop the decorative camera dynamics. */
+  reducedMotion?: boolean
 }
 
 export function stepCamera(cam: CamState, opts: CamStepOpts, dt: number): void {
   if (dt <= 0) return
   const { anchor, vel, accel } = opts
+  const reduced = opts.reducedMotion === true
 
   // Velocity-aware trail: shove the pivot opposite the character's acceleration,
   // so the arm visibly drags when you take off and eases back in when you stop.
-  _lagGoal.set(-accel.x * LAG_PER_ACCEL, 0, -accel.z * LAG_PER_ACCEL)
-  if (_lagGoal.lengthSq() > LAG_MAX * LAG_MAX) _lagGoal.setLength(LAG_MAX)
-  cam.lag.lerp(_lagGoal, smoothFactor(LAG_RATE, dt))
+  // Under reduced motion the arm is rigid — the trail is exactly the kind of
+  // unrequested viewport movement that provokes motion sickness.
+  if (reduced) {
+    cam.lag.set(0, 0, 0)
+  } else {
+    _lagGoal.set(-accel.x * LAG_PER_ACCEL, 0, -accel.z * LAG_PER_ACCEL)
+    if (_lagGoal.lengthSq() > LAG_MAX * LAG_MAX) _lagGoal.setLength(LAG_MAX)
+    cam.lag.lerp(_lagGoal, smoothFactor(LAG_RATE, dt))
+  }
 
   _pivotGoal.set(anchor.x + cam.lag.x, anchor.y + CAM_PIVOT_Y + cam.lag.y, anchor.z + cam.lag.z)
-  cam.pivot.lerp(_pivotGoal, smoothFactor(FOLLOW_RATE, dt))
+  cam.pivot.lerp(_pivotGoal, smoothFactor(reduced ? FOLLOW_RATE_REDUCED : FOLLOW_RATE, dt))
 
   // Zoom eases onto the wheel target rather than jumping a notch at a time.
+  // Kept under reduced motion: it's directly user-initiated, and easing it is
+  // gentler than snapping.
   cam.dist += (cam.distTarget - cam.dist) * smoothFactor(ZOOM_RATE, dt)
 
   // ── FOV ─────────────────────────────────────────────────────────────────────
   const speed = Math.hypot(vel.x, vel.z)
-  const t = clamp(speed / SPRINT_SPEED, 0, 1)
-  // Squared so walking barely reframes and the widening belongs to the sprint.
-  let goal = FOV_BASE + t * t * FOV_WIDEN
-  // Braking pulls FOV below base for a beat — that dip is what reads as the
-  // camera "tightening in" as you come to a stop.
-  if (speed > 1e-4) {
-    const along = (accel.x * vel.x + accel.z * vel.z) / speed
-    if (along < 0) goal -= Math.min(FOV_TIGHTEN, -along * FOV_TIGHTEN_PER_DECEL)
+  let goal: number
+  if (reduced) {
+    // A moving FOV is the single most nauseating part of this camera; pin it.
+    goal = FOV_BASE
+  } else {
+    const t = clamp(speed / SPRINT_SPEED, 0, 1)
+    // Squared so walking barely reframes and the widening belongs to the sprint.
+    goal = FOV_BASE + t * t * FOV_WIDEN
+    // Braking pulls FOV below base for a beat — that dip is what reads as the
+    // camera "tightening in" as you come to a stop.
+    if (speed > 1e-4) {
+      const along = (accel.x * vel.x + accel.z * vel.z) / speed
+      if (along < 0) goal -= Math.min(FOV_TIGHTEN, -along * FOV_TIGHTEN_PER_DECEL)
+    }
   }
+  // Still eased, so flipping the setting mid-session doesn't jump the framing.
   cam.fov += (goal - cam.fov) * smoothFactor(FOV_RATE, dt)
+}
+
+// ─── Character collision ──────────────────────────────────────────────────────
+
+export const CHAR_RADIUS = 0.34
+
+// Push the walker out of anyone they've walked into, and cancel the velocity
+// heading into them so they slide around rather than grinding in place.
+//
+// Only the walker moves. The others are positioned by the shared deterministic
+// wander schedule in plazaWalk.ts — shoving them here would put this client's
+// world out of step with every other viewer's.
+export function resolveCharacterOverlap(
+  pos: THREE.Vector3,
+  vel: THREE.Vector3,
+  others: Iterable<{ x: number; z: number }>,
+  radius = CHAR_RADIUS,
+): boolean {
+  const minDist = radius * 2
+  let pushed = false
+  for (const o of others) {
+    const dx = pos.x - o.x
+    const dz = pos.z - o.z
+    const d  = Math.hypot(dx, dz)
+    if (d >= minDist) continue
+    // Exactly co-located (a respawn drop landing on us): pick an axis so the
+    // normal stays well defined. `d` stays 0 so the push is the full diameter —
+    // deriving the normal must not also fake the distance.
+    const nx = d < 1e-6 ? 1 : dx / d
+    const nz = d < 1e-6 ? 0 : dz / d
+    pos.x += nx * (minDist - d)
+    pos.z += nz * (minDist - d)
+    const into = vel.x * nx + vel.z * nz
+    if (into < 0) {
+      vel.x -= nx * into
+      vel.z -= nz * into
+    }
+    pushed = true
+  }
+  return pushed
 }
 
 // Resolve the orbit state into a camera position and look target.
@@ -387,10 +473,14 @@ export interface Locomotion {
   speed: number
   airborne: boolean
   sprinting: boolean
+  /** Vertical velocity, so a landing can be squashed in proportion to the fall. */
+  vy: number
+  /** Live walker position — other characters read it to turn and look at you. */
+  pos: THREE.Vector3
 }
 
 export function makeLocomotion(): Locomotion {
-  return { speed: 0, airborne: false, sprinting: false }
+  return { speed: 0, airborne: false, sprinting: false, vy: 0, pos: new THREE.Vector3() }
 }
 
 // ─── Interact targeting ───────────────────────────────────────────────────────

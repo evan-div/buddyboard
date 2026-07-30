@@ -104,6 +104,45 @@ export function playThud(intensity: number): void {
   src.stop(t + 0.09)
 }
 
+// Soft footfall for walk mode. Fires twice per stride at up to ~2/sec, so it's
+// deliberately quieter and shorter than playThud and gets a little random pitch
+// and level jitter — identical repeated clicks turn grating fast.
+// `intensity` 0..1 tracks gait speed.
+export function playFootstep(intensity: number): void {
+  const ac = getCtx()
+  if (!ac) return
+  const t = ac.currentTime
+  const k = Math.max(0.1, Math.min(1, intensity))
+  const jitter = 0.88 + Math.random() * 0.24
+
+  // A dull low blip — the boot hitting turf
+  const osc  = ac.createOscillator()
+  const gain = ac.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(150 * jitter, t)
+  osc.frequency.exponentialRampToValueAtTime(70 * jitter, t + 0.05)
+  gain.gain.setValueAtTime(0.05 * k, t)
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07)
+  osc.connect(gain).connect(ac.destination)
+  osc.start(t)
+  osc.stop(t + 0.08)
+
+  // Grass rustle on top
+  const src    = ac.createBufferSource()
+  const filter = ac.createBiquadFilter()
+  const ngain  = ac.createGain()
+  src.buffer = getNoise(ac)
+  src.playbackRate.value = jitter
+  filter.type = 'bandpass'
+  filter.Q.value = 0.8
+  filter.frequency.value = 1700 * jitter
+  ngain.gain.setValueAtTime(0.035 * k, t)
+  ngain.gain.exponentialRampToValueAtTime(0.001, t + 0.06)
+  src.connect(filter).connect(ngain).connect(ac.destination)
+  src.start(t)
+  src.stop(t + 0.08)
+}
+
 // Haptic buzz — no-op where the Vibration API is unsupported (e.g. iOS Safari)
 export function buzz(ms: number): void {
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {

@@ -1637,6 +1637,7 @@ function Scene({
   reducedMotion,
   walkMode,
   walkPaused,
+  walkTargetUid,
   returnNonce,
   onWalkInteract,
   onWalkTargetChange,
@@ -1659,6 +1660,7 @@ function Scene({
   reducedMotion: boolean
   walkMode: boolean
   walkPaused: boolean
+  walkTargetUid: string | null
   returnNonce: number
   onWalkInteract: (uid: string) => void
   onWalkTargetChange: (uid: string | null) => void
@@ -2105,6 +2107,7 @@ function Scene({
           heldBy={heldByNames.get(member.uid) ?? null}
           controlled={walkMode && member.uid === currentUid}
           locomotion={locomotion}
+          noticing={walkMode && member.uid === walkTargetUid}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -2115,6 +2118,7 @@ function Scene({
       <ThirdPersonController
         active={walkMode}
         paused={walkPaused}
+        reducedMotion={reducedMotion}
         playerUid={currentUid}
         members={members}
         charGroups={charGroups}
@@ -2465,6 +2469,7 @@ export default function MiiPlaza({
             reducedMotion={reducedMotion}
             walkMode={walkMode}
             walkPaused={!!selectedMember}
+            walkTargetUid={walkTarget}
             returnNonce={returnNonce}
             onWalkInteract={(uid) => {
               // handleSelect short-circuits on walkMode and ignores the

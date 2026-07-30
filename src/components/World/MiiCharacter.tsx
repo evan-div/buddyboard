@@ -11,7 +11,8 @@ import { highestBadge } from '@/lib/badges'
 import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
 import { BeanBody, BeanHair, BeanAccessory, outlineShade } from '@/components/Avatar/BeanParts'
 import { hashUid, slotIndex, currentWaypoint, idleVariant } from './plazaWalk'
-import { SPRINT_SPEED, type Locomotion } from './thirdPerson'
+import { SPRINT_SPEED, JUMP_SPEED, type Locomotion } from './thirdPerson'
+import { playThud, playFootstep } from './plazaSound'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
@@ -154,6 +155,8 @@ export interface MiiCharacterProps {
       animate off `locomotion` instead. */
   controlled?: boolean
   locomotion?: React.RefObject<Locomotion>
+  /** This character is the walker's current interact target: look up at them. */
+  noticing?: boolean
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -161,7 +164,7 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, heldBy = null, controlled = false, locomotion,
+  dragMode = null, heldBy = null, controlled = false, locomotion, noticing = false,
   onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
@@ -186,6 +189,7 @@ export default function MiiCharacter({
   const prevDragMode = useRef<DragMode | null>(null)
   const prevBodyRot  = useRef({ x: 0, z: 0 })
   const wakeProne    = useRef(false)
+  const prevAirborne = useRef(false)
   // Squash & stretch spring on the body scale (s → 1); v is kicked by events
   const squash       = useRef({ s: 1, v: 0 })
   // Blink state: countdown to the next blink, and progress through one
@@ -450,6 +454,19 @@ export default function MiiCharacter({
       const la = leftArmRef.current,  ra = rightArmRef.current
       const ll = leftLegRef.current,  rl = rightLegRef.current
 
+      // Takeoff / landing — kick the squash spring that already runs above, the
+      // same one throws use, so a jump leaves and lands with weight.
+      if (airborne !== prevAirborne.current) {
+        if (airborne) {
+          squash.current.v = 1.6                       // stretch off the ground
+        } else {
+          const impact = Math.min(1, Math.abs(loco?.vy ?? 0) / JUMP_SPEED)
+          squash.current.v = -(1.2 + impact * 1.7)     // squash proportional to the fall
+          playThud(0.22 + impact * 0.4)
+        }
+        prevAirborne.current = airborne
+      }
+
       if (airborne) {
         // Tuck — arms swung back, legs gathered — held until landing
         const k = Math.min(1, delta * 12)
@@ -465,7 +482,13 @@ export default function MiiCharacter({
       } else if (sp > 0.08) {
         // Stride rate AND swing both scale with speed, so a walk reads as a
         // different gait from a sprint without a second animation.
+        const prevPhase = phase.current
         phase.current += delta * (5.2 + norm * 7.5)
+        // One footfall per half-cycle: the swing crosses zero as each foot
+        // plants, so step sounds stay locked to the legs at any speed.
+        if (Math.floor(prevPhase / Math.PI) !== Math.floor(phase.current / Math.PI)) {
+          playFootstep(0.35 + norm * 0.5)
+        }
         const sw = Math.sin(phase.current) * (0.22 + norm * 0.62)
         const k  = Math.min(1, delta * 6)
         if (la) { la.rotation.x =  sw; la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, -0.05 - norm * 0.12, k) }
@@ -769,6 +792,19 @@ export default function MiiCharacter({
       const k = Math.min(1, delta * 3)
       group.position.x += (targetPos.current!.x - group.position.x) * k
       group.position.z += (targetPos.current!.z - group.position.z) * k
+
+      // Someone in walk mode is standing in front of us: turn and look at them.
+      // Only while idle — a character mid-walk is busy, and steering them here
+      // would fight the waypoint they're heading for. Purely local (this is the
+      // viewer's own walker), so it can't desync the shared schedule.
+      const walker = noticing ? locomotion?.current?.pos : null
+      if (walker) {
+        const goal = Math.atan2(walker.x - group.position.x, walker.z - group.position.z)
+        let dy = goal - group.rotation.y
+        while (dy >  Math.PI) dy -= Math.PI * 2
+        while (dy < -Math.PI) dy += Math.PI * 2
+        group.rotation.y += dy * Math.min(1, delta * 4)
+      }
       if (animState.current === 'idle_bob') {
         if (body) body.position.y = Math.sin(t * 2.6) * 0.03
       } else {

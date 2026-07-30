@@ -33,6 +33,9 @@ import {
   CARD_RISE,
   CARD_MARGIN,
   CHAR_HALF_WIDTH_PX_MAX,
+  compressFacing,
+  resolveCharacterOverlap,
+  CHAR_RADIUS,
   type MoveInput,
 } from './thirdPerson'
 import { plazaEdgeRadius } from './plazaMath'
@@ -265,6 +268,185 @@ describe('stepMovement — facing', () => {
     const s = makeMoveState(0, 0, 1.234)
     run(s, STILL, 60)
     expect(s.yaw).toBe(1.234)
+  })
+})
+
+describe('compressFacing', () => {
+  const deg = (r: number) => (r * 180) / Math.PI
+  const rad = (d: number) => (d * Math.PI) / 180
+
+  it('leaves straight ahead and a full backpedal untouched', () => {
+    expect(compressFacing(0)).toBeCloseTo(0, 10)
+    expect(compressFacing(Math.PI)).toBeCloseTo(Math.PI, 10)
+    expect(compressFacing(-Math.PI)).toBeCloseTo(-Math.PI, 10)
+  })
+
+  it('pulls a sideways step back to a three-quarter view', () => {
+    // 90° off camera-forward is the pure-strafe profile case
+    expect(deg(compressFacing(rad(90)))).toBeCloseTo(90 - deg(0.52), 6)
+    expect(deg(compressFacing(rad(90)))).toBeLessThan(65)
+    expect(deg(compressFacing(rad(90)))).toBeGreaterThan(55)
+  })
+
+  it('is symmetric about zero', () => {
+    for (let d = 5; d <= 175; d += 10)
+      expect(compressFacing(rad(-d))).toBeCloseTo(-compressFacing(rad(d)), 12)
+  })
+
+  it('never reverses — a bigger input angle always turns further', () => {
+    let prev = -Infinity
+    for (let d = 0; d <= 180; d += 1) {
+      const v = compressFacing(rad(d))
+      expect(v).toBeGreaterThan(prev)
+      prev = v
+    }
+  })
+
+  it('only ever reduces the turn, never exaggerates it', () => {
+    for (let d = 0; d <= 180; d += 3) {
+      const v = deg(compressFacing(rad(d)))
+      expect(v).toBeLessThanOrEqual(d + 1e-9)
+      expect(v).toBeGreaterThanOrEqual(0)
+    }
+  })
+})
+
+describe('stepMovement — facing under compression', () => {
+  const faceOffset = (input: MoveInput, camYaw = 0) => {
+    const s = makeMoveState()
+    run(s, input, 200, camYaw)
+    // camera-forward at camYaw is atan2(-sin, -cos) = camYaw + π
+    return (shortestAngle(camYaw + Math.PI, s.yaw) * 180) / Math.PI
+  }
+
+  it('faces dead ahead when running straight forward', () => {
+    expect(Math.abs(faceOffset(input({ forward: 1 })))).toBeLessThan(1)
+  })
+
+  // Before compression these were 45° / 90°; the 90° case was a pure profile.
+  it('keeps the back to camera on a diagonal', () => {
+    expect(Math.abs(faceOffset(input({ forward: 1, strafe: 1 })))).toBeLessThan(35)
+  })
+
+  it('no longer shows a full profile on a pure strafe', () => {
+    const off = Math.abs(faceOffset(input({ strafe: 1 })))
+    expect(off).toBeLessThan(65)
+    expect(off).toBeGreaterThan(50)   // still visibly angled into the step
+  })
+
+  it('still turns all the way around to backpedal', () => {
+    expect(Math.abs(faceOffset(input({ forward: -1 })))).toBeGreaterThan(175)
+  })
+
+  it('holds regardless of which way the camera points', () => {
+    for (const camYaw of [-2.5, -1.0, 0, 0.8, 2.2])
+      expect(Math.abs(faceOffset(input({ strafe: 1 }), camYaw))).toBeLessThan(65)
+  })
+})
+
+describe('resolveCharacterOverlap', () => {
+  const at = (x: number, z: number) => new THREE.Vector3(x, 0, z)
+
+  it('leaves a walker who is clear of everyone alone', () => {
+    const pos = at(0, 0), vel = at(1, 0)
+    expect(resolveCharacterOverlap(pos, vel, [{ x: 5, z: 5 }])).toBe(false)
+    expect(pos.x).toBe(0)
+    expect(vel.x).toBe(1)
+  })
+
+  it('pushes out to exactly touching, never further', () => {
+    const pos = at(0.2, 0), vel = at(0, 0)
+    expect(resolveCharacterOverlap(pos, vel, [{ x: 0, z: 0 }])).toBe(true)
+    expect(Math.hypot(pos.x, pos.z)).toBeCloseTo(CHAR_RADIUS * 2, 10)
+  })
+
+  it('cancels the velocity heading into them but keeps the sliding part', () => {
+    const pos = at(0.3, 0)
+    const vel = new THREE.Vector3(-2, 0, 3)   // -x drives into them, +z slides past
+    resolveCharacterOverlap(pos, vel, [{ x: 0, z: 0 }])
+    expect(vel.x).toBeCloseTo(0, 10)          // the "into" component is gone
+    expect(vel.z).toBeCloseTo(3, 10)          // the tangential component survives
+  })
+
+  it('does not brake a walker who is already moving away', () => {
+    const pos = at(0.3, 0)
+    const vel = new THREE.Vector3(4, 0, 0)
+    resolveCharacterOverlap(pos, vel, [{ x: 0, z: 0 }])
+    expect(vel.x).toBeCloseTo(4, 10)
+  })
+
+  it('resolves a dead-on overlap instead of dividing by zero', () => {
+    const pos = at(0, 0), vel = at(0, 0)
+    expect(resolveCharacterOverlap(pos, vel, [{ x: 0, z: 0 }])).toBe(true)
+    expect(Number.isFinite(pos.x)).toBe(true)
+    expect(Number.isFinite(pos.z)).toBe(true)
+    expect(Math.hypot(pos.x, pos.z)).toBeCloseTo(CHAR_RADIUS * 2, 10)
+  })
+
+  it('separates from every character in a crowd', () => {
+    const others = [{ x: 0, z: 0 }, { x: 0.5, z: 0.1 }, { x: 0.2, z: 0.5 }]
+    const pos = at(0.25, 0.2), vel = at(0, 0)
+    // A single pass can push into a neighbour; a few settle it, like any
+    // iterative solver.
+    for (let i = 0; i < 12; i++) resolveCharacterOverlap(pos, vel, others)
+    for (const o of others)
+      expect(Math.hypot(pos.x - o.x, pos.z - o.z)).toBeGreaterThanOrEqual(CHAR_RADIUS * 2 - 1e-6)
+  })
+
+  it('never lets the walker end up inside someone while walking into them', () => {
+    const s = makeMoveState(3, 0)
+    const blocker = [{ x: 0, z: 0 }]
+    // Walk straight at a stationary character for two seconds
+    for (let f = 0; f < 120; f++) {
+      stepMovement(s, input({ forward: 1 }), Math.PI / 2, 1 / 60)
+      resolveCharacterOverlap(s.pos, s.vel, blocker)
+      expect(Math.hypot(s.pos.x, s.pos.z)).toBeGreaterThanOrEqual(CHAR_RADIUS * 2 - 1e-6)
+    }
+  })
+})
+
+describe('stepCamera — reduced motion', () => {
+  const opts = (vx = 0, vz = 0, ax = 0, az = 0, reducedMotion = false) => ({
+    anchor: new THREE.Vector3(),
+    vel: new THREE.Vector3(vx, 0, vz),
+    accel: new THREE.Vector3(ax, 0, az),
+    reducedMotion,
+  })
+
+  it('pins the FOV at base no matter how fast you go', () => {
+    const cam = makeCamState()
+    for (let i = 0; i < 600; i++) stepCamera(cam, opts(SPRINT_SPEED, 0, 0, 0, true), DT)
+    expect(cam.fov).toBeCloseTo(FOV_BASE, 4)
+  })
+
+  it('does not dip the FOV under braking either', () => {
+    const cam = makeCamState()
+    for (let i = 0; i < 300; i++) stepCamera(cam, opts(0.5, 0, -30, 0, true), DT)
+    expect(cam.fov).toBeCloseTo(FOV_BASE, 4)
+  })
+
+  it('holds the arm rigid instead of trailing under acceleration', () => {
+    const cam = makeCamState()
+    for (let i = 0; i < 60; i++) stepCamera(cam, opts(3, 0, 30, 0, true), DT)
+    expect(cam.lag.lengthSq()).toBe(0)
+  })
+
+  it('tracks the character faster than the normal spring arm', () => {
+    const normal = makeCamState()
+    const reduced = makeCamState()
+    const anchor = new THREE.Vector3(5, 0, 0)
+    for (let i = 0; i < 12; i++) {
+      stepCamera(normal,  { anchor, vel: new THREE.Vector3(), accel: new THREE.Vector3() }, DT)
+      stepCamera(reduced, { anchor, vel: new THREE.Vector3(), accel: new THREE.Vector3(), reducedMotion: true }, DT)
+    }
+    expect(reduced.pivot.x).toBeGreaterThan(normal.pivot.x)
+  })
+
+  it('still lets the wheel zoom work', () => {
+    const cam = makeCamState()
+    applyZoom(cam, -600)
+    for (let i = 0; i < 300; i++) stepCamera(cam, opts(0, 0, 0, 0, true), DT)
+    expect(cam.dist).toBeCloseTo(cam.distTarget, 4)
   })
 })
 
