@@ -2307,6 +2307,10 @@ interface Props {
   remainingTake: number
   lowerGraphics?: boolean
   reducedMotion?: boolean
+  /** Height of any chrome floating over the bottom of the plaza (the app's tab
+      bar). The plaza fills the viewport and the bar is fixed on top of it, so
+      every bottom-anchored overlay has to be lifted clear of it. */
+  bottomInset?: number
   presets?: PlazaPreset[]
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
@@ -2314,7 +2318,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2441,7 +2445,7 @@ export default function MiiPlaza({
     : null
 
   const cardWrapperStyle: React.CSSProperties = isMobile
-    ? { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, pointerEvents: 'auto' }
+    ? { position: 'absolute', bottom: bottomInset, left: 0, right: 0, zIndex: 10, pointerEvents: 'auto' }
     : walkMode
       ? {
           position: 'absolute',
@@ -2559,7 +2563,7 @@ export default function MiiPlaza({
           <div style={{
             position: 'absolute',
             right: 16,
-            bottom: 52,
+            bottom: 52 + bottomInset,
             zIndex: 10,
             background: 'rgba(0,0,0,0.5)',
             color: '#ccc',
@@ -2590,7 +2594,7 @@ export default function MiiPlaza({
             style={{
               position: 'absolute',
               right: 16,
-              bottom: 52,
+              bottom: 52 + bottomInset,
               zIndex: 10,
               background: walkMode ? 'rgba(99,102,241,0.92)' : 'rgba(0,0,0,0.5)',
               color: '#fff',
@@ -2614,7 +2618,7 @@ export default function MiiPlaza({
         <div style={{
           position: 'absolute',
           left: '50%',
-          bottom: 92,
+          bottom: 92 + bottomInset,
           transform: 'translateX(-50%)',
           zIndex: 10,
           background: 'rgba(15,15,25,0.82)',
@@ -2646,7 +2650,7 @@ export default function MiiPlaza({
       {!selectedMember && (
         <div style={{
           position: 'absolute',
-          bottom: 12,
+          bottom: 12 + bottomInset,
           left: '50%',
           transform: 'translateX(-50%)',
           background: 'rgba(0,0,0,0.5)',

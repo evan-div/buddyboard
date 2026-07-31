@@ -134,6 +134,33 @@ test.describe('third-person walk mode', () => {
     expect(errors).toEqual([])
   })
 
+  // Regression: the plaza fills the viewport and the app's tab bar is fixed on
+  // top of it, so anything anchored to the bottom of the plaza sits underneath
+  // the bar unless it's lifted clear. The walk button was clipped by it, and
+  // the controls hint was hidden by it completely.
+  test('the walk controls clear the tab bar instead of hiding behind it', async ({ page }) => {
+    await openPlaza(page)
+    const bar = await page.locator('nav').boundingBox()
+    expect(bar).not.toBeNull()
+
+    const clears = async (label: string, box: { y: number; height: number } | null) => {
+      expect(box, `${label} should be laid out`).not.toBeNull()
+      expect(box!.y + box!.height, `${label} overlaps the tab bar`).toBeLessThanOrEqual(bar!.y)
+    }
+
+    await clears('plaza hint', await page.getByText(PLAZA_HINT).boundingBox())
+    await clears('walk button', await page.getByRole('button', { name: /Walk mode/ }).boundingBox())
+
+    await enterWalkMode(page)
+    await clears('walk hint', await page.getByText(WALK_HINT).boundingBox())
+
+    // Free the cursor so the exit control is the button rather than the Esc
+    // badge, then check that too — they share the same anchor.
+    await page.evaluate(() => document.exitPointerLock())
+    await expect.poll(() => isLocked(page), { timeout: 30_000 }).toBe(false)
+    await clears('exit button', await page.getByRole('button', { name: /Exit walk mode/ }).boundingBox())
+  })
+
   test('is not offered on a touch-sized viewport', async ({ page }) => {
     await page.setViewportSize({ width: 420, height: 860 })
     await page.goto('/walkharness')

@@ -8,6 +8,7 @@
 // development-only (see page.tsx) — it 404s in a production build.
 
 import MiiPlaza from '@/components/World/MiiPlaza'
+import BottomTabBar, { TAB_BAR_HEIGHT, type TabDef } from '@/components/Shell/BottomTabBar'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import type { GroupMember } from '@/lib/types'
 
@@ -33,14 +34,27 @@ const MEMBERS: GroupMember[] = [
   member('buddy-uid-000000000000004', 'Jordan', '#F5D033'),
 ]
 
+// The real plaza sits under the app's fixed tab bar. The harness renders that
+// bar too — without it the plaza is the only thing on screen and overlays that
+// collide with the shell in the real app look perfectly fine here.
+const TABS = [
+  { key: 'plaza', label: 'Plaza', icon: '🌳' },
+  { key: 'wall', label: 'Wall', icon: '📋' },
+  { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
+] as const satisfies readonly TabDef<'plaza' | 'wall' | 'leaderboard'>[]
+
 export default function WalkHarness() {
   return (
-    <MiiPlaza
-      members={MEMBERS}
-      currentUid="player-uid-000000000000001"
-      groupId="harness-group"
-      remainingGive={100}
-      remainingTake={100}
-    />
+    <>
+      <MiiPlaza
+        members={MEMBERS}
+        currentUid="player-uid-000000000000001"
+        groupId="harness-group"
+        remainingGive={100}
+        remainingTake={100}
+        bottomInset={TAB_BAR_HEIGHT}
+      />
+      <BottomTabBar tabs={TABS} active="plaza" onSelect={() => {}} />
+    </>
   )
 }
