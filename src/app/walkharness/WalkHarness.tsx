@@ -7,9 +7,11 @@
 // mounts it with stub members instead. The route that renders it is
 // development-only (see page.tsx) — it 404s in a production build.
 
+import { useEffect, useRef } from 'react'
 import MiiPlaza from '@/components/World/MiiPlaza'
 import BottomTabBar, { TAB_BAR_HEIGHT, type TabDef } from '@/components/Shell/BottomTabBar'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
+import type { Locomotion } from '@/components/World/thirdPerson'
 import type { GroupMember } from '@/lib/types'
 
 function member(uid: string, displayName: string, bodyColor: string): GroupMember {
@@ -44,6 +46,22 @@ const TABS = [
 ] as const satisfies readonly TabDef<'plaza' | 'wall' | 'leaderboard'>[]
 
 export default function WalkHarness() {
+  // Walking has no DOM footprint at all — the position lives in a ref the
+  // animator reads 60× a second — so tap-to-move would be untestable from
+  // outside without a way to look at it. Publish a reader on window; this route
+  // is development-only, so nothing ships.
+  const walker = useRef<Locomotion | null>(null)
+  useEffect(() => {
+    const w = window as unknown as {
+      __walkerPos?: () => { x: number; z: number; speed: number } | null
+    }
+    w.__walkerPos = () => {
+      const loco = walker.current
+      return loco ? { x: loco.pos.x, z: loco.pos.z, speed: loco.speed } : null
+    }
+    return () => { delete w.__walkerPos }
+  }, [])
+
   return (
     <>
       <MiiPlaza
@@ -53,6 +71,7 @@ export default function WalkHarness() {
         remainingGive={100}
         remainingTake={100}
         bottomInset={TAB_BAR_HEIGHT}
+        walkerProbe={walker}
       />
       <BottomTabBar tabs={TABS} active="plaza" onSelect={() => {}} />
     </>

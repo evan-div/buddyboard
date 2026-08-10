@@ -1,9 +1,11 @@
 'use client'
 
-// Desktop-only third-person "walk mode" for the plaza.
+// Third-person "walk mode" for the plaza.
 //
 // Owns three things while active:
-//   1. keyboard/mouse input (WASD, shift, space, E; pointer-locked mouse look)
+//   1. input — either keyboard/mouse (WASD, shift, space, E; pointer-locked
+//      mouse look) or touch (tap-to-move, drag-to-orbit, pinch-to-zoom),
+//      selected by the `control` prop. The two schemes never run at once.
 //   2. the local player's character transform — the shared wander schedule in
 //      plazaWalk.ts is suspended for this uid and we drive it directly
 //   3. the camera: a spring arm that lags, widens FOV with speed, and eases
@@ -25,8 +27,13 @@ import {
   DOUBLE_TAP_MS, FLIP_PIVOT_Y, FALL_HANDOFF_Y,
   type MoveInput, type InteractCandidate, type Locomotion,
 } from './thirdPerson'
+import {
+  makeSeekState, setSeekTarget, clearSeek, seekInput,
+  classifyTouch, isRunUpgrade, ndcFromClient, clampRange,
+  GROUND_PICK_Y, TOUCH_LOOK_SCALE, PINCH_TO_WHEEL, MARKER_FADE_RATE, STOP_TOLERANCE,
+} from './tapMove'
 import { AXIS_X, AXIS_Y } from './plazaMath'
-import { playWhoosh } from './plazaSound'
+import { playWhoosh, buzz } from './plazaSound'
 import type { GroupMember } from '@/lib/types'
 
 // Drag-to-orbit fallback, used when the pointer isn't locked (after Esc, or if
@@ -40,8 +47,20 @@ const RESTORE_RATE = 6
 // following that far leaves you looking at nothing.
 const FALL_CAM_FLOOR = -3.5
 
+// The destination marker: a ring on the ground with a pip at its centre. Sized
+// so the walker reliably comes to rest inside it — braking has to commit early
+// enough to never overshoot, so they can stop up to STOP_TOLERANCE short, and a
+// tighter ring would make every short trip look like a miss.
+const MARKER_RINGS = [
+  { inner: STOP_TOLERANCE + 0.02, outer: STOP_TOLERANCE + 0.14, opacity: 0.85 },
+  { inner: 0,                     outer: 0.09,                  opacity: 0.7  },
+]
+
 interface Props {
   active: boolean
+  /** Which input scheme owns the canvas. 'keyboard' is the desktop path (WASD
+      plus pointer-locked mouse look); 'touch' is tap-to-move. Never both. */
+  control: 'keyboard' | 'touch'
   /** A member card is open: freeze input, but keep the camera easing. */
   paused: boolean
   /** prefers-reduced-motion: drop the FOV punch and the spring-arm trail. */
@@ -53,6 +72,10 @@ interface Props {
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
   locomotion: React.RefObject<Locomotion>
+  /** The plaza sets this when a touch lands on a character. That tap belongs to
+      their member card, so tap-to-move must not also claim it as a destination
+      and walk off toward the ground behind them. Cleared here when consumed. */
+  tapOnCharacter: React.RefObject<boolean>
   onInteract: (uid: string) => void
   onTargetChange: (uid: string | null) => void
   onLockChange: (locked: boolean) => void
@@ -66,14 +89,30 @@ interface Props {
 }
 
 export default function ThirdPersonController({
-  active, paused, reducedMotion, suspended, playerUid, members, charGroups, locomotion,
-  onInteract, onTargetChange, onLockChange, onCardAnchor, onFellOff, onExit,
+  active, control, paused, reducedMotion, suspended, playerUid, members, charGroups, locomotion,
+  tapOnCharacter, onInteract, onTargetChange, onLockChange, onCardAnchor, onFellOff, onExit,
 }: Props) {
   const { camera, gl } = useThree()
 
   const move = useRef(makeMoveState())
   const cam  = useRef(makeCamState())
   const keys = useRef<Set<string>>(new Set())
+
+  // ── Touch ──────────────────────────────────────────────────────────────────
+  const seek       = useRef(makeSeekState())
+  const pendingTap = useRef<{ clientX: number; clientY: number; run: boolean } | null>(null)
+  const markerRef  = useRef<THREE.Group>(null)
+  const markerFade = useRef(0)
+  // The in-flight gesture. 'candidate' is a single finger that could still turn
+  // out to be either a tap or an orbit drag — we don't know until it moves or
+  // lifts.
+  const gesture = useRef({
+    mode: 'none' as 'none' | 'candidate' | 'drag' | 'pinch',
+    id: -1,
+    x0: 0, y0: 0, lastX: 0, lastY: 0, t0: 0,
+    prevPinch: 0,
+    lastTapX: 0, lastTapY: 0, lastTapMs: -Infinity,
+  })
   const jumpQueued = useRef(false)
   const flipQueued = useRef(false)
   const lastJumpTap = useRef(0)
@@ -95,11 +134,16 @@ export default function ThirdPersonController({
   const suspAnchor = useRef(new THREE.Vector3())
   const zeroVec    = useRef(new THREE.Vector3())
   const lastAnchor = useRef({ x: -1e9, y: -1e9, halfWidth: -1 })
+  const ndc        = useRef(new THREE.Vector2())
+  const ray        = useRef(new THREE.Raycaster())
+  const hit        = useRef(new THREE.Vector3())
+  // The tap plane sits at the grass tops, not the floor — see GROUND_PICK_Y.
+  const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), -GROUND_PICK_Y))
 
   // Latest props for the window-level listeners, which are registered once and
   // must not be torn down and rebuilt every time `members` changes identity.
-  const live = useRef({ active, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff })
-  live.current = { active, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff }
+  const live = useRef({ active, control, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff })
+  live.current = { active, control, paused, members, onInteract, onExit, onLockChange, onCardAnchor, onFellOff }
 
   // ── Reset on entry ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -108,6 +152,11 @@ export default function ThirdPersonController({
       jumpQueued.current = false
       dragging.current = false
       seeded.current = false
+      clearSeek(seek.current)
+      pendingTap.current = null
+      gesture.current.mode = 'none'
+      gesture.current.lastTapMs = -Infinity
+      markerFade.current = 0
       if (target.current !== null) { target.current = null; onTargetChange(null) }
       if (document.pointerLockElement === gl.domElement) document.exitPointerLock()
       return
@@ -115,7 +164,12 @@ export default function ThirdPersonController({
     // Seeding happens on the first frame instead of here, because the player's
     // THREE.Group may not be registered in charGroups yet on this tick.
     seeded.current = false
-  }, [active, gl.domElement, onTargetChange])
+    // The plaza sets this on any touch that lands on a character, walk mode or
+    // not, and only the walk-mode handler clears it. Tapping a buddy to open
+    // their card and *then* entering walk mode would otherwise leave the claim
+    // standing, and eat the first tap-to-walk.
+    tapOnCharacter.current = false
+  }, [active, gl.domElement, onTargetChange, tapOnCharacter])
 
   // No card open: drop the anchor so the overlay stops positioning against a
   // character it's no longer showing.
@@ -137,8 +191,11 @@ export default function ThirdPersonController({
   }, [active, paused, gl.domElement])
 
   // ── Pointer lock ────────────────────────────────────────────────────────────
+  // Keyboard control only. On touch this must not mount at all: Android Chrome
+  // will happily grant a pointer lock, and once it has one every subsequent
+  // touch is routed as a locked mouse event and the canvas stops responding.
   useEffect(() => {
-    if (!active) return
+    if (!active || control !== 'keyboard') return
     const el = gl.domElement
 
     function requestLock() {
@@ -192,7 +249,7 @@ export default function ThirdPersonController({
       el.removeEventListener('contextmenu', onContextMenu)
       locked.current = false
     }
-  }, [active, gl.domElement])
+  }, [active, control, gl.domElement])
 
   // ── Keyboard ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -206,7 +263,9 @@ export default function ThirdPersonController({
     }
 
     function onKeyDown(e: KeyboardEvent) {
-      if (!live.current.active || typing()) return
+      // Registered once, for the lifetime of the component, so the gate is on
+      // the live props rather than the effect's deps.
+      if (!live.current.active || live.current.control !== 'keyboard' || typing()) return
 
       if (e.code === 'Escape') {
         // The browser eats the first Esc to release the pointer lock; this
@@ -252,6 +311,127 @@ export default function ThirdPersonController({
     }
   }, [])
 
+  // ── Touch ───────────────────────────────────────────────────────────────────
+  // The mirror of the mouse effect above, and the reason walk mode owns touch
+  // outright while it's active: the plaza's own touch handlers exist to feed
+  // OrbitControls and the carry raycaster, both of which are switched off in
+  // walk mode, and they stand down for the duration (see MiiPlaza).
+  //
+  // One finger is ambiguous on arrival. It becomes a drag the moment it travels
+  // past the slop, and a tap only if it lifts without ever doing so — which is
+  // why the walk command commits on touchend rather than touchstart.
+  //
+  // The tempting alternative is to commit on touchstart and cancel if the finger
+  // later moves: lower latency, but then every orbit drag begins with the
+  // character lurching off toward whatever was under the thumb before aborting.
+  // A ~60-90ms quick-tap release is much cheaper than that.
+  useEffect(() => {
+    if (!active || control !== 'touch') return
+    const el = gl.domElement
+    const g  = gesture.current
+
+    function reset() {
+      g.mode = 'none'
+      g.id = -1
+      g.prevPinch = 0
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length >= 2) {
+        // A second finger arriving destroys any candidate, so lifting the first
+        // one out of a pinch can never register as a stray walk command.
+        g.mode = 'pinch'
+        g.prevPinch = 0
+        return
+      }
+      if (g.mode !== 'none') return
+      const t = e.touches[0]
+      if (!t) return
+      g.mode = 'candidate'
+      g.id = t.identifier
+      g.x0 = g.lastX = t.clientX
+      g.y0 = g.lastY = t.clientY
+      g.t0 = e.timeStamp
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (g.mode === 'pinch') {
+        if (e.touches.length < 2) return
+        e.preventDefault()
+        const d = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        )
+        if (!g.prevPinch) { g.prevPinch = d; return }
+        // Sign matches the plaza's own pinch (fingers together = zoom out), so
+        // the gesture means the same thing inside walk mode and outside it.
+        applyZoom(cam.current, (g.prevPinch - d) * PINCH_TO_WHEEL)
+        g.prevPinch = d
+        return
+      }
+      if (g.mode !== 'candidate' && g.mode !== 'drag') return
+
+      const t = Array.from(e.touches).find((x) => x.identifier === g.id)
+      if (!t) return
+      e.preventDefault()
+
+      if (g.mode === 'candidate' &&
+          classifyTouch(t.clientX - g.x0, t.clientY - g.y0, e.timeStamp - g.t0) === 'drag') {
+        g.mode = 'drag'
+      }
+      // lastX/lastY advance on every move, candidate or not, so the frame that
+      // crosses the slop threshold orbits by that frame's delta rather than
+      // snapping through the whole accumulated 10px.
+      if (g.mode === 'drag') {
+        applyLook(cam.current, t.clientX - g.lastX, t.clientY - g.lastY, TOUCH_LOOK_SCALE)
+      }
+      g.lastX = t.clientX
+      g.lastY = t.clientY
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      const t = Array.from(e.changedTouches).find((x) => x.identifier === g.id)
+      // A touch that landed on a buddy opens their card; it is not also a
+      // request to walk to the patch of grass behind them. Read and clear
+      // whether or not this turned out to be a tap, so the claim never carries
+      // over into the next gesture.
+      const claimed = tapOnCharacter.current
+      tapOnCharacter.current = false
+
+      if (!claimed && g.mode === 'candidate' && t && !live.current.paused &&
+          classifyTouch(t.clientX - g.x0, t.clientY - g.y0, e.timeStamp - g.t0) === 'tap') {
+        // Time the double-tap off the event's own timestamp, not the clock as
+        // the handler runs — the same reason the backflip does (a busy main
+        // thread can deliver a touchend long after the finger left the glass,
+        // which turns a real double-tap into two separate walk commands
+        // whenever the scene hitches).
+        const ms = e.timeStamp || performance.now()
+        pendingTap.current = {
+          clientX: t.clientX,
+          clientY: t.clientY,
+          run: isRunUpgrade(g.lastTapX, g.lastTapY, g.lastTapMs, t.clientX, t.clientY, ms),
+        }
+        g.lastTapX = t.clientX
+        g.lastTapY = t.clientY
+        g.lastTapMs = ms
+      }
+      if (e.touches.length === 0) reset()
+    }
+
+    el.addEventListener('touchstart',  onTouchStart,  { passive: false })
+    el.addEventListener('touchmove',   onTouchMove,   { passive: false })
+    el.addEventListener('touchend',    onTouchEnd,    { passive: false })
+    el.addEventListener('touchcancel', reset,         { passive: false })
+
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart)
+      el.removeEventListener('touchmove',   onTouchMove)
+      el.removeEventListener('touchend',    onTouchEnd)
+      el.removeEventListener('touchcancel', reset)
+      reset()
+    }
+  }, [active, control, gl.domElement, tapOnCharacter])
+
   // ── Frame ───────────────────────────────────────────────────────────────────
   // Scratch objects reused every frame — walk mode allocates nothing per frame.
   const inputRef   = useRef<MoveInput>({ forward: 0, strafe: 0, sprint: false, jump: false, flip: false })
@@ -282,6 +462,11 @@ export default function ThirdPersonController({
     // character gets. Just keep the camera on the body and stay out of the way.
     if (suspended) {
       prevSuspended.current = true
+      // Drop any destination. Otherwise a walker who stepped off the rim would
+      // resume marching at a target they chose before the fall, the moment the
+      // sky respawn hands the body back.
+      clearSeek(seek.current)
+      pendingTap.current = null
       suspAnchor.current.copy(group.position)
       // Don't ride all the way down: the character despawns at -30 and is
       // invisible for over a second, and following that leaves you staring
@@ -351,6 +536,36 @@ export default function ThirdPersonController({
       c.fov = persp.isPerspectiveCamera ? persp.fov : FOV_BASE
     }
 
+    // ── Tap → destination ───────────────────────────────────────────────────
+    // Deferred out of the touch handler and into the frame for two reasons: the
+    // handler stays free of THREE work, and the pick has to happen *before*
+    // stepCamera moves the camera. Raycast after it and the tap resolves
+    // against a view the player never saw.
+    const m = move.current
+    const tap = pendingTap.current
+    if (tap) {
+      pendingTap.current = null
+      if (control === 'touch' && !paused) {
+        ndcFromClient(tap.clientX, tap.clientY, gl.domElement.getBoundingClientRect(), ndc.current)
+        ray.current.setFromCamera(ndc.current, camera)
+        // A ray parallel to the ground, or pointing up out of it, returns null —
+        // that's a tap into the sky, which is a mis-tap rather than a request.
+        // Silent: no marker, no haptic.
+        if (ray.current.ray.intersectPlane(groundPlane.current, hit.current)) {
+          // Clamp the reach rather than rejecting: the camera's pitch floor is
+          // near horizontal, so a tap a few pixels under the horizon meets the
+          // ground plane most of a kilometre away.
+          clampRange(hit.current, m.pos)
+          // Deliberately not gated on isOverIsland. The rim is a cliff, not a
+          // fence, and walking off it on purpose is a feature — stepMovement
+          // drops you and the plaza physics takes the body from there.
+          setSeekTarget(seek.current, hit.current.x, hit.current.z, tap.run)
+          markerRef.current?.position.set(hit.current.x, GROUND_PICK_Y + 0.015, hit.current.z)
+          buzz(6)
+        }
+      }
+    }
+
     // ── Input → movement ────────────────────────────────────────────────────
     const k = keys.current
     const input = inputRef.current
@@ -362,6 +577,13 @@ export default function ThirdPersonController({
       input.flip    = false
       jumpQueued.current = false
       flipQueued.current = false
+      clearSeek(seek.current)
+    } else if (control === 'touch') {
+      // Touch has no jump affordance — no button, no gesture. Leaving them
+      // wired to nothing is the whole point rather than an omission.
+      input.jump = false
+      input.flip = false
+      seekInput(seek.current, m.pos, m.vel, cam.current.yaw, dt, input)
     } else {
       input.forward = (k.has('KeyW') || k.has('ArrowUp')   ? 1 : 0) -
                       (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0)
@@ -387,8 +609,9 @@ export default function ThirdPersonController({
       if (Math.abs(g.position.y) < 0.6) blockers.current.push({ x: g.position.x, z: g.position.z })
     }
 
-    const m = move.current
-    stepMovement(m, input, cam.current.yaw, dt)
+    // Tap-to-move faces where it's actually going. Compression exists to hide a
+    // camera-relative artifact that only WASD produces — see FacingMode.
+    stepMovement(m, input, cam.current.yaw, dt, control === 'touch' ? 'travel' : 'camera')
 
     // Bump into people rather than walking through them. No edge clamp after
     // it: the rim is a cliff now, and everyone else wanders well inside it, so
@@ -446,8 +669,30 @@ export default function ThirdPersonController({
       persp.updateProjectionMatrix()
     }
 
+    // ── Destination marker ──────────────────────────────────────────────────
+    // Eased through smoothFactor rather than a flat per-frame alpha, like every
+    // other transition here.
+    const markerGroup = markerRef.current
+    if (markerGroup) {
+      const goal = seek.current.active ? 1 : 0
+      markerFade.current += (goal - markerFade.current) * smoothFactor(MARKER_FADE_RATE, dt)
+      if (Math.abs(goal - markerFade.current) < 0.004) markerFade.current = goal
+      markerGroup.visible = markerFade.current > 0.01
+      if (markerGroup.visible) {
+        for (let i = 0; i < markerGroup.children.length; i++) {
+          const mesh = markerGroup.children[i] as THREE.Mesh
+          const mat  = mesh.material as THREE.MeshBasicMaterial
+          mat.opacity = MARKER_RINGS[i].opacity * markerFade.current
+        }
+      }
+    }
+
     // ── Interact target ─────────────────────────────────────────────────────
-    const found = paused ? target.current
+    // Keyboard only. On touch there's no E key and no interact prompt: tapping
+    // a buddy opens their card outright, so nothing consumes this and the cone
+    // search would be per-frame work for nobody.
+    const found = control === 'touch' ? null
+      : paused ? target.current
       : nearestInteractable(m.pos.x, m.pos.z, m.yaw, candidates.current)
     if (found !== target.current) {
       target.current = found
@@ -460,7 +705,10 @@ export default function ThirdPersonController({
     // still easing for a few hundred ms after E — the walker decelerates and
     // the spring arm settles — so a one-shot projection would drift out of
     // alignment right as the card appears.
-    if (paused && target.current) {
+    //
+    // Keyboard only: on touch the card is the app's bottom sheet, pinned to the
+    // foot of the screen, and has nothing to anchor against a character.
+    if (control === 'keyboard' && paused && target.current) {
       const g = charGroups.current?.get(target.current)
       if (g) {
         // camera.lookAt() above only touched rotation; matrixWorld is stale
@@ -491,5 +739,19 @@ export default function ThirdPersonController({
     }
   })
 
-  return null
+  // The destination marker lives here rather than in a sibling component so it
+  // reads the seek state directly instead of needing another shared ref. Flat on
+  // the ground and stacked a hair apart, the same way the plaza's other ground
+  // decals avoid z-fighting.
+  if (control !== 'touch') return null
+  return (
+    <group ref={markerRef} visible={false}>
+      {MARKER_RINGS.map((r, i) => (
+        <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, i * 0.002, 0]}>
+          <ringGeometry args={[r.inner, r.outer, 32]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  )
 }

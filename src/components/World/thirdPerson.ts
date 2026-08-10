@@ -101,6 +101,18 @@ export function compressFacing(s: number): number {
   return s - Math.sign(s) * FACING_COMPRESS * sn * sn
 }
 
+// All of the above rests on one premise: that the input frame IS the camera, so
+// every heading is something the player asked for *relative to where they are
+// looking*, and the deviation is an artifact worth hiding.
+//
+// Touch's tap-to-move (tapMove.ts) breaks that premise. There the player names a
+// point in the world, and the heading is simply the way to it — the camera had
+// no part in choosing it and there is no artifact to compress away. Compressing
+// anyway would turn a walk due left into a 60°-off crab. So that caller asks for
+// 'travel' and gets the raw heading; it is not a regression of the reasoning
+// above, it is the case that reasoning doesn't cover.
+export type FacingMode = 'camera' | 'travel'
+
 export interface MoveInput {
   forward: number   // -1..1  (W = +1, S = -1)
   strafe:  number   // -1..1  (D = +1, A = -1)
@@ -150,7 +162,16 @@ export function cameraBasis(cameraYaw: number): { fx: number; fz: number; rx: nu
   return { fx, fz, rx: -fz, rz: fx }
 }
 
-export function stepMovement(s: MoveState, input: MoveInput, cameraYaw: number, dt: number): void {
+export function stepMovement(
+  s: MoveState,
+  input: MoveInput,
+  cameraYaw: number,
+  dt: number,
+  // Defaulted positional rather than an options object: this is called every
+  // frame, and an object literal per call would allocate where the rest of walk
+  // mode deliberately doesn't.
+  facing: FacingMode = 'camera',
+): void {
   if (dt <= 0) return
   _prevVel.copy(s.vel)
 
@@ -231,14 +252,20 @@ export function stepMovement(s: MoveState, input: MoveInput, cameraYaw: number, 
   }
 
   // ── Facing ──────────────────────────────────────────────────────────────────
-  // Turn toward where we're heading, but compressed toward camera-forward so a
-  // sideways step doesn't leave us staring at the character's profile (see
-  // compressFacing). Eased, so a 180° reversal sweeps around instead of
-  // snapping.
+  // Turn toward where we're heading. Under 'camera' that's compressed toward
+  // camera-forward so a sideways step doesn't leave us staring at the
+  // character's profile (see compressFacing); under 'travel' it's the raw
+  // heading. Both ease at TURN_RATE, so a 180° reversal sweeps around instead
+  // of snapping either way.
   if (moving) {
-    const travel  = Math.atan2(_desired.x, _desired.z)
-    const forward = cameraYaw + Math.PI          // where the camera is looking
-    const goal    = forward + compressFacing(shortestAngle(forward, travel))
+    const travel = Math.atan2(_desired.x, _desired.z)
+    let goal: number
+    if (facing === 'travel') {
+      goal = travel
+    } else {
+      const forward = cameraYaw + Math.PI        // where the camera is looking
+      goal = forward + compressFacing(shortestAngle(forward, travel))
+    }
     s.yaw += shortestAngle(s.yaw, goal) * smoothFactor(TURN_RATE, dt)
   }
 
