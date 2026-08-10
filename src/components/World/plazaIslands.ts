@@ -87,6 +87,9 @@ export const ISLANDS: IslandDef[] = [
 
 export const HOME_ISLAND = ISLANDS[0]
 
+/** Points-given that raises every island — the last threshold. */
+export const ALL_UNLOCKED_POINTS = ISLANDS[ISLANDS.length - 1].unlockAtPoints
+
 export const ISLAND_MAP: Record<string, IslandDef> = Object.fromEntries(
   ISLANDS.map((i) => [i.id, i]),
 )
@@ -170,6 +173,53 @@ export function bridgeFor(island: IslandDef): {
     to,
     angle: Math.atan2(dz, dx),
     length: Math.hypot(to.x - from.x, to.z - from.z),
+  }
+}
+
+// ─── Camera framing ───────────────────────────────────────────────────────────
+
+// Vertical limits the plaza's orbit camera is clamped to (polar angle from +Y).
+// A visit that sat outside them would be snapped back on the first drag, so the
+// scene and the framing below share these numbers.
+export const POLAR_MIN = Math.PI / 3.3
+export const POLAR_MAX = Math.PI / 2.5
+
+// Visits keep the plaza's 45° diagonal so the archipelago always reads as the
+// same world from the same angle — only the position and distance change. The
+// eye sits a little higher than the plaza's default camera: an island is
+// something you look *at*, and the extra tilt shows its surface (and its
+// planting tiles) rather than its rim.
+const VIEW_DIR = { x: 1, y: 0.9, z: 1 }
+const VIEW_LEN = Math.hypot(VIEW_DIR.x, VIEW_DIR.y, VIEW_DIR.z)
+
+/** Eye height of the look-at point, matching the plaza's default target. */
+export const VIEW_TARGET_Y = 0.6
+
+// Enough pull-back that the smallest island still fills a comfortable part of
+// the frame rather than sitting in the middle of a wall of clouds.
+const VIEW_FIT = 2.8
+const VIEW_MIN_DISTANCE = 18
+
+/**
+ * Where to park the camera to look at one island on its own: the eye position,
+ * the point it looks at, and their separation (so callers can keep orbit
+ * controls in range). Pure — the flight itself is animated by the renderer.
+ */
+export function islandView(island: IslandDef): {
+  position: { x: number; y: number; z: number }
+  target: { x: number; y: number; z: number }
+  distance: number
+} {
+  const distance = Math.max(VIEW_MIN_DISTANCE, islandRadius(island) * VIEW_FIT)
+  const k = distance / VIEW_LEN
+  return {
+    position: {
+      x: island.center.x + VIEW_DIR.x * k,
+      y: VIEW_TARGET_Y + VIEW_DIR.y * k,
+      z: island.center.z + VIEW_DIR.z * k,
+    },
+    target: { x: island.center.x, y: VIEW_TARGET_Y, z: island.center.z },
+    distance,
   }
 }
 

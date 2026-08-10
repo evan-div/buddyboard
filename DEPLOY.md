@@ -104,11 +104,12 @@ If either fails with a `permission-denied`, the rules didn't publish. The app
 also logs a throttled `[plaza] … permission-denied` warning in the browser
 console pointing back to this step.
 
-## Previewing plaza growth without waiting days
+## Previewing plaza growth and islands without earning them
 
 Plants grow on `min(elapsed time, group activity)`, so watching a tree mature
-normally takes a week of real check-ins. **Preview mode** fast-forwards the
-*rendering* so you can see every stage immediately.
+normally takes a week of real check-ins — and the islands past home cost
+thousands of points given. **Preview mode** fast-forwards the *rendering* so you
+can see every stage, and every island, immediately.
 
 Add `?preview=1` to the plaza URL:
 
@@ -119,11 +120,18 @@ Add `?preview=1` to the plaza URL:
 An orange **⏩ preview** panel appears at the top-left. Tap it to expand, then:
 
 - Tap **Seedling / Sprout / Young / Mature** to jump straight to that stage.
-- Tap **🌿 One of each** to drop every species on the tiles nearest the middle —
-  combined with the stage buttons, that shows all plant forms at any maturity.
-- Tap an **island emoji** to jump the group's points-given to that island's
-  unlock threshold and watch the archipelago rise (`reset` returns to the real
-  number). Or pass `?preview=1&plazaPoints=1500` directly.
+- Tap **🌿 One of each** to drop every species on the tiles nearest the middle of
+  the island you are standing on — combined with the stage buttons, that shows
+  all plant forms at any maturity.
+- **Raise land**: tap an **island emoji** to jump the group's points-given to that
+  island's unlock threshold and watch the archipelago rise, **all** to raise every
+  island at once, or `reset` to return to the real number. Or pass
+  `?preview=1&plazaPoints=1500` directly.
+- **Fly to**: tap an island's name to glide the camera out and park on it — orbit,
+  zoom and plant there exactly as you can at home. Islands the group hasn't
+  raised yet are greyed out; tap the one you're already on to re-centre after
+  orbiting away. Lowering the points (or leaving preview) while you're standing
+  on a satellite flies you home instead of stranding the camera in empty sky.
 - Seeds are **unlimited** in preview (the Plant button reads `🌱 Plant · ∞`), and
   anything planted while previewing is **local to your device only** — it is
   never written to Firestore, so testing never litters the group's real island.
@@ -143,6 +151,8 @@ Optional shortcuts if you prefer to start at a specific point:
 
 Stage thresholds live in `src/lib/plazaGrowth.ts` (`TIME_DAYS` / `NOURISH_DAYS`)
 and are unit-tested; the preset buttons derive from them, so they can't drift.
+Island thresholds and the camera framing a visit uses live in
+`src/components/World/plazaIslands.ts` (`ISLANDS`, `islandView`), also unit-tested.
 
 ## What each Firebase config file is
 

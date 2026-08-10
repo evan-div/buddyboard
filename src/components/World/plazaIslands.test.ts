@@ -10,6 +10,11 @@ import {
   islandRadius,
   bridgeFor,
   archipelagoRadius,
+  islandView,
+  ALL_UNLOCKED_POINTS,
+  VIEW_TARGET_Y,
+  POLAR_MIN,
+  POLAR_MAX,
 } from './plazaIslands'
 import { FSIZE } from './plazaMath'
 
@@ -113,5 +118,77 @@ describe('geometry', () => {
     const full = archipelagoRadius(99999)
     expect(solo).toBeCloseTo(FSIZE / 2, 6)
     expect(full).toBeGreaterThan(solo)
+  })
+})
+
+describe('islandView', () => {
+  it('looks at the island it is framing', () => {
+    for (const i of ISLANDS) {
+      const v = islandView(i)
+      expect(v.target.x).toBeCloseTo(i.center.x, 6)
+      expect(v.target.z).toBeCloseTo(i.center.z, 6)
+      expect(v.target.y).toBeCloseTo(VIEW_TARGET_Y, 6)
+    }
+  })
+
+  it('sits `distance` away from the target, above it', () => {
+    for (const i of ISLANDS) {
+      const v = islandView(i)
+      const d = Math.hypot(v.position.x - v.target.x, v.position.y - v.target.y, v.position.z - v.target.z)
+      expect(d).toBeCloseTo(v.distance, 6)
+      expect(v.position.y).toBeGreaterThan(v.target.y)
+    }
+  })
+
+  it('keeps the same isometric direction for every island', () => {
+    const dir = (i: (typeof ISLANDS)[number]) => {
+      const v = islandView(i)
+      const d = v.distance
+      return [
+        (v.position.x - v.target.x) / d,
+        (v.position.y - v.target.y) / d,
+        (v.position.z - v.target.z) / d,
+      ]
+    }
+    const home = dir(HOME_ISLAND)
+    for (const i of ISLANDS.slice(1)) {
+      dir(i).forEach((c, axis) => expect(c).toBeCloseTo(home[axis], 6))
+    }
+  })
+
+  it('sits within the orbit camera\'s vertical limits', () => {
+    // Outside them, OrbitControls would snap the view the moment it takes over.
+    for (const i of ISLANDS) {
+      const v = islandView(i)
+      const polar = Math.atan2(
+        Math.hypot(v.position.x - v.target.x, v.position.z - v.target.z),
+        v.position.y - v.target.y,
+      )
+      expect(polar).toBeGreaterThanOrEqual(POLAR_MIN)
+      expect(polar).toBeLessThanOrEqual(POLAR_MAX)
+    }
+  })
+
+  it('pulls back far enough to hold the whole island in frame', () => {
+    for (const i of ISLANDS) {
+      expect(islandView(i).distance).toBeGreaterThan(islandRadius(i) * 2)
+    }
+  })
+
+  it('stays inside the camera range the archipelago is framed with', () => {
+    // Scene caps OrbitControls at max(40, archipelagoRadius * 2.1); a visit must
+    // never ask for a distance beyond that or the controls would snap back.
+    const maxDistance = Math.max(40, archipelagoRadius(ALL_UNLOCKED_POINTS) * 2.1)
+    for (const i of ISLANDS) {
+      expect(islandView(i).distance).toBeLessThanOrEqual(maxDistance)
+    }
+  })
+})
+
+describe('ALL_UNLOCKED_POINTS', () => {
+  it('raises every island, and one point less does not', () => {
+    expect(unlockedIslands(ALL_UNLOCKED_POINTS)).toHaveLength(ISLANDS.length)
+    expect(unlockedIslands(ALL_UNLOCKED_POINTS - 1).length).toBeLessThan(ISLANDS.length)
+    expect(nextIsland(ALL_UNLOCKED_POINTS)).toBeNull()
   })
 })

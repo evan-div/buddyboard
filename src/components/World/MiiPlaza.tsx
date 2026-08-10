@@ -14,7 +14,7 @@ import { TAB_BAR_HEIGHT } from '@/components/Shell/BottomTabBar'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
 import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
-import { ISLANDS, unlockedIslands, progressToNext, archipelagoRadius } from './plazaIslands'
+import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
 import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
@@ -248,23 +248,49 @@ const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
 const DEFAULT_CAM_POS  = new THREE.Vector3(8, 6, 8)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
+// A request to fly the camera out to one island. The nonce distinguishes two
+// taps on the same island, so asking again re-centres the view.
+export type IslandVisit = { id: string; nonce: number }
+
+// Exponential approach rate for an island hop, in units of "e-folds per second"
+// — 4 lands a 40-unit crossing in a little over a second.
+const FLY_RATE = 4
+
 function CameraController({
   focusPos,
+  visit,
   orbitRef,
   onUnlock,
+  onFlying,
   mobile,
 }: {
   focusPos: [number, number, number] | null
+  /** Island to fly to and park on, or null for the plaza's own camera. */
+  visit: IslandVisit | null
   orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
+  onFlying: (flying: boolean) => void
   mobile: boolean
 }) {
   const { camera } = useThree()
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
   const wasLocked  = useRef(false)
   const unlockSent = useRef(false)
+  // Island we are currently gliding toward; null once we have arrived.
+  const flyingTo   = useRef<string | null>(null)
 
-  useFrame(() => {
+  useEffect(() => {
+    if (!visit) return
+    flyingTo.current = visit.id
+    // Cancel any pending glide back to the default view, so closing a member
+    // card just before a visit doesn't drag the camera home behind our back.
+    wasLocked.current  = false
+    unlockSent.current = true
+    onFlying(true)
+    onUnlock()
+  }, [visit, onFlying, onUnlock])
+
+  useFrame((_, rawDelta) => {
     if (focusPos) {
       wasLocked.current  = true
       unlockSent.current = false
@@ -277,6 +303,32 @@ function CameraController({
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
+    } else if (flyingTo.current) {
+      // Glide out to the island and hand the camera back to OrbitControls
+      // re-targeted on it, so you can orbit and zoom around that island the
+      // same way you can around home.
+      const view     = islandView(getIsland(flyingTo.current))
+      const goal     = new THREE.Vector3(view.position.x, view.position.y, view.position.z)
+      const lookGoal = new THREE.Vector3(view.target.x, view.target.y, view.target.z)
+      // Time-based easing, not per-frame: these hops cross the whole archipelago
+      // and a fixed step would crawl on a phone rendering at a few frames a
+      // second. Deliberately unclamped — a long frame should cover more ground,
+      // and a huge one (a backgrounded tab) simply lands the camera.
+      const t = 1 - Math.exp(-FLY_RATE * rawDelta)
+      camera.position.lerp(goal, t)
+      lookAt.current.lerp(lookGoal, t)
+      camera.lookAt(lookAt.current)
+      if (camera.position.distanceTo(goal) < 0.4) {
+        camera.position.copy(goal)
+        lookAt.current.copy(lookGoal)
+        camera.lookAt(lookAt.current)
+        if (orbitRef.current) {
+          orbitRef.current.target.copy(lookGoal)
+          orbitRef.current.update()
+        }
+        flyingTo.current = null
+        onFlying(false)
+      }
     } else if (wasLocked.current) {
       camera.position.lerp(DEFAULT_CAM_POS, 0.06)
       lookAt.current.lerp(DEFAULT_CAM_LOOK, 0.06)
@@ -1063,6 +1115,7 @@ interface PhysicsUpdaterProps {
   remoteHolds:    React.RefObject<Map<string, RemoteHold>>
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
+  cameraFlying:   boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
   onHeldMove:     (pos: THREE.Vector3) => void
   onHoldStale:    (uid: string) => void
@@ -1070,7 +1123,7 @@ interface PhysicsUpdaterProps {
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, setCharMode,
+  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, cameraFlying, setCharMode,
   onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
@@ -1085,9 +1138,10 @@ function PhysicsUpdater({
     // characters across (or off) the island.
     const delta = Math.min(rawDelta, 0.1)
 
-    // Update orbit enabled state
+    // Update orbit enabled state (the camera also takes the controls away from
+    // the user while it glides to another island)
     if (orbitRef.current) {
-      orbitRef.current.enabled = !draggingUid.current && !cameraLocked
+      orbitRef.current.enabled = !draggingUid.current && !cameraLocked && !cameraFlying
     }
 
     // If dragging: raycast pointer to hold plane, compute smoothed velocity, move char
@@ -1556,6 +1610,7 @@ function Scene({
   reducedMotion,
   gardenObjects,
   islandFrames,
+  visit,
   groupVitality,
   pointsGiven,
   nowMs,
@@ -1580,6 +1635,7 @@ function Scene({
   reducedMotion: boolean
   gardenObjects: PlazaObject[]
   islandFrames: IslandFrame[]
+  visit: IslandVisit | null
   groupVitality: number
   pointsGiven: number
   nowMs: number
@@ -1595,6 +1651,16 @@ function Scene({
   // Pull the camera back far enough to hold every unlocked island in one view,
   // with headroom so the whole archipelago is visible at max zoom-out.
   const camReach = useMemo(() => Math.max(40, archipelagoRadius(pointsGiven) * 2.1), [pointsGiven])
+
+  // While the camera is gliding to an island, OrbitControls must let go — its
+  // own update() would otherwise pull the camera straight back to its target.
+  const [flying, setFlying] = useState(false)
+  // Orbiting happens around whichever island is being visited.
+  const orbitTarget = useMemo<[number, number, number]>(() => {
+    if (!visit) return [DEFAULT_CAM_LOOK.x, DEFAULT_CAM_LOOK.y, DEFAULT_CAM_LOOK.z]
+    const { target } = islandView(getIsland(visit.id))
+    return [target.x, target.y, target.z]
+  }, [visit])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -1990,7 +2056,14 @@ function Scene({
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
-      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
+      <CameraController
+        focusPos={focusPos}
+        visit={visit}
+        orbitRef={orbitRef}
+        onUnlock={onUnlock}
+        onFlying={setFlying}
+        mobile={mobile}
+      />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
@@ -2042,6 +2115,7 @@ function Scene({
         remoteHolds={remoteHolds}
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
+        cameraFlying={flying}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
         onHoldStale={(uid) => {
@@ -2053,14 +2127,14 @@ function Scene({
       />
       <OrbitControls
         ref={orbitRef}
-        enabled={!cameraLocked}
-        target={[0, 0.6, 0]}
+        enabled={!cameraLocked && !flying}
+        target={orbitTarget}
         minDistance={3}
         maxDistance={camReach}
         enableRotate={true}
         enablePan={false}
-        minPolarAngle={Math.PI / 3.3}
-        maxPolarAngle={Math.PI / 2.5}
+        minPolarAngle={POLAR_MIN}
+        maxPolarAngle={POLAR_MAX}
         makeDefault
       />
     </>
@@ -2164,11 +2238,14 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
 
 
 // ── Growth preview ────────────────────────────────────────────────────────────
-// Watching a plant mature normally takes a week of real check-ins, so preview
-// mode fast-forwards the *rendering* — it writes nothing and never touches
-// Firestore. Opt in by adding `?preview=1` to the plaza URL (short enough to
-// type on a phone); everything after that is tap-driven, which matters when
-// testing on mobile where editing query strings is painful.
+// Watching a plant mature normally takes a week of real check-ins, and the
+// islands beyond home take thousands of points the group hasn't given yet, so
+// preview mode fast-forwards the *rendering* — it writes nothing and never
+// touches Firestore. It can raise any island and fly the camera out to stand on
+// it, which is the only way to see a satellite up close before it is earned.
+// Opt in by adding `?preview=1` to the plaza URL (short enough to type on a
+// phone); everything after that is tap-driven, which matters when testing on
+// mobile where editing query strings is painful.
 export type PlazaPreview = { on: boolean; days: number; vitality: number; points: number | null }
 
 export const PREVIEW_OFF: PlazaPreview = { on: false, days: 0, vitality: 0, points: null }
@@ -2200,14 +2277,25 @@ export function presetForStage(stage: number): { days: number; vitality: number 
   return { days: TIME_DAYS[i], vitality: NOURISH_DAYS[i] }
 }
 
+// "The Garden" → "Garden", so island chips stay narrow on a phone.
+function shortName(island: { label: string }): string {
+  return island.label.replace(/^The /, '')
+}
+
 // Tap-driven growth preview: jump straight to a stage, or nudge days/vitality
-// independently to check the min(time, care) rule behaves.
+// independently to check the min(time, care) rule behaves. The island rows do
+// the same for the archipelago — raise land the group hasn't earned yet, then
+// fly out and stand on it.
 function PreviewPanel({
-  preview, previewCount, onChange, onFillOneOfEach, onClearPreviewPlants, onExit,
+  preview, previewCount, pointsGiven, visitIsland, onChange, onVisit, onFillOneOfEach, onClearPreviewPlants, onExit,
 }: {
   preview: PlazaPreview
   previewCount: number
+  /** Points the scene is actually drawing with (preview override or real). */
+  pointsGiven: number
+  visitIsland: string | null
   onChange: (p: PlazaPreview) => void
+  onVisit: (islandId: string) => void
   onFillOneOfEach: () => void
   onClearPreviewPlants: () => void
   onExit: () => void
@@ -2251,7 +2339,7 @@ function PreviewPanel({
           </div>
 
           <div style={{ display: 'flex', gap: 5 }}>
-            {btn(`🌿 One of each (${PLAZA_SPECIES.length})`, onFillOneOfEach, true)}
+            {btn(`🌿 One of each · ${shortName(getIsland(visitIsland ?? undefined))}`, onFillOneOfEach, true)}
             {previewCount > 0 && btn(`✕ ${previewCount}`, onClearPreviewPlants)}
           </div>
 
@@ -2287,7 +2375,7 @@ function PreviewPanel({
           </div>
 
           <div style={{ fontSize: 10, opacity: 0.85, paddingTop: 2 }}>
-            Islands — jump the group&apos;s points given:
+            Raise land — set the group&apos;s points given:
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {ISLANDS.map((isl) => (
@@ -2298,14 +2386,43 @@ function PreviewPanel({
                 style={{
                   padding: '6px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
                   border: '1px solid rgba(255,255,255,0.18)',
-                  background: (preview.points ?? 0) >= isl.unlockAtPoints && preview.points !== null
-                    ? '#fff' : 'rgba(255,255,255,0.12)',
+                  background: pointsGiven >= isl.unlockAtPoints ? '#fff' : 'rgba(255,255,255,0.12)',
                 }}
               >
                 {isl.emoji}
               </button>
             ))}
-            {preview.points !== null && btn('reset', () => onChange({ ...preview, points: null }), true)}
+            {btn('all', () => onChange({ ...preview, on: true, points: ALL_UNLOCKED_POINTS }))}
+            {preview.points !== null && btn('reset', () => onChange({ ...preview, points: null }))}
+          </div>
+
+          <div style={{ fontSize: 10, opacity: 0.85, paddingTop: 2 }}>
+            Fly to — visit an island up close:
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {ISLANDS.map((isl) => {
+              const reachable = isUnlocked(isl.id, pointsGiven)
+              const here = (visitIsland ?? HOME_ISLAND.id) === isl.id
+              return (
+                <button
+                  key={isl.id}
+                  onClick={() => { if (reachable) onVisit(isl.id) }}
+                  disabled={!reachable}
+                  title={reachable ? `Fly to ${isl.label}` : `${isl.label} — raise it first`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '6px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                    cursor: reachable ? 'pointer' : 'default', opacity: reachable ? 1 : 0.35,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: here && reachable ? '#fff' : 'rgba(255,255,255,0.12)',
+                    color: here && reachable ? '#8a5a10' : '#fff',
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>{isl.emoji}</span>
+                  {shortName(isl)}
+                </button>
+              )
+            })}
           </div>
 
           {btn('Exit preview', onExit, true)}
@@ -2686,6 +2803,20 @@ export default function MiiPlaza({
   // Plants placed while previewing live only on this device — they are never
   // written to Firestore, so testing never litters the group's real island.
   const [previewPlants, setPreviewPlants] = useState<PlazaObject[]>([])
+  // Island the camera has been sent to (preview sightseeing). null = the
+  // plaza's own camera, untouched. The nonce lets a repeat tap re-centre a view
+  // the user has since orbited away from.
+  const [visit, setVisit] = useState<IslandVisit | null>(null)
+  const visitTo = useCallback((id: string) => {
+    setVisit((v) => ({ id, nonce: (v?.nonce ?? 0) + 1 }))
+  }, [])
+  // If the island being visited sinks back into the clouds — points lowered, or
+  // preview switched off — come home rather than orbit empty sky. Memoised so
+  // the camera only reacts when the destination actually changes.
+  const visitTarget = useMemo<IslandVisit | null>(
+    () => (visit && !isUnlocked(visit.id, effectivePoints) ? { id: HOME_ISLAND.id, nonce: visit.nonce } : visit),
+    [visit, effectivePoints],
+  )
 
   const today = useMemo(() => dayKey(timezone), [timezone])
   const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
@@ -2769,15 +2900,16 @@ export default function MiiPlaza({
   }
 
   // Drop one of every species on the free tiles closest to the middle, so all
-  // the forms can be compared side by side at any growth stage.
+  // the forms can be compared side by side at any growth stage. Fills whichever
+  // island is being visited, so a satellite can be dressed and judged too.
   function handleFillOneOfEach() {
-    const home = islandFrames[0]
-    const free = tilesOnIsland(home)
+    const frame = islandFrames.find((f) => f.id === visitTarget?.id) ?? islandFrames[0]
+    const free = tilesOnIsland(frame)
       .filter((t) => !takenTiles.has(tileKey(t)))
       .sort((a, b) => {
-        const wa = tileToWorld(a, home), wb = tileToWorld(b, home)
-        return Math.hypot(wa.x - home.center.x, wa.z - home.center.z)
-             - Math.hypot(wb.x - home.center.x, wb.z - home.center.z)
+        const wa = tileToWorld(a, frame), wb = tileToWorld(b, frame)
+        return Math.hypot(wa.x - frame.center.x, wa.z - frame.center.z)
+             - Math.hypot(wb.x - frame.center.x, wb.z - frame.center.z)
       })
     setPreviewPlants((prev) => [
       ...prev,
@@ -2881,6 +3013,7 @@ export default function MiiPlaza({
             reducedMotion={reducedMotion}
             gardenObjects={allObjects}
             islandFrames={islandFrames}
+            visit={visitTarget}
             groupVitality={effectiveVitality}
             pointsGiven={effectivePoints}
             nowMs={nowMs}
@@ -2964,7 +3097,10 @@ export default function MiiPlaza({
           <PreviewPanel
             preview={preview}
             previewCount={previewPlants.length}
+            pointsGiven={effectivePoints}
+            visitIsland={visitTarget?.id ?? null}
             onChange={setPreview}
+            onVisit={visitTo}
             onFillOneOfEach={handleFillOneOfEach}
             onClearPreviewPlants={() => { setPreviewPlants([]); setSelectedPlantId(null) }}
             onExit={() => { setPreview(PREVIEW_OFF); setPreviewPlants([]); setSelectedPlantId(null) }}
