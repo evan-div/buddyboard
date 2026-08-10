@@ -445,6 +445,49 @@ describe('compressFacing', () => {
   })
 })
 
+describe('stepMovement — the facing mode is opt-in', () => {
+  // Everything else in this file calls the four-argument form. This pins that
+  // the fifth parameter defaults to the behaviour those 900 lines describe, so
+  // adding the tap-to-move caller can't have moved the desktop feel.
+  it('defaults to camera-relative facing', () => {
+    const implicit = makeMoveState()
+    const explicit = makeMoveState()
+    const i = input({ forward: 1, strafe: 1 })
+
+    for (let n = 0; n < 90; n++) {
+      stepMovement(implicit, i, 0.7, DT)
+      stepMovement(explicit, i, 0.7, DT, 'camera')
+    }
+    expect(implicit.yaw).toBe(explicit.yaw)
+    expect(implicit.pos.x).toBe(explicit.pos.x)
+    expect(implicit.pos.z).toBe(explicit.pos.z)
+    expect(implicit.speed).toBe(explicit.speed)
+  })
+
+  it("'travel' faces the way the character is actually going", () => {
+    const s = makeMoveState()
+    // Pure strafe: the case compression bends the furthest.
+    for (let n = 0; n < 200; n++) stepMovement(s, input({ strafe: 1 }), 0, DT, 'travel')
+    const { rx, rz } = cameraBasis(0)
+    expect(s.yaw).toBeCloseTo(Math.atan2(rx, rz), 3)
+  })
+
+  it("'travel' still moves identically — only the facing differs", () => {
+    const camera = makeMoveState()
+    const travel = makeMoveState()
+    const i = input({ forward: 1, strafe: -1, sprint: true })
+
+    for (let n = 0; n < 120; n++) {
+      stepMovement(camera, i, 1.1, DT, 'camera')
+      stepMovement(travel, i, 1.1, DT, 'travel')
+    }
+    expect(travel.pos.x).toBeCloseTo(camera.pos.x, 12)
+    expect(travel.pos.z).toBeCloseTo(camera.pos.z, 12)
+    expect(travel.speed).toBeCloseTo(camera.speed, 12)
+    expect(travel.yaw).not.toBeCloseTo(camera.yaw, 2)
+  })
+})
+
 describe('stepMovement — facing under compression', () => {
   const faceOffset = (input: MoveInput, camYaw = 0) => {
     const s = makeMoveState()

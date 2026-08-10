@@ -11,7 +11,7 @@ import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import ThirdPersonController from './ThirdPersonController'
-import { makeLocomotion, placeCardBeside } from './thirdPerson'
+import { makeLocomotion, placeCardBeside, type Locomotion } from './thirdPerson'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -1636,6 +1636,8 @@ function Scene({
   lowerGraphics,
   reducedMotion,
   walkMode,
+  walkControl,
+  walkerProbe,
   walkPaused,
   walkTargetUid,
   returnNonce,
@@ -1659,6 +1661,8 @@ function Scene({
   lowerGraphics: boolean
   reducedMotion: boolean
   walkMode: boolean
+  walkControl: 'keyboard' | 'touch'
+  walkerProbe?: React.RefObject<Locomotion | null>
   walkPaused: boolean
   walkTargetUid: string | null
   returnNonce: number
@@ -1675,10 +1679,21 @@ function Scene({
   const walkModeRef  = useRef(walkMode)
   walkModeRef.current = walkMode
 
+  // Test seam. The walker's position lives in a ref that changes 60× a second
+  // and never reaches the DOM, so an end-to-end test has no way to see whether
+  // a tap actually moved anybody. Hand the ref out when asked; only the
+  // development-only /walkharness route asks.
+  useEffect(() => {
+    if (walkerProbe) walkerProbe.current = locomotion.current
+  }, [walkerProbe])
+
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
   const draggingUid   = useRef<string | null>(null)
   const pendingPickup = useRef<{ uid: string; member: GroupMember; pos: [number, number, number] } | null>(null)
+  // Set when a touch lands on a character, read and cleared by the walk-mode
+  // touch handler. A tap on a buddy belongs to their card, not to the floor.
+  const tapOnCharacter = useRef(false)
   const holdTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragCursor    = useRef(new THREE.Vector3())
   const dragCursorVel = useRef(new THREE.Vector3())
@@ -1744,9 +1759,12 @@ function Scene({
   }, [])
 
   const handlePickupStart = useCallback((member: GroupMember) => {
-    // Walk mode owns the mouse (pointer lock) — carrying and throwing stay in
-    // the orbit-camera mode.
-    if (walkMode || cameraLocked || draggingUid.current) return
+    if (cameraLocked || draggingUid.current) return
+    // Walk mode owns the mouse (pointer lock), so carrying and throwing stay in
+    // the orbit-camera mode. On touch there's no lock to fight over, and a tap
+    // on a buddy still opens their card — so record the pending tap, but don't
+    // arm the hold. You're a character down there, not a hand.
+    if (walkMode && walkControl !== 'touch') return
 
     // Always use the character's live position, not the stale spawn position
     const group = charGroups.current.get(member.uid)
@@ -1755,11 +1773,18 @@ function Scene({
       : [0, 0, 0]
 
     pendingPickup.current = { uid: member.uid, member, pos }
+    // Claim the gesture, so touch walk mode doesn't also read it as a tap on the
+    // ground behind them and go marching off while the card opens.
+    tapOnCharacter.current = true
+    if (walkMode) return   // touch walk mode: the tap can open a card, not a hand
 
     if (holdTimer.current) clearTimeout(holdTimer.current)
     holdTimer.current = setTimeout(() => {
       const pickup = pendingPickup.current
       if (!pickup) return
+      // Re-checked rather than trusted from the closure: walk mode may have been
+      // entered in the 250ms since the finger landed.
+      if (walkModeRef.current) { pendingPickup.current = null; return }
       pendingPickup.current = null
 
       const group = charGroups.current.get(pickup.uid)
@@ -1801,7 +1826,7 @@ function Scene({
         pos: plazaVec(startPos),
       })
     }, 250)
-  }, [walkMode, cameraLocked, groupId, currentUid, setHeldBy])
+  }, [walkMode, walkControl, cameraLocked, groupId, currentUid, setHeldBy])
 
   // Walked off the island in walk mode. Rather than reimplementing the fall,
   // put the body into the same 'flying' physics a thrown character gets: it
@@ -1918,7 +1943,13 @@ function Scene({
       }
     }
 
+    // Everything below exists to feed OrbitControls and the carry raycaster, by
+    // re-dispatching synthetic pointer and wheel events. Walk mode disables both
+    // of those and registers its own touch handling in ThirdPersonController, so
+    // while it's active this block stands down entirely rather than shadowing it
+    // with synthetic traffic.
     function onTouchStart(e: TouchEvent) {
+      if (walkModeRef.current) return
       if (e.touches.length === 1) {
         // Single touch: treat as pointerdown on the Mii (hold-to-carry)
         // The Mii's onPointerDown fires via React's synthetic system, so we don't
@@ -1936,6 +1967,7 @@ function Scene({
     let prevPinchDist = 0
 
     function onTouchMove(e: TouchEvent) {
+      if (walkModeRef.current) return
       if (e.touches.length === 1) {
         if (draggingUid.current !== null || holdTimer.current !== null) {
           // Mii drag: intercept and prevent scroll
@@ -1960,6 +1992,7 @@ function Scene({
     }
 
     function onTouchEnd(e: TouchEvent) {
+      if (walkModeRef.current) return
       prevPinchDist = 0
       // Fire pointerup so the hold/fling logic in handlePointerUp runs
       const lastTouch = e.changedTouches[0]
@@ -2139,6 +2172,7 @@ function Scene({
       ))}
       <ThirdPersonController
         active={walkMode}
+        control={walkControl}
         paused={walkPaused}
         reducedMotion={reducedMotion}
         suspended={walkMode && !!dragModeMap.get(currentUid)}
@@ -2146,6 +2180,7 @@ function Scene({
         members={members}
         charGroups={charGroups}
         locomotion={locomotion}
+        tapOnCharacter={tapOnCharacter}
         onInteract={onWalkInteract}
         onTargetChange={onWalkTargetChange}
         onLockChange={onWalkLockChange}
@@ -2312,13 +2347,15 @@ interface Props {
       every bottom-anchored overlay has to be lifted clear of it. */
   bottomInset?: number
   presets?: PlazaPreset[]
+  /** Test seam — see the Scene effect that fills it. */
+  walkerProbe?: React.RefObject<Locomotion | null>
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
   onReady?: () => void
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, walkerProbe, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2330,8 +2367,10 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
-  // Walk mode is desktop-only: it needs a keyboard and a lockable pointer.
-  const [isDesktop, setIsDesktop]           = useState(false)
+  // How this device can drive walk mode, if at all. 'keyboard' wants WASD and a
+  // lockable pointer; 'touch' taps a destination and walks there. 'none' is a
+  // narrow desktop window — a mouse with nowhere near enough room.
+  const [walkInput, setWalkInput]           = useState<'none' | 'keyboard' | 'touch'>('none')
   const [walkMode, setWalkMode]             = useState(false)
   const [walkTarget, setWalkTarget]         = useState<string | null>(null)
   const [pointerLocked, setPointerLocked]   = useState(false)
@@ -2348,23 +2387,32 @@ export default function MiiPlaza({
       setIsMobile(window.innerWidth < 768)
       const el = containerRef.current
       if (el) setViewSize({ width: el.clientWidth, height: el.clientHeight })
+
       // A fine pointer rules out touch-only devices regardless of viewport, and
       // pointer lock is what mouse-look depends on.
-      setIsDesktop(
+      const keyboard =
         window.innerWidth >= 768 &&
         window.matchMedia('(pointer: fine)').matches &&
-        'requestPointerLock' in HTMLElement.prototype,
-      )
+        'requestPointerLock' in HTMLElement.prototype
+      // Touch capability belongs to the device, not the viewport: a narrow
+      // window on a desktop is still a mouse, and gets no walk mode at all.
+      const touch =
+        navigator.maxTouchPoints > 0 ||
+        window.matchMedia('(pointer: coarse)').matches
+
+      // Keyboard is tested first and its predicate is unchanged, so a
+      // touchscreen laptop still lands on the desktop scheme exactly as before.
+      setWalkInput(keyboard ? 'keyboard' : touch ? 'touch' : 'none')
     }
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Never leave walk mode running on a viewport that just became mobile-sized
+  // Never leave walk mode running on a device that can no longer drive it
   useEffect(() => {
-    if (!isDesktop && walkMode) exitWalkMode()
-  }, [isDesktop, walkMode])
+    if (walkInput === 'none' && walkMode) exitWalkMode()
+  }, [walkInput, walkMode])
 
   // The card's height changes as you page through presets / confirm / stats, and
   // the placement clamp needs the live value to keep it on screen.
@@ -2496,6 +2544,8 @@ export default function MiiPlaza({
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
             walkMode={walkMode}
+            walkControl={walkInput === 'touch' ? 'touch' : 'keyboard'}
+            walkerProbe={walkerProbe}
             walkPaused={!!selectedMember}
             walkTargetUid={walkTarget}
             returnNonce={returnNonce}
@@ -2558,7 +2608,7 @@ export default function MiiPlaza({
           While the pointer is locked the browser routes every click to the
           canvas, so a button here would be visible but dead. In that state we
           render a plain badge pointing at the key that actually works. */}
-      {isDesktop && !selectedMember && (
+      {walkInput !== 'none' && !selectedMember && (
         walkMode && pointerLocked ? (
           <div style={{
             position: 'absolute',
@@ -2665,9 +2715,13 @@ export default function MiiPlaza({
           gap: 8,
         }}>
           {walkMode
-            ? (pointerLocked
-                ? 'WASD move · Shift sprint · Space jump (×2 backflip) · E interact · Esc release cursor'
-                : 'Click to look · WASD move · Shift sprint · Space jump (×2 backflip) · Esc exit')
+            ? (walkInput === 'touch'
+                // No Esc, no jump, no backflip — none of them exist on touch,
+                // and the exit control is the button in the corner.
+                ? 'Tap to walk · Double-tap to run · Drag to look · Pinch to zoom'
+                : pointerLocked
+                  ? 'WASD move · Shift sprint · Space jump (×2 backflip) · E interact · Esc release cursor'
+                  : 'Click to look · WASD move · Shift sprint · Space jump (×2 backflip) · Esc exit')
             : isMobile
               ? 'Hold to carry · Pinch to zoom · Swipe to rotate'
               : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
