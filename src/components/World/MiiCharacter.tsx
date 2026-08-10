@@ -11,6 +11,8 @@ import { highestBadge } from '@/lib/badges'
 import { BeanFace, type FaceExpression } from '@/components/Avatar/BeanFace'
 import { BeanBody, BeanHair, BeanAccessory, outlineShade } from '@/components/Avatar/BeanParts'
 import { hashUid, slotIndex, currentWaypoint, idleVariant } from './plazaWalk'
+import { SPRINT_SPEED, JUMP_SPEED, type Locomotion } from './thirdPerson'
+import { playThud, playFootstep } from './plazaSound'
 
 // ─── Selection Ring ───────────────────────────────────────────────────────────
 
@@ -148,6 +150,13 @@ export interface MiiCharacterProps {
   celebrationType?: 'celebrate' | 'shame' | null
   dragMode?: DragMode | null
   heldBy?: string | null   // display name of whoever is carrying this character
+  /** Third-person walk mode: ThirdPersonController owns this character's
+      transform, so the shared wander schedule is suspended and the limbs
+      animate off `locomotion` instead. */
+  controlled?: boolean
+  locomotion?: React.RefObject<Locomotion>
+  /** This character is the walker's current interact target: look up at them. */
+  noticing?: boolean
   onPickupStart?: () => void
   onGroupMount?: (uid: string, g: THREE.Group | null) => void
 }
@@ -155,7 +164,8 @@ export interface MiiCharacterProps {
 export default function MiiCharacter({
   member, bounds = 5,
   isSelected, celebrationType = null,
-  dragMode = null, heldBy = null, onPickupStart, onGroupMount,
+  dragMode = null, heldBy = null, controlled = false, locomotion, noticing = false,
+  onPickupStart, onGroupMount,
 }: MiiCharacterProps) {
   const groupRef     = useRef<THREE.Group>(null)
   const bodyGroupRef = useRef<THREE.Group>(null)
@@ -179,6 +189,7 @@ export default function MiiCharacter({
   const prevDragMode = useRef<DragMode | null>(null)
   const prevBodyRot  = useRef({ x: 0, z: 0 })
   const wakeProne    = useRef(false)
+  const prevAirborne = useRef(false)
   // Squash & stretch spring on the body scale (s → 1); v is kicked by events
   const squash       = useRef({ s: 1, v: 0 })
   // Blink state: countdown to the next blink, and progress through one
@@ -302,6 +313,13 @@ export default function MiiCharacter({
     }
   }, [dragMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Leaving walk mode: rejoin the shared wander schedule from wherever the
+  // player parked, so this client re-converges with every other viewer.
+  useEffect(() => {
+    if (!controlled) syncTarget(Date.now())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controlled])
+
   // Seed every ragdoll spring from the limbs' current pose with random impulses
   function seedRagdoll(sMin: number, sMax: number) {
     const s  = sMin + Math.random() * (sMax - sMin)
@@ -420,6 +438,84 @@ export default function MiiCharacter({
           ? 1 - Math.sin(Math.PI * Math.min(1, b.t / 0.16)) * 0.92
           : 1
       }
+    }
+
+    // ── locally driven (third-person walk mode) ──────────────────────────────
+    // Takes priority over every other state: the controller owns position and
+    // yaw, and nothing should be able to strand the player mid-pose while
+    // they're steering. Position/rotation are already set by the controller —
+    // this branch only poses the limbs.
+    if (controlled) {
+      const loco     = locomotion?.current
+      const sp       = loco?.speed ?? 0
+      const airborne = loco?.airborne ?? false
+      const norm     = Math.min(1, sp / SPRINT_SPEED)
+      const bodyG    = bodyGroupRef.current
+      const la = leftArmRef.current,  ra = rightArmRef.current
+      const ll = leftLegRef.current,  rl = rightLegRef.current
+
+      // Takeoff / landing — kick the squash spring that already runs above, the
+      // same one throws use, so a jump leaves and lands with weight.
+      if (airborne !== prevAirborne.current) {
+        if (airborne) {
+          squash.current.v = 1.6                       // stretch off the ground
+        } else {
+          const impact = Math.min(1, Math.abs(loco?.vy ?? 0) / JUMP_SPEED)
+          squash.current.v = -(1.2 + impact * 1.7)     // squash proportional to the fall
+          playThud(0.22 + impact * 0.4)
+        }
+        prevAirborne.current = airborne
+      }
+
+      if (airborne) {
+        // Tuck — arms swung back, legs gathered — held until landing
+        const k = Math.min(1, delta * 12)
+        if (la) { la.rotation.x = THREE.MathUtils.lerp(la.rotation.x, -1.9, k); la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, -0.34, k) }
+        if (ra) { ra.rotation.x = THREE.MathUtils.lerp(ra.rotation.x, -1.9, k); ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z,  0.34, k) }
+        if (ll) ll.rotation.x = THREE.MathUtils.lerp(ll.rotation.x, -0.55, k)
+        if (rl) rl.rotation.x = THREE.MathUtils.lerp(rl.rotation.x,  0.30, k)
+        if (bodyG) {
+          bodyG.position.y = THREE.MathUtils.lerp(bodyG.position.y,  0.04, k)
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, -0.10, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z,  0,    k)
+        }
+      } else if (sp > 0.08) {
+        // Stride rate AND swing both scale with speed, so a walk reads as a
+        // different gait from a sprint without a second animation.
+        const prevPhase = phase.current
+        phase.current += delta * (5.2 + norm * 7.5)
+        // One footfall per half-cycle: the swing crosses zero as each foot
+        // plants, so step sounds stay locked to the legs at any speed.
+        if (Math.floor(prevPhase / Math.PI) !== Math.floor(phase.current / Math.PI)) {
+          playFootstep(0.35 + norm * 0.5)
+        }
+        const sw = Math.sin(phase.current) * (0.22 + norm * 0.62)
+        const k  = Math.min(1, delta * 6)
+        if (la) { la.rotation.x =  sw; la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, -0.05 - norm * 0.12, k) }
+        if (ra) { ra.rotation.x = -sw; ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z,  0.05 + norm * 0.12, k) }
+        if (ll) ll.rotation.x = -sw
+        if (rl) rl.rotation.x =  sw
+        if (bodyG) {
+          bodyG.position.y = Math.abs(Math.sin(phase.current)) * (0.03 + norm * 0.06)
+          // Lean into the run
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, norm * 0.20, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z, 0, k)
+        }
+      } else {
+        // Standing: settle to neutral and breathe
+        phase.current += delta
+        const k = Math.min(1, delta * 8)
+        if (la) { la.rotation.x = THREE.MathUtils.lerp(la.rotation.x, 0, k); la.rotation.z = THREE.MathUtils.lerp(la.rotation.z, 0, k) }
+        if (ra) { ra.rotation.x = THREE.MathUtils.lerp(ra.rotation.x, 0, k); ra.rotation.z = THREE.MathUtils.lerp(ra.rotation.z, 0, k) }
+        if (ll) ll.rotation.x = THREE.MathUtils.lerp(ll.rotation.x, 0, k)
+        if (rl) rl.rotation.x = THREE.MathUtils.lerp(rl.rotation.x, 0, k)
+        if (bodyG) {
+          bodyG.position.y = Math.sin(phase.current * 2.6) * 0.03
+          bodyG.rotation.x = THREE.MathUtils.lerp(bodyG.rotation.x, 0, k)
+          bodyG.rotation.z = THREE.MathUtils.lerp(bodyG.rotation.z, 0, k)
+        }
+      }
+      return
     }
 
     // ── fallen (off the island, hidden until respawn) ────────────────────────
@@ -696,6 +792,19 @@ export default function MiiCharacter({
       const k = Math.min(1, delta * 3)
       group.position.x += (targetPos.current!.x - group.position.x) * k
       group.position.z += (targetPos.current!.z - group.position.z) * k
+
+      // Someone in walk mode is standing in front of us: turn and look at them.
+      // Only while idle — a character mid-walk is busy, and steering them here
+      // would fight the waypoint they're heading for. Purely local (this is the
+      // viewer's own walker), so it can't desync the shared schedule.
+      const walker = noticing ? locomotion?.current?.pos : null
+      if (walker) {
+        const goal = Math.atan2(walker.x - group.position.x, walker.z - group.position.z)
+        let dy = goal - group.rotation.y
+        while (dy >  Math.PI) dy -= Math.PI * 2
+        while (dy < -Math.PI) dy += Math.PI * 2
+        group.rotation.y += dy * Math.min(1, delta * 4)
+      }
       if (animState.current === 'idle_bob') {
         if (body) body.position.y = Math.sin(t * 2.6) * 0.03
       } else {

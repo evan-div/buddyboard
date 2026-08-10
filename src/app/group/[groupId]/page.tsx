@@ -342,6 +342,7 @@ export default function GroupPage() {
               remainingGive={dailyStats.remainingGive}
               remainingTake={dailyStats.remainingTake}
               presets={group.presets}
+              bottomInset={TAB_BAR_HEIGHT}
               onReady={handlePlazaReady}
             />
           )}

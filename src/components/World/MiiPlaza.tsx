@@ -10,6 +10,8 @@ import StylizedGrassSurface from './StylizedGrassSurface'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
+import ThirdPersonController from './ThirdPersonController'
+import { makeLocomotion, placeCardBeside } from './thirdPerson'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -316,18 +318,33 @@ function CameraController({
   orbitRef,
   onUnlock,
   mobile,
+  disabled = false,
+  returnNonce = 0,
 }: {
   focusPos: [number, number, number] | null
   orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
   mobile: boolean
+  /** Third-person mode owns the camera — stay entirely out of the way. */
+  disabled?: boolean
+  /** Bumped when walk mode exits, to run the same eased return-to-default
+      path a closing member card uses (instead of leaving the camera parked
+      at head height wherever the player stopped walking). */
+  returnNonce?: number
 }) {
   const { camera } = useThree()
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
   const wasLocked  = useRef(false)
   const unlockSent = useRef(false)
 
+  useEffect(() => {
+    if (returnNonce === 0) return
+    wasLocked.current  = true
+    unlockSent.current = false
+  }, [returnNonce])
+
   useFrame(() => {
+    if (disabled) return
     if (focusPos) {
       wasLocked.current  = true
       unlockSent.current = false
@@ -1126,6 +1143,7 @@ interface PhysicsUpdaterProps {
   remoteHolds:    React.RefObject<Map<string, RemoteHold>>
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
+  walkMode:       boolean
   setCharMode:    (uid: string, mode: DragMode | null) => void
   onHeldMove:     (pos: THREE.Vector3) => void
   onHoldStale:    (uid: string) => void
@@ -1133,7 +1151,7 @@ interface PhysicsUpdaterProps {
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, setCharMode,
+  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, walkMode, setCharMode,
   onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
@@ -1150,7 +1168,7 @@ function PhysicsUpdater({
 
     // Update orbit enabled state
     if (orbitRef.current) {
-      orbitRef.current.enabled = !draggingUid.current && !cameraLocked
+      orbitRef.current.enabled = !draggingUid.current && !cameraLocked && !walkMode
     }
 
     // If dragging: raycast pointer to hold plane, compute smoothed velocity, move char
@@ -1617,6 +1635,15 @@ function Scene({
   mobile,
   lowerGraphics,
   reducedMotion,
+  walkMode,
+  walkPaused,
+  walkTargetUid,
+  returnNonce,
+  onWalkInteract,
+  onWalkTargetChange,
+  onWalkLockChange,
+  onWalkCardAnchor,
+  onWalkExit,
 }: {
   members: GroupMember[]
   groupId: string
@@ -1631,9 +1658,22 @@ function Scene({
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
+  walkMode: boolean
+  walkPaused: boolean
+  walkTargetUid: string | null
+  returnNonce: number
+  onWalkInteract: (uid: string) => void
+  onWalkTargetChange: (uid: string | null) => void
+  onWalkLockChange: (locked: boolean) => void
+  onWalkCardAnchor: (anchor: { x: number; y: number; halfWidth: number } | null) => void
+  onWalkExit: () => void
 }) {
   const orbitRef     = useRef<OrbitControlsImpl | null>(null)
   const { gl }       = useThree()
+  const locomotion   = useRef(makeLocomotion())
+  // Read inside subscription callbacks that are registered once
+  const walkModeRef  = useRef(walkMode)
+  walkModeRef.current = walkMode
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -1704,7 +1744,9 @@ function Scene({
   }, [])
 
   const handlePickupStart = useCallback((member: GroupMember) => {
-    if (cameraLocked || draggingUid.current) return
+    // Walk mode owns the mouse (pointer lock) — carrying and throwing stay in
+    // the orbit-camera mode.
+    if (walkMode || cameraLocked || draggingUid.current) return
 
     // Always use the character's live position, not the stale spawn position
     const group = charGroups.current.get(member.uid)
@@ -1759,7 +1801,29 @@ function Scene({
         pos: plazaVec(startPos),
       })
     }, 250)
-  }, [cameraLocked, groupId, currentUid, setHeldBy])
+  }, [walkMode, cameraLocked, groupId, currentUid, setHeldBy])
+
+  // Walked off the island in walk mode. Rather than reimplementing the fall,
+  // put the body into the same 'flying' physics a thrown character gets: it
+  // already tumbles into the clouds, despawns, and drops back in from the sky
+  // at the shared waypoint. When it finishes it sets the mode back to null,
+  // and the controller picks the walker up again.
+  //
+  // Local-only, like the rest of walk mode — no plaza event is broadcast, so
+  // other members keep seeing this character on the wander schedule.
+  const handleFellOff = useCallback((pos: THREE.Vector3, vel: THREE.Vector3) => {
+    setCharMode(currentUid, 'flying')
+    const phys = physicsMap.current.get(currentUid)
+    if (!phys) return
+    phys.pos.copy(pos)
+    phys.vel.set(vel.x, Math.min(vel.y, 0), vel.z)
+    phys.angVel.set(
+      (Math.random() - 0.5) * 3.2,
+      (Math.random() - 0.5) * 2.0,
+      (Math.random() - 0.5) * 3.2,
+    )
+    playWhoosh(6)
+  }, [currentUid, setCharMode])
 
   const handlePointerUp = useCallback(() => {
     // Clear pending hold timer
@@ -1926,6 +1990,9 @@ function Scene({
     const unsub = subscribeToPlazaEvents(groupId, (ev) => {
       if (ev.by === currentUid) return                 // our own broadcast
       if (draggingUid.current === ev.uid) return       // we're holding them locally
+      // Walking: the controller owns our transform. Another member grabbing us
+      // on their client must not fight it for control of the same group.
+      if (walkModeRef.current && ev.uid === currentUid) return
       if (seenEventIds.current.has(ev.id)) return
       seenEventIds.current.add(ev.id)
 
@@ -1977,6 +2044,7 @@ function Scene({
   useEffect(() => {
     if (!groupId || !currentUid) return
     const unsub = subscribeToPlazaHolds(groupId, (change) => {
+      if (walkModeRef.current && change.uid === currentUid) return   // see above
       if (change.removed) {
         remoteHolds.current.delete(change.uid)
         // The matching throw/drop event usually handles the release; if it
@@ -2029,7 +2097,14 @@ function Scene({
   return (
     <>
       {/* sky is transparent — CSS gradient on the container div shows through */}
-      <CameraController focusPos={focusPos} orbitRef={orbitRef} onUnlock={onUnlock} mobile={mobile} />
+      <CameraController
+        focusPos={focusPos}
+        orbitRef={orbitRef}
+        onUnlock={onUnlock}
+        mobile={mobile}
+        disabled={walkMode}
+        returnNonce={returnNonce}
+      />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
@@ -2052,6 +2127,9 @@ function Scene({
           celebrationType={member.uid === animatingUid ? animationType : null}
           dragMode={dragModeMap.get(member.uid) ?? null}
           heldBy={heldByNames.get(member.uid) ?? null}
+          controlled={walkMode && member.uid === currentUid && !dragModeMap.get(currentUid)}
+          locomotion={locomotion}
+          noticing={walkMode && member.uid === walkTargetUid}
           onPickupStart={() => handlePickupStart(member)}
           onGroupMount={(uid, g) => {
             if (g) charGroups.current.set(uid, g)
@@ -2059,6 +2137,22 @@ function Scene({
           }}
         />
       ))}
+      <ThirdPersonController
+        active={walkMode}
+        paused={walkPaused}
+        reducedMotion={reducedMotion}
+        suspended={walkMode && !!dragModeMap.get(currentUid)}
+        playerUid={currentUid}
+        members={members}
+        charGroups={charGroups}
+        locomotion={locomotion}
+        onInteract={onWalkInteract}
+        onTargetChange={onWalkTargetChange}
+        onLockChange={onWalkLockChange}
+        onCardAnchor={onWalkCardAnchor}
+        onFellOff={handleFellOff}
+        onExit={onWalkExit}
+      />
       <PhysicsUpdater
         draggingUid={draggingUid}
         dragCursor={dragCursor}
@@ -2068,6 +2162,7 @@ function Scene({
         remoteHolds={remoteHolds}
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
+        walkMode={walkMode}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
         onHoldStale={(uid) => {
@@ -2079,7 +2174,7 @@ function Scene({
       />
       <OrbitControls
         ref={orbitRef}
-        enabled={!cameraLocked}
+        enabled={!cameraLocked && !walkMode}
         target={[0, 0.6, 0]}
         minDistance={3}
         maxDistance={40}
@@ -2212,6 +2307,10 @@ interface Props {
   remainingTake: number
   lowerGraphics?: boolean
   reducedMotion?: boolean
+  /** Height of any chrome floating over the bottom of the plaza (the app's tab
+      bar). The plaza fills the viewport and the bar is fixed on top of it, so
+      every bottom-anchored overlay has to be lifted clear of it. */
+  bottomInset?: number
   presets?: PlazaPreset[]
   onPointsSubmitted?: () => void
   onAvatarUpdated?: () => void
@@ -2219,7 +2318,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, presets, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2231,17 +2330,86 @@ export default function MiiPlaza({
   const [animatingUid, setAnimatingUid]     = useState<string | null>(null)
   const [animationType, setAnimationType]   = useState<'celebrate' | 'shame' | null>(null)
   const [isMobile, setIsMobile]             = useState(false)
+  // Walk mode is desktop-only: it needs a keyboard and a lockable pointer.
+  const [isDesktop, setIsDesktop]           = useState(false)
+  const [walkMode, setWalkMode]             = useState(false)
+  const [walkTarget, setWalkTarget]         = useState<string | null>(null)
+  const [pointerLocked, setPointerLocked]   = useState(false)
+  const [returnNonce, setReturnNonce]       = useState(0)
+  // Where the card's character is on screen, and how big the card currently is
+  // — both needed to place the card beside them instead of over them.
+  const [walkCardAnchor, setWalkCardAnchor] = useState<{ x: number; y: number; halfWidth: number } | null>(null)
+  const [walkCardSize, setWalkCardSize]     = useState({ width: 270, height: 420 })
+  const [viewSize, setViewSize]             = useState({ width: 0, height: 0 })
+  const walkCardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function check() { setIsMobile(window.innerWidth < 768) }
+    function check() {
+      setIsMobile(window.innerWidth < 768)
+      const el = containerRef.current
+      if (el) setViewSize({ width: el.clientWidth, height: el.clientHeight })
+      // A fine pointer rules out touch-only devices regardless of viewport, and
+      // pointer lock is what mouse-look depends on.
+      setIsDesktop(
+        window.innerWidth >= 768 &&
+        window.matchMedia('(pointer: fine)').matches &&
+        'requestPointerLock' in HTMLElement.prototype,
+      )
+    }
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
 
+  // Never leave walk mode running on a viewport that just became mobile-sized
+  useEffect(() => {
+    if (!isDesktop && walkMode) exitWalkMode()
+  }, [isDesktop, walkMode])
+
+  // The card's height changes as you page through presets / confirm / stats, and
+  // the placement clamp needs the live value to keep it on screen.
+  useEffect(() => {
+    const el = walkCardRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      setWalkCardSize((prev) =>
+        Math.abs(prev.width - width) > 1 || Math.abs(prev.height - height) > 1
+          ? { width, height }
+          : prev,
+      )
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [walkMode, selectedMember])
+
+  function enterWalkMode() {
+    setSelectedMember(null)
+    setFocusPos(null)
+    setCameraLocked(false)
+    setWalkMode(true)
+  }
+
+  function exitWalkMode() {
+    setWalkMode(false)
+    setWalkTarget(null)
+    setPointerLocked(false)
+    // Hand back to the same eased return-to-default path a closing card uses,
+    // so the view glides back to the plaza framing instead of cutting.
+    setCameraLocked(true)
+    setReturnNonce((n) => n + 1)
+  }
+
   useEffect(() => () => { if (animTimerRef.current) clearTimeout(animTimerRef.current) }, [])
 
   function handleSelect(member: GroupMember, pos: [number, number, number]) {
+    // In walk mode the spring arm stays put — no zoom-to-focus, no camera lock.
+    // The card is positioned from the target's live projected screen position
+    // (see walkPlacement), so there's no framing to precompute here.
+    if (walkMode) {
+      setSelectedMember(member)
+      return
+    }
     const [fx, fy, fz] = pos
     const container = containerRef.current
     if (container) {
@@ -2267,6 +2435,29 @@ export default function MiiPlaza({
   }
 
   const cardTop = Math.max(16, headScreenY - 40)
+
+  // Orbit mode can hard-code the card's offset from centre because zooming to a
+  // character always frames them identically. Walk mode can't — the spring arm
+  // could have the character anywhere — so place it against their live
+  // projected screen position instead.
+  const walkPlacement = walkMode && walkCardAnchor && viewSize.width > 0
+    ? placeCardBeside(walkCardAnchor.x, walkCardAnchor.y, walkCardSize, viewSize, walkCardAnchor.halfWidth)
+    : null
+
+  const cardWrapperStyle: React.CSSProperties = isMobile
+    ? { position: 'absolute', bottom: bottomInset, left: 0, right: 0, zIndex: 10, pointerEvents: 'auto' }
+    : walkMode
+      ? {
+          position: 'absolute',
+          left: walkPlacement?.left ?? 0,
+          top:  walkPlacement?.top  ?? 0,
+          zIndex: 10,
+          pointerEvents: 'auto',
+          // The anchor lands on the first frame after E; stay hidden until then
+          // rather than flashing the card in the top-left corner.
+          visibility: walkPlacement ? 'visible' : 'hidden',
+        }
+      : { position: 'absolute', left: 'calc(50% + 150px)', top: cardTop, zIndex: 10, pointerEvents: 'auto' }
 
   return (
     <div
@@ -2304,6 +2495,20 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
+            walkMode={walkMode}
+            walkPaused={!!selectedMember}
+            walkTargetUid={walkTarget}
+            returnNonce={returnNonce}
+            onWalkInteract={(uid) => {
+              // handleSelect short-circuits on walkMode and ignores the
+              // position — the camera stays where the spring arm has it.
+              const member = members.find((m) => m.uid === uid)
+              if (member) handleSelect(member, [0, 0, 0])
+            }}
+            onWalkTargetChange={setWalkTarget}
+            onWalkLockChange={setPointerLocked}
+            onWalkCardAnchor={setWalkCardAnchor}
+            onWalkExit={exitWalkMode}
           />
         </Suspense>
         {onReady && <ReadySignal onReady={onReady} />}
@@ -2313,18 +2518,7 @@ export default function MiiPlaza({
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (
-        <div className="sheet-rise" style={isMobile ? {
-          position: 'absolute',
-          bottom: 0, left: 0, right: 0,
-          zIndex: 10,
-          pointerEvents: 'auto',
-        } : {
-          position: 'absolute',
-          left: 'calc(50% + 150px)',
-          top: cardTop,
-          zIndex: 10,
-          pointerEvents: 'auto',
-        }}>
+        <div ref={walkCardRef} className="sheet-rise" style={cardWrapperStyle}>
           {selectedMember.uid === currentUid ? (
             <SelfCard
               member={selectedMember}
@@ -2360,11 +2554,103 @@ export default function MiiPlaza({
         </div>
       )}
 
+      {/* Walk mode: enter / exit control (desktop only).
+          While the pointer is locked the browser routes every click to the
+          canvas, so a button here would be visible but dead. In that state we
+          render a plain badge pointing at the key that actually works. */}
+      {isDesktop && !selectedMember && (
+        walkMode && pointerLocked ? (
+          <div style={{
+            position: 'absolute',
+            right: 16,
+            bottom: 52 + bottomInset,
+            zIndex: 10,
+            background: 'rgba(0,0,0,0.5)',
+            color: '#ccc',
+            border: '1px solid rgba(255,255,255,0.14)',
+            borderRadius: 20,
+            padding: '7px 14px',
+            fontSize: 12,
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <kbd style={{
+              background: 'rgba(255,255,255,0.16)',
+              border: '1px solid rgba(255,255,255,0.28)',
+              borderRadius: 5,
+              padding: '1px 6px',
+              fontSize: 11,
+              fontFamily: 'ui-monospace, monospace',
+            }}>Esc</kbd>
+            to release cursor
+          </div>
+        ) : (
+          <button
+            onClick={() => (walkMode ? exitWalkMode() : enterWalkMode())}
+            style={{
+              position: 'absolute',
+              right: 16,
+              bottom: 52 + bottomInset,
+              zIndex: 10,
+              background: walkMode ? 'rgba(99,102,241,0.92)' : 'rgba(0,0,0,0.5)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.18)',
+              borderRadius: 20,
+              padding: '7px 14px',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+            }}
+          >
+            {walkMode ? '✕ Exit walk mode' : '🚶 Walk mode'}
+          </button>
+        )
+      )}
+
+      {/* Interact prompt — only while someone is actually in range */}
+      {walkMode && walkTarget && !selectedMember && (
+        <div style={{
+          position: 'absolute',
+          left: '50%',
+          bottom: 92 + bottomInset,
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+          background: 'rgba(15,15,25,0.82)',
+          color: '#fff',
+          borderRadius: 999,
+          padding: '6px 14px',
+          fontSize: 13,
+          fontWeight: 700,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+        }}>
+          <kbd style={{
+            background: 'rgba(255,255,255,0.16)',
+            border: '1px solid rgba(255,255,255,0.28)',
+            borderRadius: 5,
+            padding: '1px 6px',
+            fontSize: 11,
+            fontFamily: 'ui-monospace, monospace',
+          }}>E</kbd>
+          Talk to {members.find((m) => m.uid === walkTarget)?.displayName ?? '…'}
+        </div>
+      )}
+
       {/* Hint */}
       {!selectedMember && (
         <div style={{
           position: 'absolute',
-          bottom: 12,
+          bottom: 12 + bottomInset,
           left: '50%',
           transform: 'translateX(-50%)',
           background: 'rgba(0,0,0,0.5)',
@@ -2378,8 +2664,14 @@ export default function MiiPlaza({
           alignItems: 'center',
           gap: 8,
         }}>
-          {isMobile ? 'Hold to carry · Pinch to zoom · Swipe to rotate' : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
-          {inviteCode && (
+          {walkMode
+            ? (pointerLocked
+                ? 'WASD move · Shift sprint · Space jump (×2 backflip) · E interact · Esc release cursor'
+                : 'Click to look · WASD move · Shift sprint · Space jump (×2 backflip) · Esc exit')
+            : isMobile
+              ? 'Hold to carry · Pinch to zoom · Swipe to rotate'
+              : 'Hold to carry · Scroll to zoom · Tap a Mii to interact'}
+          {inviteCode && !walkMode && (
             <>
               <span style={{ opacity: 0.4 }}>·</span>
               <span>Code: <strong style={{ color: '#fff', letterSpacing: 1 }}>{inviteCode}</strong></span>
