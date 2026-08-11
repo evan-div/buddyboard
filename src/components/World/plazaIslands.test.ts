@@ -15,8 +15,12 @@ import {
   VIEW_TARGET_Y,
   POLAR_MIN,
   POLAR_MAX,
+  BRIDGE_WIDTH,
+  isOnIsland,
+  isOnGround,
+  islandAt,
 } from './plazaIslands'
-import { FSIZE } from './plazaMath'
+import { FSIZE, edgeRadius, edgeMaxRadius } from './plazaMath'
 
 describe('island layout', () => {
   it('always includes home, unlocked from zero', () => {
@@ -81,43 +85,156 @@ describe('nextIsland / progressToNext', () => {
 })
 
 describe('geometry', () => {
-  it('sizes home at the full plaza radius and satellites smaller', () => {
-    expect(islandRadius(HOME_ISLAND)).toBeCloseTo(FSIZE / 2, 6)
-    for (const i of ISLANDS.slice(1)) {
-      expect(islandRadius(i)).toBeLessThan(FSIZE / 2)
+  it('builds every island at the same size', () => {
+    // The satellites used to be half-size scale models. They are the plaza's
+    // equals now; only their outlines differ.
+    for (const i of ISLANDS) {
+      expect(i.scale).toBe(1)
+      expect(islandRadius(i)).toBeCloseTo(edgeMaxRadius(i.edge), 6)
     }
+    const radii = ISLANDS.map(islandRadius)
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(1.5)
+  })
+
+  it('reaches further than the nominal plaza half-width', () => {
+    // The n=4 superellipse bulges toward its corners, so the true rim is ~22%
+    // past FSIZE/2. Layout that assumed FSIZE/2 is what made the satellites
+    // overlap home once they grew.
+    expect(islandRadius(HOME_ISLAND)).toBeGreaterThan(FSIZE / 2)
   })
 
   it('has no bridge for home', () => {
     expect(bridgeFor(HOME_ISLAND)).toBeNull()
   })
 
-  it('runs each bridge radially between the two rims without overlapping them', () => {
+  it('lands each bridge on both rims, square to them', () => {
     for (const i of ISLANDS.slice(1)) {
       const b = bridgeFor(i)!
+      const angle = Math.atan2(i.center.z, i.center.x)
       expect(b.length).toBeGreaterThan(0)
-      // Bridge endpoints sit near each rim, not at the centres
+      // The deck points from home out toward the island...
+      expect(angle).toBeCloseTo(b.angle, 6)
+      // ...and each end sits inside the rim it actually meets — a different
+      // radius at each end now that the outlines differ. The anchor tucks under
+      // the grass by the bury plus however much the rim falls away across the
+      // deck's width; a couple of units covers both, and the corner test below
+      // is what actually pins the near edge.
       const fromR = Math.hypot(b.from.x, b.from.z)
-      expect(fromR).toBeCloseTo((FSIZE / 2) * 0.95, 6)
+      expect(fromR).toBeLessThan(edgeRadius(angle, HOME_ISLAND.edge))
+      expect(fromR).toBeGreaterThan(edgeRadius(angle, HOME_ISLAND.edge) - 2)
       const toR = Math.hypot(b.to.x - i.center.x, b.to.z - i.center.z)
-      expect(toR).toBeCloseTo(islandRadius(i) * 0.95, 6)
-      // ...and the deck points from home out toward the island
-      expect(Math.atan2(i.center.z, i.center.x)).toBeCloseTo(b.angle, 6)
+      expect(toR).toBeLessThan(edgeRadius(angle + Math.PI, i.edge))
+      expect(toR).toBeGreaterThan(edgeRadius(angle + Math.PI, i.edge) - 2)
     }
   })
 
-  it('keeps satellites clear of the home island', () => {
+  it('puts all four corners of every deck on solid ground', () => {
+    // The failure this catches is a plank hanging over the void: a wobbly rim
+    // is not perpendicular to the radius, so anchoring on the centreline alone
+    // leaves one corner of the deck short of the grass.
+    const grounds = unlockedIslands(ALL_UNLOCKED_POINTS)
     for (const i of ISLANDS.slice(1)) {
-      const dist = Math.hypot(i.center.x, i.center.z)
-      expect(dist).toBeGreaterThan(FSIZE / 2 + islandRadius(i))
+      const b = bridgeFor(i)!
+      const nx = -Math.sin(b.angle)
+      const nz = Math.cos(b.angle)
+      for (const end of [b.from, b.to]) {
+        for (const side of [-1, 1]) {
+          const cx = end.x + nx * side * (BRIDGE_WIDTH / 2)
+          const cz = end.z + nz * side * (BRIDGE_WIDTH / 2)
+          expect(islandAt(cx, cz, grounds), `${i.id} deck corner is over open sky`).not.toBeNull()
+        }
+      }
+    }
+  })
+
+  it('leaves a crossable gap between home and every satellite', () => {
+    // Both a floor and a ceiling: too little and the islands intersect, too
+    // much and the bridge is a hallway. This is what pins RING.
+    for (const i of ISLANDS.slice(1)) {
+      const b = bridgeFor(i)!
+      expect(b.length).toBeGreaterThan(6)
+      expect(b.length).toBeLessThan(14)
+    }
+  })
+
+  it('keeps every pair of islands clear of each other', () => {
+    // Measured on the true rims, and pairwise — satellite-vs-satellite was
+    // never checked before, and it is the second thing full-size islands break.
+    for (let a = 0; a < ISLANDS.length; a++) {
+      for (let b = a + 1; b < ISLANDS.length; b++) {
+        const dist = Math.hypot(
+          ISLANDS[a].center.x - ISLANDS[b].center.x,
+          ISLANDS[a].center.z - ISLANDS[b].center.z,
+        )
+        expect(dist).toBeGreaterThan(islandRadius(ISLANDS[a]) + islandRadius(ISLANDS[b]))
+      }
     }
   })
 
   it('grows the camera framing radius as islands unlock', () => {
     const solo = archipelagoRadius(0)
     const full = archipelagoRadius(99999)
-    expect(solo).toBeCloseTo(FSIZE / 2, 6)
+    expect(solo).toBeCloseTo(edgeMaxRadius(HOME_ISLAND.edge), 6)
     expect(full).toBeGreaterThan(solo)
+  })
+})
+
+describe('ground', () => {
+  const grounds = unlockedIslands(ALL_UNLOCKED_POINTS)
+
+  it('stands you on every island, and drops you between them', () => {
+    for (const i of ISLANDS) {
+      expect(islandAt(i.center.x, i.center.z, grounds)?.id).toBe(i.id)
+      // Just inside its own rim in every direction, and just outside it.
+      for (let k = 0; k < 32; k++) {
+        const theta = (k / 32) * Math.PI * 2
+        const rim = edgeRadius(theta, i.edge)
+        const inX = i.center.x + Math.cos(theta) * rim * 0.98
+        const inZ = i.center.z + Math.sin(theta) * rim * 0.98
+        expect(islandAt(inX, inZ, grounds)?.id).toBe(i.id)
+      }
+    }
+    // The middle of the ring is open sky in every direction but the bridges.
+    expect(islandAt(0, 0, grounds)?.id).toBe('home')
+    expect(islandAt(1000, 1000, grounds)).toBeNull()
+  })
+
+  it('never lets two islands claim the same point', () => {
+    // "First match wins" is only correct because they provably don't overlap.
+    for (let x = -60; x <= 60; x += 2) {
+      for (let z = -60; z <= 60; z += 2) {
+        const hits = grounds.filter((i) => isOnIsland(x, z, i))
+        expect(hits.length, `(${x}, ${z}) is on ${hits.map((h) => h.id).join(' and ')}`)
+          .toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('carries you along a deck but not off its side', () => {
+    for (const i of ISLANDS.slice(1)) {
+      const b = bridgeFor(i)!
+      const nx = -Math.sin(b.angle)
+      const nz = Math.cos(b.angle)
+      for (let t = 0.1; t < 1; t += 0.1) {
+        const cx = b.from.x + (b.to.x - b.from.x) * t
+        const cz = b.from.z + (b.to.z - b.from.z) * t
+        expect(isOnGround(cx, cz, grounds), `${i.id} deck has a hole in it`).toBe(true)
+        // A stride past the rails is open sky (except near the ends, where the
+        // island itself is still underneath).
+        const offX = cx + nx * BRIDGE_WIDTH
+        const offZ = cz + nz * BRIDGE_WIDTH
+        if (!islandAt(offX, offZ, grounds)) {
+          expect(isOnGround(offX, offZ, grounds), `${i.id} deck is wider than its rails`).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('offers no footing on an island the group has not earned', () => {
+    const homeOnly = unlockedIslands(0)
+    const garden = ISLANDS.find((i) => i.id === 'garden')!
+    expect(islandAt(garden.center.x, garden.center.z, homeOnly)).toBeNull()
+    expect(isOnGround(garden.center.x, garden.center.z, homeOnly)).toBe(false)
   })
 })
 

@@ -19,7 +19,10 @@ import {
   tilesInsidePlaza,
   tilesOnIsland,
   nearestFreeTile,
+  edgeMaxRadius,
+  TILE,
 } from './plazaMath'
+import { ISLANDS } from './plazaIslands'
 
 const TAU = Math.PI * 2
 
@@ -122,7 +125,10 @@ describe('placement grid', () => {
   })
 
   it('produces a non-trivial number of plantable tiles', () => {
-    expect(tilesInsidePlaza().length).toBeGreaterThan(20)
+    // Pinned rather than bounded: the count has exactly one tile of slack over
+    // the old "> 20", so an accidental change to the home outline should fail
+    // here loudly instead of quietly costing somebody a planting spot.
+    expect(tilesInsidePlaza().length).toBe(21)
   })
 
   it('rejects tiles well outside the island', () => {
@@ -160,17 +166,45 @@ describe('placement grid', () => {
     expect(nearestFreeTile({ x: 0, z: 0 }, taken)).toBeNull()
   })
 
-  it('gives a smaller island its own, smaller set of usable tiles', () => {
-    const frame = { id: 'garden', center: { x: 27, z: 0 }, scale: 0.52 }
-    const tiles = tilesOnIsland(frame)
-    expect(tiles.length).toBeGreaterThan(2)
-    expect(tiles.length).toBeLessThan(tilesInsidePlaza().length)
-    // every tile is tagged with its island and sits near that island's centre
-    for (const t of tiles) {
-      expect(t.island).toBe('garden')
-      const { x, z } = tileToWorld(t, frame)
-      expect(Math.hypot(x - frame.center.x, z - frame.center.z)).toBeLessThan(FSIZE / 2)
+  it('gives every island its own full-size set of usable tiles', () => {
+    // Satellites are the plaza's equals now, so each one carries a comparable
+    // number of planting spots — measured against its own rim, which reaches
+    // past FSIZE/2 on the diagonals.
+    const home = tilesInsidePlaza().length
+    for (const island of ISLANDS.slice(1)) {
+      const frame = { id: island.id, center: island.center, scale: island.scale, edge: island.edge }
+      const tiles = tilesOnIsland(frame)
+      expect(tiles.length).toBeGreaterThan(home * 0.75)
+      expect(tiles.length).toBeLessThan(home * 1.25)
+      for (const t of tiles) {
+        expect(t.island).toBe(island.id)
+        const { x, z } = tileToWorld(t, frame)
+        expect(Math.hypot(x - frame.center.x, z - frame.center.z))
+          .toBeLessThan(edgeMaxRadius(island.edge))
+      }
     }
+  })
+
+  it('scans far enough out to find every tile', () => {
+    // The scan span is derived from the island's true reach. If it ever went
+    // back to FSIZE/2, the corner tiles would be silently clipped — which shows
+    // up as an accepted tile sitting on the very edge of the scanned square.
+    for (const island of ISLANDS) {
+      const frame = { id: island.id, center: island.center, scale: island.scale, edge: island.edge }
+      const span = Math.ceil((edgeMaxRadius(island.edge) * island.scale) / TILE)
+      for (const t of tilesOnIsland(frame)) {
+        expect(Math.max(Math.abs(t.q), Math.abs(t.r))).toBeLessThan(span)
+      }
+    }
+  })
+
+  it('keeps two islands with the same id but different shapes apart', () => {
+    // Direct regression for the tile cache: it used to key on the island id
+    // alone, so a second frame sharing that id got the first one's tiles.
+    const base = { id: 'twin', center: { x: 0, z: 0 }, scale: 1 }
+    const round = tilesOnIsland({ ...base, edge: { exp: 4.8, a1: 0.02, k1: 3, p1: 0, a2: 0.01, k2: 7, p2: 0 } })
+    const lumpy = tilesOnIsland({ ...base, edge: { exp: 3.6, a1: 0.04, k1: 6, p1: 2, a2: 0.02, k2: 11, p2: 1 } })
+    expect(round).not.toBe(lumpy)
   })
 })
 

@@ -12,7 +12,14 @@
  * Pure data + math (no React/THREE) so it can be unit-tested and shared.
  */
 
-import { FSIZE } from './plazaMath'
+import {
+  HOME_EDGE,
+  edgeRadius,
+  edgeMaxRadius,
+  makeEdgeShape,
+  type EdgeShape,
+} from './plazaMath'
+import { hashUid, mix } from './plazaWalk'
 
 export type IslandDef = {
   id: string
@@ -23,14 +30,35 @@ export type IslandDef = {
   center: { x: number; z: number }
   /** Island size relative to the home island (1 = the full FSIZE plaza). */
   scale: number
+  /** This island's own rim. Same size as home, different silhouette. */
+  edge: EdgeShape
   /** Cumulative points given required to raise it. 0 = always present. */
   unlockAtPoints: number
 }
 
-// Home sits at the origin at full size; satellites ring it, smaller, at a
-// distance that leaves a clean gap for the bridge. Angles are spread so no two
-// bridges run close to each other.
-const RING = 27
+/**
+ * Each island's outline, derived from its id.
+ *
+ * ⚠️ SHARED WORLD: every client has to draw the same archipelago, so this
+ * mapping is as much a wire format as plazaWalk's wander schedule. The shapes
+ * are pinned in plazaIslands.test.ts — changing the salt reshapes islands that
+ * people have already planted on.
+ */
+export function edgeForIsland(id: string): EdgeShape {
+  if (id === 'home') return HOME_EDGE
+  return makeEdgeShape(mix(hashUid(id), 0xed6e))
+}
+
+// Home sits at the origin; satellites ring it at the same size, far enough out
+// to leave a clean gap for the bridge. Angles are spread so no two bridges run
+// close to each other.
+//
+// The ring has to clear two *true* rims, not two nominal ones: a full-size
+// island reaches ~15.9 at its diagonals, so the old 27 — chosen when satellites
+// were half-size — would overlap home by a couple of units. 38 leaves decks of
+// 10-11 units for the shipped islands (they were 8.2 when the satellites were
+// small) and at least 9 for any island the seeder can produce.
+const RING = 38
 
 function ring(angleDeg: number): { x: number; z: number } {
   const a = (angleDeg * Math.PI) / 180
@@ -45,6 +73,7 @@ export const ISLANDS: IslandDef[] = [
     blurb: 'Where everyone gathers.',
     center: { x: 0, z: 0 },
     scale: 1,
+    edge: edgeForIsland('home'),
     unlockAtPoints: 0,
   },
   {
@@ -53,7 +82,8 @@ export const ISLANDS: IslandDef[] = [
     emoji: '🌷',
     blurb: 'The first chunk of land the group earned together.',
     center: ring(30),
-    scale: 0.52,
+    scale: 1,
+    edge: edgeForIsland('garden'),
     unlockAtPoints: 500,
   },
   {
@@ -62,7 +92,8 @@ export const ISLANDS: IslandDef[] = [
     emoji: '🍎',
     blurb: 'Room for the long-lived things.',
     center: ring(120),
-    scale: 0.56,
+    scale: 1,
+    edge: edgeForIsland('orchard'),
     unlockAtPoints: 1500,
   },
   {
@@ -71,7 +102,8 @@ export const ISLANDS: IslandDef[] = [
     emoji: '🗿',
     blurb: 'Raised for the milestones worth remembering.',
     center: ring(210),
-    scale: 0.5,
+    scale: 1,
+    edge: edgeForIsland('hill'),
     unlockAtPoints: 3000,
   },
   {
@@ -80,7 +112,8 @@ export const ISLANDS: IslandDef[] = [
     emoji: '🔭',
     blurb: 'The far island, for groups that went the distance.',
     center: ring(300),
-    scale: 0.54,
+    scale: 1,
+    edge: edgeForIsland('observatory'),
     unlockAtPoints: 5000,
   },
 ]
@@ -141,9 +174,36 @@ export function progressToNext(pointsGiven: number): {
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────────
 
-/** Half-width of an island in world units (home is FSIZE/2). */
+/**
+ * An island's true reach: how far its rim gets from its centre. Note this is
+ * well past FSIZE/2 — the superellipse bulges toward its corners — which is
+ * exactly what layout built on FSIZE/2 got wrong.
+ */
 export function islandRadius(island: IslandDef): number {
-  return (FSIZE / 2) * island.scale
+  return edgeMaxRadius(island.edge) * island.scale
+}
+
+/** Plank deck width, shared by the renderer and the walkable-ground test. */
+export const BRIDGE_WIDTH = 2.6
+/** How far each end of the deck sinks into the grass so it meets it visibly. */
+const BRIDGE_BURY = 0.35
+
+/**
+ * The rim radius under a deck of BRIDGE_WIDTH pointing along `bearing`, taken
+ * as the minimum across the deck's angular footprint.
+ *
+ * A wobbly rim isn't perpendicular to the radius, so anchoring on the deck's
+ * centreline alone leaves one corner of the planks hanging over the void: dr/dθ
+ * runs ~3.7 units per radian at these bearings and the deck subtends ~0.09 rad,
+ * so a corner can miss by a third of a unit — most of the bury.
+ */
+function deckAnchorRadius(edge: EdgeShape, bearing: number): number {
+  const spread = Math.atan2(BRIDGE_WIDTH / 2, edgeRadius(bearing, edge))
+  return Math.min(
+    edgeRadius(bearing, edge),
+    edgeRadius(bearing + spread, edge),
+    edgeRadius(bearing - spread, edge),
+  ) - BRIDGE_BURY
 }
 
 /**
@@ -151,29 +211,93 @@ export function islandRadius(island: IslandDef): number {
  * island's rim, plus the direction and span between them. Bridges run radially,
  * so they always land square on both rims.
  */
-export function bridgeFor(island: IslandDef): {
+export type Bridge = {
   from: { x: number; z: number }
   to: { x: number; z: number }
   angle: number
   length: number
-} | null {
+}
+
+// Fixed per island, and asked for every frame by the ground test.
+const _bridgeCache = new Map<string, Bridge | null>()
+
+export function bridgeFor(island: IslandDef): Bridge | null {
+  const hit = _bridgeCache.get(island.id)
+  if (hit !== undefined) return hit
+  const built = buildBridge(island)
+  _bridgeCache.set(island.id, built)
+  return built
+}
+
+function buildBridge(island: IslandDef): Bridge | null {
   if (island.id === HOME_ISLAND.id) return null
   const dx = island.center.x - HOME_ISLAND.center.x
   const dz = island.center.z - HOME_ISLAND.center.z
-  const dist = Math.hypot(dx, dz)
-  const ux = dx / dist
-  const uz = dz / dist
-  // Overlap the rims slightly so the deck visibly meets the grass.
-  const homeEdge = (FSIZE / 2) * 0.95
-  const farEdge = islandRadius(island) * 0.95
-  const from = { x: ux * homeEdge, z: uz * homeEdge }
-  const to = { x: island.center.x - ux * farEdge, z: island.center.z - uz * farEdge }
+  const angle = Math.atan2(dz, dx)
+  const ux = Math.cos(angle)
+  const uz = Math.sin(angle)
+  // Each end sits on the rim it actually meets. The satellite's near side is at
+  // its own local bearing angle+π, which is a different radius from home's.
+  const homeR = deckAnchorRadius(HOME_ISLAND.edge, angle)
+  const farR = deckAnchorRadius(island.edge, angle + Math.PI)
+  const from = { x: HOME_ISLAND.center.x + ux * homeR, z: HOME_ISLAND.center.z + uz * homeR }
+  const to = { x: island.center.x - ux * farR, z: island.center.z - uz * farR }
   return {
     from,
     to,
-    angle: Math.atan2(dz, dx),
+    angle,
     length: Math.hypot(to.x - from.x, to.z - from.z),
   }
+}
+
+// ─── Ground ───────────────────────────────────────────────────────────────────
+// What counts as solid footing anywhere in the archipelago. Pure, so the walk
+// step, the throw physics and the blob shadows can all ask the same question
+// and get the same answer.
+
+/** Is (x, z) over this island's surface? */
+export function isOnIsland(x: number, z: number, island: IslandDef): boolean {
+  const lx = x - island.center.x
+  const lz = z - island.center.z
+  const r = Math.hypot(lx, lz)
+  if (r === 0) return true
+  return r <= edgeRadius(Math.atan2(lz, lx), island.edge) * island.scale
+}
+
+/**
+ * Is (x, z) on the planks of this island's bridge? Inset to the rails, which
+ * are what actually stops you walking off the side.
+ */
+export function isOnBridge(x: number, z: number, island: IslandDef, halfWidth = BRIDGE_WIDTH / 2): boolean {
+  const bridge = bridgeFor(island)
+  if (!bridge) return false
+  const midX = (bridge.from.x + bridge.to.x) / 2
+  const midZ = (bridge.from.z + bridge.to.z) / 2
+  const cos = Math.cos(bridge.angle)
+  const sin = Math.sin(bridge.angle)
+  const dx = x - midX
+  const dz = z - midZ
+  // Into the deck's own frame: along the span, and across it.
+  const along = dx * cos + dz * sin
+  const across = -dx * sin + dz * cos
+  return Math.abs(along) <= bridge.length / 2 && Math.abs(across) <= halfWidth
+}
+
+/** The island whose surface is under (x, z), or null over open sky. */
+export function islandAt(x: number, z: number, unlocked: readonly IslandDef[]): IslandDef | null {
+  for (const island of unlocked) if (isOnIsland(x, z, island)) return island
+  return null
+}
+
+/**
+ * Is there something to stand on at (x, z)? Islands and the decks that join
+ * them. Bridge decks sit ~0.01 below the grass, close enough that ground is
+ * flat at y = 0 everywhere and callers need no height model.
+ */
+export function isOnGround(x: number, z: number, unlocked: readonly IslandDef[]): boolean {
+  if (islandAt(x, z, unlocked)) return true
+  for (const island of unlocked) if (isOnBridge(x, z, island)) return true
+  return false
 }
 
 // ─── Camera framing ───────────────────────────────────────────────────────────
@@ -228,5 +352,5 @@ export function archipelagoRadius(pointsGiven: number): number {
   return unlockedIslands(pointsGiven).reduce((max, i) => {
     const reach = Math.hypot(i.center.x, i.center.z) + islandRadius(i)
     return Math.max(max, reach)
-  }, FSIZE / 2)
+  }, edgeMaxRadius(HOME_EDGE))
 }
