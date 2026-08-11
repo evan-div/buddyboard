@@ -346,6 +346,7 @@ export default function GroupPage() {
               plazaActiveDays={group.plazaActiveDays}
               plazaLastActiveDay={group.plazaLastActiveDay}
               plazaPointsGiven={group.plazaPointsGiven}
+              bottomInset={TAB_BAR_HEIGHT}
               onReady={handlePlazaReady}
             />
           )}
