@@ -1682,6 +1682,7 @@ function Scene({
   walkMode,
   walkControl,
   walkerProbe,
+  walkerRef,
   walkPaused,
   walkTargetUid,
   returnNonce,
@@ -1718,6 +1719,8 @@ function Scene({
   walkMode: boolean
   walkControl: 'keyboard' | 'touch'
   walkerProbe?: React.RefObject<Locomotion | null>
+  /** Filled with the live walker so the plaza can read where they stopped. */
+  walkerRef: React.RefObject<Locomotion | null>
   walkPaused: boolean
   walkTargetUid: string | null
   returnNonce: number
@@ -1734,13 +1737,15 @@ function Scene({
   const walkModeRef  = useRef(walkMode)
   walkModeRef.current = walkMode
 
-  // Test seam. The walker's position lives in a ref that changes 60× a second
-  // and never reaches the DOM, so an end-to-end test has no way to see whether
-  // a tap actually moved anybody. Hand the ref out when asked; only the
-  // development-only /walkharness route asks.
+  // The plaza needs the walker's position when walk mode ends, to frame the
+  // island they finished on. `walkerProbe` is the same ref handed to the
+  // development-only /walkharness route as a test seam — the walker's position
+  // lives in a ref that changes 60× a second and never reaches the DOM, so an
+  // end-to-end test has no other way to see whether a tap moved anybody.
   useEffect(() => {
+    walkerRef.current = locomotion.current
     if (walkerProbe) walkerProbe.current = locomotion.current
-  }, [walkerProbe])
+  }, [walkerProbe, walkerRef])
 
   // Pull the camera back far enough to hold every unlocked island in one view,
   // with headroom so the whole archipelago is visible at max zoom-out.
@@ -2468,6 +2473,155 @@ function shortName(island: { label: string }): string {
   return island.label.replace(/^The /, '')
 }
 
+// ─── Collapsing HUD cards ─────────────────────────────────────────────────────
+// The plaza is the point, and on a phone these cards cover a quarter of it. So
+// they say their piece and then get out of the way, sliding out to a pill you
+// can tap to bring them back. Nothing becomes unreachable — the check-in button
+// and the island list are both one tap from the collapsed state — and the same
+// numbers live permanently in the Info tab for anyone who wants to read rather
+// than glance.
+const HUD_LINGER_MS = 7000
+
+function HudCard({ pill, dot = false, children }: {
+  /** What's left once the card slides away. Keep it to an emoji and a number. */
+  pill: React.ReactNode
+  /** Draw attention to the collapsed pill — something is waiting for you. */
+  dot?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(true)
+  // Whether the user closed it themselves. An auto-collapse should feel like
+  // the card getting out of the way; a reopen should then stay open.
+  const [pinned, setPinned] = useState(false)
+
+  useEffect(() => {
+    if (!open || pinned) return
+    const t = setTimeout(() => setOpen(false), HUD_LINGER_MS)
+    return () => clearTimeout(t)
+  }, [open, pinned])
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setPinned(true); setOpen(true) }}
+        style={{
+          position: 'relative', display: 'flex', alignItems: 'center', gap: 6,
+          background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999,
+          padding: '7px 12px', cursor: 'pointer', color: '#cdd6df',
+          fontSize: 12, fontWeight: 700,
+        }}
+      >
+        {pill}
+        {dot && (
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute', top: 4, right: 4, width: 7, height: 7,
+              borderRadius: '50%', background: '#f87171',
+            }}
+          />
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <div className="hud-card" style={{ position: 'relative' }}>
+      {children}
+      <button
+        onClick={() => { setPinned(false); setOpen(false) }}
+        aria-label="Dismiss"
+        style={{
+          position: 'absolute', top: -6, right: -6, width: 22, height: 22,
+          borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)',
+          background: 'rgba(12,16,22,0.92)', color: '#cdd6df',
+          fontSize: 12, lineHeight: 1, cursor: 'pointer', padding: 0,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The island list, and the only way to look at another island outside preview
+ * mode. Panning is off (it strands the camera in open sky with no way back), so
+ * without this the camera is nailed to wherever it last settled — you could walk
+ * to the observatory, leave walk mode, and have no way to look at your own
+ * character.
+ */
+function IslandJumper({ pointsGiven, visitIsland, onVisit }: {
+  pointsGiven: number
+  visitIsland: string | null
+  onVisit: (islandId: string) => void
+}) {
+  const earned = unlockedIslands(pointsGiven)
+  const p = progressToNext(pointsGiven)
+  const here = visitIsland ?? HOME_ISLAND.id
+
+  return (
+    <div style={{
+      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#cdd6df' }}>
+        <span style={{ fontSize: 14 }}>🏝️</span>
+        <strong style={{ color: '#fff' }}>{earned.length}</strong>
+        <span>island{earned.length === 1 ? '' : 's'}</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.65, fontSize: 11 }}>
+          {pointsGiven.toLocaleString()} given
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+        {earned.map((isl) => (
+          <button
+            key={isl.id}
+            onClick={() => onVisit(isl.id)}
+            title={`Look at ${isl.label}`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '6px 8px', borderRadius: 9, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: here === isl.id ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.08)',
+              color: here === isl.id ? '#14181f' : '#e6ecf1',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{isl.emoji}</span>
+            {shortName(isl)}
+          </button>
+        ))}
+      </div>
+
+      {p.next ? (
+        <>
+          <div style={{
+            height: 6, borderRadius: 999, marginTop: 10, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.1)',
+          }}>
+            <div style={{
+              width: `${Math.round(p.fraction * 100)}%`, height: '100%',
+              background: 'linear-gradient(90deg,#43b05f,#7fd694)', borderRadius: 999,
+              transition: 'width 400ms ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 11, color: '#9aa6b1', marginTop: 6, lineHeight: 1.4 }}>
+            <strong style={{ color: '#e6ecf1' }}>{p.next.emoji} {p.next.label}</strong>
+            {' '}rises in {p.remaining.toLocaleString()} more points given
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: '#8fd19e', marginTop: 8 }}>
+          Every island earned 🎉
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Tap-driven growth preview: jump straight to a stage, or nudge days/vitality
 // independently to check the min(time, care) rule behaves. The island rows do
 // the same for the archipelago — raise land the group hasn't earned yet, then
@@ -2694,53 +2848,6 @@ function CheckinCard({
             )}
           </div>
         </>
-      )}
-    </div>
-  )
-}
-
-// Collective progress toward the next island. Sits under the check-in card so
-// the two tiers read together: check in to grow life, give to earn land.
-function IslandProgress({ pointsGiven }: { pointsGiven: number }) {
-  const p = progressToNext(pointsGiven)
-  const earned = unlockedIslands(pointsGiven)
-
-  return (
-    <div style={{
-      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
-      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
-      border: '1px solid rgba(255,255,255,0.08)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#cdd6df' }}>
-        <span style={{ fontSize: 14 }}>🏝️</span>
-        <strong style={{ color: '#fff' }}>{earned.length}</strong>
-        <span>island{earned.length === 1 ? '' : 's'}</span>
-        <span style={{ marginLeft: 'auto', opacity: 0.65, fontSize: 11 }}>
-          {pointsGiven.toLocaleString()} given
-        </span>
-      </div>
-
-      {p.next ? (
-        <>
-          <div style={{
-            height: 6, borderRadius: 999, marginTop: 8, overflow: 'hidden',
-            background: 'rgba(255,255,255,0.1)',
-          }}>
-            <div style={{
-              width: `${Math.round(p.fraction * 100)}%`, height: '100%',
-              background: 'linear-gradient(90deg,#43b05f,#7fd694)', borderRadius: 999,
-              transition: 'width 400ms ease',
-            }} />
-          </div>
-          <div style={{ fontSize: 11, color: '#9aa6b1', marginTop: 6, lineHeight: 1.4 }}>
-            <strong style={{ color: '#e6ecf1' }}>{p.next.emoji} {p.next.label}</strong>
-            {' '}rises in {p.remaining.toLocaleString()} more points given
-          </div>
-        </>
-      ) : (
-        <div style={{ fontSize: 11, color: '#8fd19e', marginTop: 6 }}>
-          Every island earned 🎉
-        </div>
       )}
     </div>
   )
@@ -2989,7 +3096,18 @@ export default function MiiPlaza({
   const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
   const [busy, setBusy]                   = useState(false)
   // Tap-driven growth preview (opt in with ?preview=1). Render-only.
-  const [preview, setPreview] = useState<PlazaPreview>(readPlazaPreview)
+  //
+  // Read on mount rather than in the initializer. The server has no URL to
+  // read, so deriving it during the first client render makes that render
+  // disagree with the server's HTML ("1 island" vs "5"), and React responds by
+  // throwing the whole tree away and rebuilding it — an expensive way to start
+  // when there's a WebGL canvas in it.
+  // A one-shot read of a browser-only value on mount is exactly what this rule's
+  // own guidance says an effect is for, so the cascade it warns about is the
+  // intent here rather than an accident.
+  const [preview, setPreview] = useState<PlazaPreview>(PREVIEW_OFF)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setPreview(readPlazaPreview()) }, [])
   // A slowly-advancing clock so growth stages recompute without calling the
   // impure Date.now() during render. Ticks once a minute; the preview offset is
   // applied as a derived value so tapping updates the scene immediately.
@@ -3015,6 +3133,11 @@ export default function MiiPlaza({
   // plaza's own camera, untouched. The nonce lets a repeat tap re-centre a view
   // the user has since orbited away from.
   const [visit, setVisit] = useState<IslandVisit | null>(null)
+  // Filled by the Scene with the live walker, so exiting walk mode can frame
+  // whichever island they stopped on.
+  const walkerRef = useRef<Locomotion | null>(null)
+  // Islands as *ground* — what the walker can be standing on when they stop.
+  const groundIslands = useMemo(() => unlockedIslands(effectivePoints), [effectivePoints])
   const visitTo = useCallback((id: string) => {
     setVisit((v) => ({ id, nonce: (v?.nonce ?? 0) + 1 }))
   }, [])
@@ -3174,9 +3297,13 @@ export default function MiiPlaza({
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Never leave walk mode running on a device that can no longer drive it
+  // Never leave walk mode running on a device that can no longer drive it.
+  // Through a ref, the way the rest of this file reaches a live callback from an
+  // effect that shouldn't re-run when the callback is re-created.
+  const exitWalkModeRef = useRef(exitWalkMode)
+  exitWalkModeRef.current = exitWalkMode
   useEffect(() => {
-    if (walkInput === 'none' && walkMode) exitWalkMode()
+    if (walkInput === 'none' && walkMode) exitWalkModeRef.current()
   }, [walkInput, walkMode])
 
   // The card's height changes as you page through presets / confirm / stats, and
@@ -3207,8 +3334,18 @@ export default function MiiPlaza({
     setWalkMode(false)
     setWalkTarget(null)
     setPointerLocked(false)
-    // Hand back to the same eased return-to-default path a closing card uses,
-    // so the view glides back to the plaza framing instead of cutting.
+    // Leave the camera looking at the island you actually finished on. Walking
+    // to the observatory and then being yanked back to the plaza loses your
+    // character completely: the orbit camera can't pan, so there'd be no way to
+    // find them again.
+    const walkerPos = walkerRef.current?.pos
+    const landedOn = walkerPos ? islandAt(walkerPos.x, walkerPos.z, groundIslands) : null
+    if (landedOn && landedOn.id !== HOME_ISLAND.id) {
+      visitTo(landedOn.id)
+      return
+    }
+    // Home: hand back to the same eased return-to-default path a closing card
+    // uses, so the view glides back to the plaza framing instead of cutting.
     setCameraLocked(true)
     setReturnNonce((n) => n + 1)
   }
@@ -3322,6 +3459,7 @@ export default function MiiPlaza({
             walkMode={walkMode}
             walkControl={walkInput === 'touch' ? 'touch' : 'keyboard'}
             walkerProbe={walkerProbe}
+            walkerRef={walkerRef}
             walkPaused={!!selectedMember}
             walkTargetUid={walkTarget}
             returnNonce={returnNonce}
@@ -3342,22 +3480,38 @@ export default function MiiPlaza({
 
       <PresenceTab members={members} currentUid={currentUid} />
 
-      {/* Living plaza: daily check-in heartbeat + island progress (top-right) */}
-      <div style={{
-        position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto',
-        display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
-      }}>
-        <CheckinCard
-          checkedIn={checkedInToday}
-          checkedInCount={todayCheckins.length}
-          memberCount={members.length}
-          streak={currentMember?.checkinStreak ?? 0}
-          dormant={dormant}
-          busy={busy}
-          onCheckin={handleCheckin}
-        />
-        <IslandProgress pointsGiven={effectivePoints} />
-      </div>
+      {/* Living plaza: daily check-in heartbeat + the island list (top-right).
+          Both slide away to pills so they stop covering the plaza; the same
+          numbers live permanently in the Info tab. Hidden in walk mode, where
+          the camera is over the walker's shoulder and every pixel counts. */}
+      {!walkMode && (
+        <div style={{
+          position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+        }}>
+          <HudCard
+            dot={!checkedInToday}
+            pill={<>🌱 {todayCheckins.length}/{members.length}</>}
+          >
+            <CheckinCard
+              checkedIn={checkedInToday}
+              checkedInCount={todayCheckins.length}
+              memberCount={members.length}
+              streak={currentMember?.checkinStreak ?? 0}
+              dormant={dormant}
+              busy={busy}
+              onCheckin={handleCheckin}
+            />
+          </HudCard>
+          <HudCard pill={<>🏝️ {unlockedIslands(effectivePoints).length}</>}>
+            <IslandJumper
+              pointsGiven={effectivePoints}
+              visitIsland={visitTarget?.id ?? null}
+              onVisit={visitTo}
+            />
+          </HudCard>
+        </div>
+      )}
 
       {/* Plant controls (hidden while another card or picker is open).
           Not offered in walk mode: planting is a tap on a glowing tile, and on
