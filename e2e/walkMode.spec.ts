@@ -299,6 +299,23 @@ test.describe('walk mode on touch', () => {
     await expect.poll(() => walkerPos(page), { timeout: 30_000 }).not.toBeNull()
   }
 
+  // Taking the character over from the wander animator nudges them a fraction of
+  // a unit as the two hand off. Harmless in play, but a test that asserts
+  // "nothing moved" has to start from a walker that has actually stopped —
+  // otherwise it measures the tail of the handover and fails in proportion to
+  // how slow the frames are, which is to say in proportion to how much scenery
+  // happens to be on screen.
+  async function walkerAtRest(page: Page) {
+    let last: { x: number; z: number } | null = null
+    await expect.poll(async () => {
+      const now = await walkerPos(page)
+      if (!now) return false
+      const still = last !== null && Math.hypot(now.x - last.x, now.z - last.z) < 1e-4
+      last = now
+      return still
+    }, { timeout: 30_000, intervals: [200] }).toBe(true)
+  }
+
   test('is offered, and enters without ever grabbing the pointer', async ({ page }) => {
     const errors = watchForErrors(page)
     await page.goto('/walkharness')
@@ -393,6 +410,7 @@ test.describe('walk mode on touch', () => {
   test('a drag orbits the camera instead of walking', async ({ page }) => {
     const errors = watchForErrors(page)
     await enterTouchWalk(page)
+    await walkerAtRest(page)
 
     const before = await walkerPos(page)
     const frames = []

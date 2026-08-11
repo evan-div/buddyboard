@@ -108,6 +108,23 @@ function usable(lx: number, lz: number, island: IslandDef, tileClearance: number
 }
 
 /**
+ * Pull a point back inside the island's rim, keeping its bearing from the
+ * centre. For the small things that get placed *relative to* a prop rather than
+ * by the samplers above — an apple falling from a tree that stands near the
+ * edge, which would otherwise lie in mid-air off the side of the island.
+ */
+export function clampInsideRim(
+  lx: number, lz: number, island: IslandDef, margin = 0.5,
+): { x: number; z: number } {
+  const r = Math.hypot(lx, lz)
+  if (r === 0) return { x: lx, z: lz }
+  const maxR = edgeRadius(Math.atan2(lz, lx), island.edge) * island.scale - margin
+  if (r <= maxR) return { x: lx, z: lz }
+  const k = maxR / r
+  return { x: lx * k, z: lz * k }
+}
+
+/**
  * Scatter small things (flowers) across the whole island. Rejection sampling
  * over the bounding square: the island is most of that square, and the rejects
  * are the tile discs and the deck we want to skip anyway.

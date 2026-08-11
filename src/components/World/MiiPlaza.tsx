@@ -1510,16 +1510,33 @@ function ringSprites(
   }
 }
 
+// Cloud drawn *over* an island the group hasn't earned, rather than under it.
+// This is what makes a shrouded island read as veiled instead of as a dark
+// shape someone forgot to texture.
+// Enough to hide what's *on* the island, not enough to hide the island. Seven
+// small puffs low over the surface: the shape stays readable as a dark mass, its
+// contents don't.
+const VEIL_RING: CloudRing = { count: 7, r0: 0.2, r1: 0.75, y0: 0.2, y1: 1.3, w0: 4, w1: 7 }
+
 /**
- * Every cloud in the scene: a mist collar around each island, and a shell of
- * sky rings scaled to hold the whole archipelago. Each sprite is its own draw
- * call, so the collars are deliberately small — the sea below carries the rest.
+ * Every cloud in the scene: a mist collar around each island — earned or not,
+ * so the count doesn't change as the group progresses — a veil over the ones
+ * still to come, and a shell of sky rings scaled to hold the whole archipelago.
+ * Each sprite is its own draw call, so the collars are deliberately small; the
+ * sea below carries the rest.
  */
-function makeSpriteDefs(centres: readonly { x: number; z: number }[], reach: number): SpriteDef[] {
+function makeSpriteDefs(
+  centres: readonly { x: number; z: number }[],
+  reach: number,
+  veiled: readonly { x: number; z: number }[] = [],
+): SpriteDef[] {
   const rng = seededRandom(42)
   const defs: SpriteDef[] = []
   for (const centre of centres) {
     for (const ring of COLLAR_RINGS) ringSprites(ring, rng, centre, 1, defs)
+  }
+  for (const centre of veiled) {
+    ringSprites(VEIL_RING, rng, centre, 14, defs)
   }
   for (const ring of SKY_RINGS) ringSprites(ring, rng, { x: 0, z: 0 }, reach, defs)
   return defs
@@ -1599,15 +1616,17 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
-function Clouds({ centres, reach }: {
+function Clouds({ centres, reach, veiled }: {
   centres: readonly { x: number; z: number }[]
   reach: number
+  /** Islands still to be earned — clouds hang over these, not just around them. */
+  veiled: readonly { x: number; z: number }[]
 }) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
 
-  const sprites = useMemo(() => makeSpriteDefs(centres, reach), [centres, reach])
+  const sprites = useMemo(() => makeSpriteDefs(centres, reach, veiled), [centres, reach, veiled])
 
   const fadeTex = useMemo(() => {
     const size = 1024, c = size / 2
@@ -1748,9 +1767,11 @@ function Scene({
     if (walkerProbe) walkerProbe.current = locomotion.current
   }, [walkerProbe, walkerRef])
 
-  // Pull the camera back far enough to hold every unlocked island in one view,
-  // with headroom so the whole archipelago is visible at max zoom-out.
-  const camReach = useMemo(() => Math.max(40, archipelagoRadius(pointsGiven) * 2.1), [pointsGiven])
+  // Pull back far enough to hold the whole archipelago — including the islands
+  // still to be earned, which are in the scene as shrouds. Deriving this from
+  // what's *unlocked* capped a new group at 40 units and put its own future out
+  // of view, which is the one thing the shrouds exist to show.
+  const camReach = useMemo(() => Math.max(40, archipelagoRadius(ALL_UNLOCKED_POINTS) * 2.1), [])
 
   // Every island the group has earned gets grass; the field is thinned by
   // distance so five of them cost about what one used to.
@@ -1760,8 +1781,11 @@ function Scene({
   )
   // The cloud shell has to hold whatever land exists, and each island needs its
   // own mist to float in.
-  const islandCentres = useMemo(
-    () => unlockedIslands(pointsGiven).map((i) => i.center),
+  // Every island gets a collar, earned or not, so the cloud count — and with it
+  // the draw-call cost — is the same however far along the group is.
+  const islandCentres = useMemo(() => ISLANDS.map((i) => i.center), [])
+  const veiledCentres = useMemo(
+    () => ISLANDS.filter((i) => pointsGiven < i.unlockAtPoints).map((i) => i.center),
     [pointsGiven],
   )
   const archipelagoReach = useMemo(() => archipelagoRadius(pointsGiven), [pointsGiven])
@@ -2235,7 +2259,7 @@ function Scene({
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        <Clouds centres={islandCentres} reach={archipelagoReach} />
+        <Clouds centres={islandCentres} reach={archipelagoReach} veiled={veiledCentres} />
       </Suspense>
       <GrassFloor
         islands={grassIslands}

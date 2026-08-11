@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useEffect } from 'react'
 import * as THREE from 'three'
-import { themeFor, scatterPlacements, ringPlacements, type Placement } from './plazaScenery'
+import { themeFor, scatterPlacements, ringPlacements, clampInsideRim, type Placement } from './plazaScenery'
 import { type IslandDef } from './plazaIslands'
 import { hashUid, mix, makeRng } from './plazaWalk'
 
@@ -162,19 +162,29 @@ function Orchard({ island, detail }: { island: IslandDef; detail: number }) {
     const dummy = new THREE.Object3D()
     const rng = makeRng(mix(hashUid(island.id), 0xa77e))
     let i = 0
+    // Which way the island's middle is from each tree. Apples roll inward, not
+    // off the edge: the trees stand a unit or so from the rim, so a fall in a
+    // uniformly random direction leaves half of them hanging over the clouds.
     for (const tree of trees) {
+      const inward = Math.atan2(-tree.z, -tree.x)
       for (let a = 0; a < APPLES_PER_TREE; a++) {
         const fallen = a >= APPLES_PER_TREE - 2
-        const theta = rng() * Math.PI * 2
         // Hanging apples sit on the canopy's lower shell; fallen ones lie in the
-        // grass a stride from the trunk.
+        // grass a stride from the trunk, on the island side of it.
+        const theta = fallen
+          ? inward + (rng() - 0.5) * 1.6
+          : rng() * Math.PI * 2
         const radius = fallen ? 1.1 + rng() * 1.3 : 0.8 + rng() * 0.7
         const y = fallen ? 0.14 : (2.35 + rng() * 0.95) * tree.scale
-        dummy.position.set(
+        // Belt and braces: a tree on a bulge of the rim can still throw one
+        // past the edge, so every apple is pulled back onto the grass.
+        const spot = clampInsideRim(
           tree.x + Math.cos(theta) * radius * tree.scale,
-          y,
           tree.z + Math.sin(theta) * radius * tree.scale,
+          island,
+          0.4,
         )
+        dummy.position.set(spot.x, y, spot.z)
         dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI)
         const s = (0.15 + rng() * 0.06) * tree.scale
         dummy.scale.set(s, fallen ? s * 0.82 : s, s)
@@ -184,7 +194,7 @@ function Orchard({ island, detail }: { island: IslandDef; detail: number }) {
     }
     mesh.count = i
     mesh.instanceMatrix.needsUpdate = true
-  }, [island.id, trees])
+  }, [island, trees])
 
   return (
     <group>
@@ -280,48 +290,59 @@ function MonumentGrounds({ island, detail }: { island: IslandDef; detail: number
 
 // ─── The Observatory — a telescope on a platform ──────────────────────────────
 
+// Where the tripod's legs meet, in the telescope's own units. Everything else
+// is positioned from this, so the legs, the mount and the tube's pivot are the
+// same point by construction rather than by three numbers agreeing.
+const MOUNT_Y = 1.5
+const LEG_LEN = 1.85
+const LEG_SPLAY = 0.34   // radians from vertical
+
 function Telescope() {
-  // Pitched up toward the sky, and yawed off the cardinal axes so it doesn't
-  // look parked.
   return (
-    <group position={[0, 0.5, 0]} rotation={[0, 0.6, 0]} scale={1.55}>
-      {/* Tripod */}
-      {[0, 1, 2].map((i) => {
-        const a = (i / 3) * Math.PI * 2
-        return (
-          <mesh
-            key={i}
-            position={[Math.cos(a) * 0.55, 0.55, Math.sin(a) * 0.55]}
-            rotation={[Math.cos(a) * 0.42, 0, -Math.sin(a) * 0.42]}
-          >
-            <cylinderGeometry args={[0.07, 0.09, 1.5, 6]} />
+    <group position={[0, 0.28, 0]} rotation={[0, 0.6, 0]} scale={1.5}>
+      {/* Tripod: each leg hangs from the mount and splays outward, so the top
+          of every leg is at the apex instead of somewhere near it. */}
+      {[0, 1, 2].map((i) => (
+        <group key={i} position={[0, MOUNT_Y, 0]} rotation={[0, (i / 3) * Math.PI * 2, LEG_SPLAY]}>
+          <mesh position={[0, -LEG_LEN / 2, 0]}>
+            <cylinderGeometry args={[0.06, 0.085, LEG_LEN, 6]} />
             <meshStandardMaterial color="#5d4a35" roughness={0.9} flatShading />
           </mesh>
-        )
-      })}
-      {/* Mount head */}
-      <mesh position={[0, 1.32, 0]}>
-        <cylinderGeometry args={[0.26, 0.3, 0.28, 8]} />
+        </group>
+      ))}
+
+      {/* Mount head, sitting on the apex */}
+      <mesh position={[0, MOUNT_Y + 0.06, 0]}>
+        <cylinderGeometry args={[0.24, 0.3, 0.34, 8]} />
         <meshStandardMaterial color={STONE_DARK} roughness={0.7} flatShading />
       </mesh>
-      {/* Tube, tipped up ~40° */}
-      <group position={[0, 1.55, 0]} rotation={[0, 0, Math.PI / 2 - 0.7]}>
-        <Built color="#2f4f7a" scale={1.05}>
-          <cylinderGeometry args={[0.3, 0.36, 2.6, 12]} />
-        </Built>
-        {/* Brass rings and the eyepiece at the low end */}
-        <mesh position={[0, 0.75, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.33, 0.055, 6, 14]} />
-          <meshStandardMaterial color={BRASS} roughness={0.5} flatShading />
-        </mesh>
-        <mesh position={[0, -0.6, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.38, 0.06, 6, 14]} />
-          <meshStandardMaterial color={BRASS} roughness={0.5} flatShading />
-        </mesh>
-        <mesh position={[0, -1.5, 0]}>
-          <cylinderGeometry args={[0.12, 0.16, 0.5, 8]} />
-          <meshStandardMaterial color={BRASS} roughness={0.5} flatShading />
-        </mesh>
+
+      {/* The tube pivots on the mount and tips up ~40°. Its geometry runs along
+          local Y, and it is slid *along* that axis so it balances on the
+          pivot — the eyepiece end hangs back and down, the barrel points up. */}
+      <group position={[0, MOUNT_Y + 0.24, 0]} rotation={[0, 0, -0.72]}>
+        <group position={[0, 0.42, 0]}>
+          <Built color="#2f4f7a" scale={1.04}>
+            <cylinderGeometry args={[0.26, 0.32, 2.5, 12]} />
+          </Built>
+          {/* Brass bands around the barrel */}
+          {[0.72, -0.55].map((y, i) => (
+            <mesh key={i} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[i === 0 ? 0.28 : 0.31, 0.05, 6, 14]} />
+              <meshStandardMaterial color={BRASS} roughness={0.5} flatShading />
+            </mesh>
+          ))}
+          {/* Objective lens at the sky end */}
+          <mesh position={[0, 1.28, 0]}>
+            <cylinderGeometry args={[0.27, 0.27, 0.1, 12]} />
+            <meshStandardMaterial color="#cfe4f5" roughness={0.25} flatShading />
+          </mesh>
+          {/* Eyepiece at the low end */}
+          <mesh position={[0, -1.42, 0]}>
+            <cylinderGeometry args={[0.1, 0.14, 0.42, 8]} />
+            <meshStandardMaterial color={BRASS} roughness={0.5} flatShading />
+          </mesh>
+        </group>
       </group>
     </group>
   )

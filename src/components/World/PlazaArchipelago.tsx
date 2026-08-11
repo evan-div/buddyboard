@@ -98,6 +98,38 @@ export function IslandGround({
   )
 }
 
+/**
+ * An island the group hasn't earned yet: its silhouette, dark and half-lost in
+ * the clouds. You can see that something is out there and roughly how big, but
+ * not what it holds — the scenery is the reveal.
+ *
+ * Deliberately not solid. Ground is decided from the *unlocked* islands, so a
+ * shroud is a view of a place, not a place: you can't walk to it, land on it, or
+ * plant on it, and there is no bridge until it is earned.
+ */
+function ShroudedIsland({ island }: { island: IslandDef }) {
+  const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
+  const topGeo = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
+  const dirtGeo = useMemo(
+    () => new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: false }),
+    [shape],
+  )
+  useEffect(() => () => { topGeo.dispose(); dirtGeo.dispose() }, [topGeo, dirtGeo])
+
+  return (
+    <group position={[island.center.x, 0, island.center.z]}>
+      {/* Unlit, so it stays a flat shape against the sky however the sun moves
+          — a lit dark surface reads as an island at dusk rather than a mystery. */}
+      <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+        <meshBasicMaterial color="#36435c" transparent opacity={0.82} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+        <meshBasicMaterial color="#232d3d" transparent opacity={0.78} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
 // A plank deck with side rails, spanning rim to rim.
 function Bridge({ island }: { island: IslandDef }) {
   const bridge = useMemo(() => bridgeFor(island), [island])
@@ -160,11 +192,17 @@ export default function PlazaArchipelago({
     () => unlockedIslands(pointsGiven).filter((i) => i.id !== HOME_ISLAND.id),
     [pointsGiven],
   )
-
-  if (!satellites.length) return null
+  // Everything still to come, shown as a shape in the clouds.
+  const shrouded = useMemo(
+    () => ISLANDS.filter((i) => i.id !== HOME_ISLAND.id && pointsGiven < i.unlockAtPoints),
+    [pointsGiven],
+  )
 
   return (
     <group>
+      {shrouded.map((island) => (
+        <ShroudedIsland key={island.id} island={island} />
+      ))}
       {satellites.map((island) => (
         <group key={island.id}>
           <IslandGround

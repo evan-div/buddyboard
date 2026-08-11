@@ -7,6 +7,7 @@ import {
   clearOfTiles,
   scatterPlacements,
   ringPlacements,
+  clampInsideRim,
   TILE_CLEARANCE,
 } from './plazaScenery'
 import { ISLANDS, HOME_ISLAND, isOnIsland, isOnBridge, unlockedIslands, ALL_UNLOCKED_POINTS } from './plazaIslands'
@@ -159,6 +160,27 @@ describe('placements', () => {
         expect(r).toBeGreaterThan(rim - 4)
       }
     }
+  })
+
+  it('pull anything dropped near the edge back onto the grass', () => {
+    // What the orchard's fallen apples rely on: a tree stands a unit or so from
+    // the rim, so an apple that rolls outward would otherwise lie in mid-air.
+    for (const island of SATELLITES) {
+      for (const p of ringPlacements(island, 12)) {
+        for (let k = 0; k < 8; k++) {
+          const theta = (k / 8) * Math.PI * 2
+          const spot = clampInsideRim(p.x + Math.cos(theta) * 2.4, p.z + Math.sin(theta) * 2.4, island, 0.4)
+          const w = world(island, spot)
+          expect(isOnIsland(w.x, w.z, island), `${island.id} drops things off its rim`).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('leave things that are already well inside exactly where they are', () => {
+    const island = SATELLITES[0]
+    expect(clampInsideRim(1, 2, island)).toEqual({ x: 1, z: 2 })
+    expect(clampInsideRim(0, 0, island)).toEqual({ x: 0, z: 0 })
   })
 
   it('clearOfTiles agrees with the tile grid', () => {
