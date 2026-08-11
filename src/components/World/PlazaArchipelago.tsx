@@ -6,6 +6,7 @@ import { FSIZE, edgeRadius } from './plazaMath'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
 import { ISLANDS, HOME_ISLAND, BRIDGE_WIDTH, bridgeFor, unlockedIslands, type IslandDef } from './plazaIslands'
 import { hashUid } from './plazaWalk'
+import IslandScenery from './IslandScenery'
 
 /**
  * The islands beyond home. Each collective milestone raises another chunk of
@@ -171,7 +172,9 @@ export default function PlazaArchipelago({
             grassTex={grassTex}
             dirtTex={dirtTex}
             showGrassTop={lowerGraphics}
-          />
+          >
+            <IslandScenery island={island} lowerGraphics={lowerGraphics} />
+          </IslandGround>
           <Bridge island={island} />
         </group>
       ))}

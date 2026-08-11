@@ -15,6 +15,7 @@ import { FSIZE, plazaEdgeRadius, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y
 import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
 import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView, islandAt, clampToNearestIsland, type IslandDef } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
+import { reservedTiles } from './plazaScenery'
 import ThirdPersonController from './ThirdPersonController'
 import { makeLocomotion, placeCardBeside, type Locomotion } from './thirdPerson'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
@@ -3164,8 +3165,13 @@ export default function MiiPlaza({
   )
 
   const takenTiles = useMemo(
-    () => new Set(allObjects.map((o) => tileKey(o.tile))),
-    [allObjects],
+    () => new Set([
+      ...allObjects.map((o) => tileKey(o.tile)),
+      // Where an island's own centrepiece stands. Planting inside the monument
+      // would grow a tree through it.
+      ...groundIslands.flatMap((i) => reservedTiles(i).map(tileKey)),
+    ]),
+    [allObjects, groundIslands],
   )
   const dormant = useMemo(
     () => isDormant(plazaLastActiveDay, [today, dayKey(timezone, -1)]),
