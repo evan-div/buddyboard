@@ -300,6 +300,80 @@ export function isOnGround(x: number, z: number, unlocked: readonly IslandDef[])
   return false
 }
 
+/**
+ * Hold a carried or sliding body on the island it is nearest to. Returns true
+ * if it had to move.
+ *
+ * The plaza-only version of this pulled everything toward the origin, which
+ * would drag a Mii standing on the observatory back across the sky the moment
+ * somebody picked them up.
+ */
+export function clampToNearestIsland(
+  pos: { x: number; z: number },
+  unlocked: readonly IslandDef[],
+  margin = 0.45,
+): boolean {
+  let nearest: IslandDef | null = null
+  let bestD = Infinity
+  for (const island of unlocked) {
+    const d = (pos.x - island.center.x) ** 2 + (pos.z - island.center.z) ** 2
+    if (d < bestD) { bestD = d; nearest = island }
+  }
+  if (!nearest) return false
+  const lx = pos.x - nearest.center.x
+  const lz = pos.z - nearest.center.z
+  const r = Math.hypot(lx, lz)
+  if (r === 0) return false
+  const maxR = edgeRadius(Math.atan2(lz, lx), nearest.edge) * nearest.scale - margin
+  if (r <= maxR) return false
+  const scale = maxR / r
+  pos.x = nearest.center.x + lx * scale
+  pos.z = nearest.center.z + lz * scale
+  return true
+}
+
+// A walker's shoulders, so the rails stop the body rather than its centreline.
+const WALKER_HALF_WIDTH = 0.34
+/** How close to the rail a walker may get. */
+const RAIL_INSET = BRIDGE_WIDTH / 2 - WALKER_HALF_WIDTH
+
+/**
+ * Resolve a walker's position against the archipelago: slide them along a
+ * bridge's rails if they're on one, and report whether there's ground beneath.
+ *
+ * The rails are the only walls in this world — everywhere else the rim is a
+ * cliff you can walk off, which is the plaza's whole attitude to edges. A deck
+ * two and a half units wide over a drop is the one place that reads as a trap
+ * rather than as a choice.
+ */
+export function resolveArchipelagoGround(
+  pos: { x: number; z: number },
+  unlocked: readonly IslandDef[],
+): boolean {
+  if (islandAt(pos.x, pos.z, unlocked)) return true
+
+  for (const island of unlocked) {
+    const bridge = bridgeFor(island)
+    if (!bridge) continue
+    const midX = (bridge.from.x + bridge.to.x) / 2
+    const midZ = (bridge.from.z + bridge.to.z) / 2
+    const cos = Math.cos(bridge.angle)
+    const sin = Math.sin(bridge.angle)
+    const dx = pos.x - midX
+    const dz = pos.z - midZ
+    const along = dx * cos + dz * sin
+    if (Math.abs(along) > bridge.length / 2) continue
+    const across = -dx * sin + dz * cos
+    if (Math.abs(across) > BRIDGE_WIDTH) continue   // not near this deck at all
+    // On the deck: hold them between the rails.
+    const held = Math.max(-RAIL_INSET, Math.min(RAIL_INSET, across))
+    pos.x = midX + cos * along - sin * held
+    pos.z = midZ + sin * along + cos * held
+    return true
+  }
+  return false
+}
+
 // ─── Camera framing ───────────────────────────────────────────────────────────
 
 // Vertical limits the plaza's orbit camera is clamped to (polar angle from +Y).

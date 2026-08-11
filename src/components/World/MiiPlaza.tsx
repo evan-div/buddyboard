@@ -11,9 +11,9 @@ import PlazaGarden from './PlazaGarden'
 import PlazaArchipelago from './PlazaArchipelago'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
 import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
-import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView } from './plazaIslands'
+import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView, islandAt, clampToNearestIsland, type IslandDef } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import ThirdPersonController from './ThirdPersonController'
 import { makeLocomotion, placeCardBeside, type Locomotion } from './thirdPerson'
@@ -1022,7 +1022,6 @@ const HOLD_HEIGHT = 1.8
 const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
 const GRAVITY     = 38
 const FLING_MIN   = 4.0
-const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
 // Thrown off the island: fall into the clouds, despawn, drop back in from the sky
@@ -1074,9 +1073,10 @@ const SHADOW_RINGS = [
   { r: 0.18, o: 0.24 },
 ]
 
-function BlobShadows({ members, charGroups }: {
+function BlobShadows({ members, charGroups, islands }: {
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
+  islands: readonly IslandDef[]
 }) {
   const shadowMap = useRef<Map<string, THREE.Group>>(new Map())
 
@@ -1086,10 +1086,10 @@ function BlobShadows({ members, charGroups }: {
       const g = charGroups.current.get(member.uid)
       if (!shadow) continue
       if (!g || !g.visible) { shadow.visible = false; continue }
-      // No shadow once the character sails past the island edge
-      const overIsland =
-        Math.hypot(g.position.x, g.position.z) <=
-        plazaEdgeRadius(Math.atan2(g.position.z, g.position.x))
+      // No shadow once the character sails past the island edge — but any
+      // island counts, so a Mii flung toward the garden keeps its shadow all
+      // the way across.
+      const overIsland = islandAt(g.position.x, g.position.z, islands) !== null
       shadow.visible = overIsland
       if (!overIsland) continue
 
@@ -1146,6 +1146,7 @@ interface PhysicsUpdaterProps {
   cameraLocked:   boolean
   cameraFlying:   boolean
   walkMode:       boolean
+  islands:        readonly IslandDef[]
   setCharMode:    (uid: string, mode: DragMode | null) => void
   onHeldMove:     (pos: THREE.Vector3) => void
   onHoldStale:    (uid: string) => void
@@ -1153,8 +1154,8 @@ interface PhysicsUpdaterProps {
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, cameraFlying, walkMode, setCharMode,
-  onHeldMove, onHoldStale,
+  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, cameraFlying, walkMode, islands,
+  setCharMode, onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1190,12 +1191,10 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          const clampedX = THREE.MathUtils.clamp(hitPoint.x, -WALL_BOUND, WALL_BOUND)
-          const clampedZ = THREE.MathUtils.clamp(hitPoint.z, -WALL_BOUND, WALL_BOUND)
-          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, clampedX, 0.14)
+          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, hitPoint.x, 0.14)
           phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
-          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, clampedZ, 0.14)
-          clampToPlazaEdge(phys.pos)
+          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, hitPoint.z, 0.14)
+          clampToNearestIsland(phys.pos, islands)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
@@ -1229,7 +1228,7 @@ function PhysicsUpdater({
           }
           const k = Math.min(1, delta * 9)
           phys.pos.lerp(hold.target, k)
-          clampToPlazaEdge(phys.pos)
+          clampToNearestIsland(phys.pos, islands)
           group.position.copy(phys.pos)
           // Same hauled-weight tilt the dragger sees, from the glide velocity
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  (hold.target.z - phys.pos.z) * 0.35, 0.12)
@@ -1249,10 +1248,9 @@ function PhysicsUpdater({
 
         // A throw that crosses the rounded edge leaves the island: no walls,
         // no ground — the character sails off and tumbles into the clouds,
-        // then despawns for a sky respawn.
-        const overIsland =
-          Math.hypot(phys.pos.x, phys.pos.z) <=
-          plazaEdgeRadius(Math.atan2(phys.pos.z, phys.pos.x))
+        // then despawns for a sky respawn. Land anywhere in the archipelago
+        // and you land *on* it.
+        const overIsland = islandAt(phys.pos.x, phys.pos.z, islands) !== null
 
         if (!overIsland) {
           if (phys.pos.y < FALL_DEPTH) {
@@ -1351,9 +1349,9 @@ function PhysicsUpdater({
         phys.pos.y = capsuleFloorY(group.quaternion)
 
         // Slide position
-        phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
-        phys.pos.z = THREE.MathUtils.clamp(phys.pos.z + phys.vel.z * delta, -WALL_BOUND, WALL_BOUND)
-        clampToPlazaEdge(phys.pos)
+        phys.pos.x += phys.vel.x * delta
+        phys.pos.z += phys.vel.z * delta
+        clampToNearestIsland(phys.pos, islands)
         group.position.copy(phys.pos)
 
         // Hand off once the skid has stopped AND the body has settled
@@ -1761,6 +1759,8 @@ function Scene({
     [pointsGiven],
   )
   const archipelagoReach = useMemo(() => archipelagoRadius(pointsGiven), [pointsGiven])
+  // Everything that can be stood on, thrown onto, or cast a shadow over.
+  const groundIslands = useMemo(() => unlockedIslands(pointsGiven), [pointsGiven])
 
   // While the camera is gliding to an island, OrbitControls must let go — its
   // own update() would otherwise pull the camera straight back to its target.
@@ -2251,7 +2251,7 @@ function Scene({
         onPlantSelect={onPlantSelect}
         onTileSelect={onTileSelect}
       />
-      <BlobShadows members={members} charGroups={charGroups} />
+      <BlobShadows members={members} charGroups={charGroups} islands={groundIslands} />
       {members.map((member) => (
         <MiiCharacter
           key={member.uid}
@@ -2273,6 +2273,7 @@ function Scene({
       ))}
       <ThirdPersonController
         active={walkMode}
+        islands={groundIslands}
         control={walkControl}
         paused={walkPaused}
         reducedMotion={reducedMotion}
@@ -2300,6 +2301,7 @@ function Scene({
         cameraLocked={cameraLocked}
         cameraFlying={flying}
         walkMode={walkMode}
+        islands={groundIslands}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
         onHoldStale={(uid) => {

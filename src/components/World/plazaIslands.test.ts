@@ -19,6 +19,7 @@ import {
   isOnIsland,
   isOnGround,
   islandAt,
+  resolveArchipelagoGround,
 } from './plazaIslands'
 import { FSIZE, edgeRadius, edgeMaxRadius } from './plazaMath'
 
@@ -226,6 +227,45 @@ describe('ground', () => {
         if (!islandAt(offX, offZ, grounds)) {
           expect(isOnGround(offX, offZ, grounds), `${i.id} deck is wider than its rails`).toBe(false)
         }
+      }
+    }
+  })
+
+  it('holds a walker between a bridge\'s rails', () => {
+    for (const i of ISLANDS.slice(1)) {
+      const b = bridgeFor(i)!
+      const nx = -Math.sin(b.angle)
+      const nz = Math.cos(b.angle)
+      // Aim at the middle of the deck, then a stride to the side of it.
+      const midX = (b.from.x + b.to.x) / 2
+      const midZ = (b.from.z + b.to.z) / 2
+      const pos = { x: midX + nx * (BRIDGE_WIDTH * 0.9), z: midZ + nz * (BRIDGE_WIDTH * 0.9) }
+      expect(resolveArchipelagoGround(pos, grounds)).toBe(true)
+      // Pulled back inside the rails, and no further along the span.
+      const across = -(pos.x - midX) * Math.sin(b.angle) + (pos.z - midZ) * Math.cos(b.angle)
+      expect(Math.abs(across)).toBeLessThan(BRIDGE_WIDTH / 2)
+      const along = (pos.x - midX) * Math.cos(b.angle) + (pos.z - midZ) * Math.sin(b.angle)
+      expect(Math.abs(along)).toBeLessThan(0.001)
+    }
+  })
+
+  it('leaves a walker alone on open grass', () => {
+    for (const i of ISLANDS) {
+      const pos = { x: i.center.x, z: i.center.z }
+      expect(resolveArchipelagoGround(pos, grounds)).toBe(true)
+      expect(pos.x).toBe(i.center.x)
+      expect(pos.z).toBe(i.center.z)
+    }
+  })
+
+  it('reports open sky between the islands, clear of the decks', () => {
+    // The islands sit exactly 90° apart, so the gaps are on the bisectors —
+    // 45° off any bearing, well past home's rim and short of a satellite's.
+    for (const deg of [75, 165, 255, 345]) {
+      const a = (deg * Math.PI) / 180
+      for (const r of [22, 26, 30]) {
+        const pos = { x: Math.cos(a) * r, z: Math.sin(a) * r }
+        expect(resolveArchipelagoGround(pos, grounds), `(${deg}°, ${r}) should be open sky`).toBe(false)
       }
     }
   })

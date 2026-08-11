@@ -100,9 +100,10 @@ export const GROUND_PICK_Y = 0.16   // = BLADE_H in MiiPlaza
 // The camera's pitch floor is 0.02 rad, so a tap a few pixels below the horizon
 // casts a ray nearly parallel to the ground and meets it thousands of units out.
 // Cap the reach rather than rejecting the tap: still far enough to walk off the
-// rim on purpose (the island is 26 across), without a mis-tap sending the
+// rim on purpose, and now far enough to name a spot on the next island across a
+// bridge (the ring is 38 out, decks run 10-11), without a mis-tap sending the
 // character to the next county.
-export const TARGET_MAX_RANGE = 26  // = FSIZE in plazaMath
+export const TARGET_MAX_RANGE = 60
 
 export interface ClientRectLike { left: number; top: number; width: number; height: number }
 
