@@ -1,57 +1,70 @@
 'use client'
 
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useRef, useEffect, type ReactNode } from 'react'
 import * as THREE from 'three'
-import { FSIZE } from './plazaMath'
-import { plazaEdgeRadius } from './plazaMath'
+import { FSIZE, edgeRadius } from './plazaMath'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
-import { ISLANDS, HOME_ISLAND, bridgeFor, unlockedIslands, type IslandDef } from './plazaIslands'
+import { ISLANDS, HOME_ISLAND, BRIDGE_WIDTH, bridgeFor, unlockedIslands, type IslandDef } from './plazaIslands'
+import { hashUid } from './plazaWalk'
 
 /**
- * The islands beyond home. Each unlocked milestone raises a smaller chunk of
+ * The islands beyond home. Each collective milestone raises another chunk of
  * land out of the clouds, joined to the plaza by a plank bridge.
  *
- * Satellites deliberately skip the home island's instanced grass blades (~100k
- * per island) and use the checker surface alone — they are seen from a
- * distance, and the blades are by far the most expensive thing in the scene.
- * Geometry is shared: one plaza shape, scaled per island, so every chunk keeps
- * the same rounded silhouette and texture mapping.
+ * Every island is the plaza's size and carries its own seeded outline, so
+ * geometry is built per island rather than shared — the textures still are.
+ * Grass is not drawn here: StylizedGrassSurface lays a field on every island,
+ * and the checker top below is only the low-graphics fallback for when it
+ * isn't running.
  */
 
 const LIGHT_COLOR = '#6dc957'
 const DARK_COLOR = '#57b344'
 const PATCH_GRID = 10
-const N_ROCKS = 34
+const N_ROCKS = 60
 
-// A satellite: checker grass top, extruded dirt column, rocks in the rim.
-function SatelliteIsland({ island, dirtTex, grassTex, shape }: {
+/**
+ * One island's body: the dirt column under the grass and the rocks in its rim.
+ * `children` is where an island's own scenery goes — it renders in the island's
+ * local frame, so a prop placed at (0, 0, 0) sits at the island's centre.
+ */
+export function IslandGround({
+  island, dirtTex, grassTex, dirtDepth = 90, rockCount = N_ROCKS, showGrassTop = false, children,
+}: {
   island: IslandDef
   dirtTex: THREE.Texture
-  grassTex: THREE.Texture
-  shape: THREE.Shape
+  grassTex?: THREE.Texture
+  dirtDepth?: number
+  rockCount?: number
+  /** Draw the flat checker grass — only when the stylized field is off. */
+  showGrassTop?: boolean
+  children?: ReactNode
 }) {
   const rocksRef = useRef<THREE.InstancedMesh>(null)
 
+  const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
-  // Shallower than home's column — these sit further from the camera.
   const dirtGeo = useMemo(
-    () => new THREE.ExtrudeGeometry(shape, { depth: 90, bevelEnabled: false }),
-    [shape],
+    () => new THREE.ExtrudeGeometry(shape, { depth: dirtDepth, bevelEnabled: false }),
+    [shape, dirtDepth],
   )
+  useEffect(() => () => { topGeo.dispose(); dirtGeo.dispose() }, [topGeo, dirtGeo])
 
   useEffect(() => {
     const mesh = rocksRef.current
     if (!mesh) return
     const dummy = new THREE.Object3D()
     const color = new THREE.Color()
-    // Seeded per island so each one's rim is different but stable across loads.
-    let seed = 9973 + island.id.length * 613
+    // Seeded from the id so each rim is different but stable across loads and
+    // clients. (It used to be seeded from the id's *length*, which gave 'hill'
+    // and 'home' — and any two same-length ids — the same rocks.)
+    let seed = hashUid(island.id)
     const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
-    for (let i = 0; i < N_ROCKS; i++) {
+    for (let i = 0; i < rockCount; i++) {
       const th = rng() * Math.PI * 2
-      const y = -(0.3 + Math.pow(rng(), 1.7) * 6.5)
-      const size = 0.18 + rng() * 0.5
-      const rOut = plazaEdgeRadius(th) - size * 0.35
+      const y = -(0.3 + Math.pow(rng(), 1.7) * 9.5)
+      const size = 0.18 + rng() * 0.55
+      const rOut = edgeRadius(th, island.edge) - size * 0.35
       dummy.position.set(Math.cos(th) * rOut, y, Math.sin(th) * rOut)
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI)
       dummy.scale.set(size, size * (0.7 + rng() * 0.5), size)
@@ -63,21 +76,23 @@ function SatelliteIsland({ island, dirtTex, grassTex, shape }: {
     }
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
-  }, [island.id])
+  }, [island.id, island.edge, rockCount])
 
-  // Scaling X/Z only keeps the dirt column vertical and the rocks upright.
   return (
-    <group position={[island.center.x, 0, island.center.z]} scale={[island.scale, 1, island.scale]}>
-      <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-        <meshStandardMaterial map={grassTex} roughness={0.95} side={THREE.DoubleSide} />
-      </mesh>
+    <group position={[island.center.x, 0, island.center.z]}>
+      {showGrassTop && grassTex && (
+        <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+          <meshStandardMaterial map={grassTex} roughness={0.95} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <meshStandardMaterial map={dirtTex} roughness={0.95} />
       </mesh>
-      <instancedMesh ref={rocksRef} args={[undefined, undefined, N_ROCKS]}>
+      <instancedMesh ref={rocksRef} args={[undefined, undefined, rockCount]}>
         <dodecahedronGeometry args={[1, 0]} />
         <meshStandardMaterial roughness={0.9} flatShading />
       </instancedMesh>
+      {children}
     </group>
   )
 }
@@ -92,7 +107,8 @@ function Bridge({ island }: { island: IslandDef }) {
   const midZ = (from.z + to.z) / 2
   const planks = Math.max(3, Math.round(length / 0.75))
   const postCount = Math.max(2, Math.round(length / 3))
-  const width = 2.6
+  // Shared with the ground test, so what you can walk on is what you can see.
+  const width = BRIDGE_WIDTH
 
   return (
     // -angle because three.js Y rotation runs opposite to atan2's Z convention
@@ -128,9 +144,14 @@ function Bridge({ island }: { island: IslandDef }) {
   )
 }
 
-export default function PlazaArchipelago({ pointsGiven }: { pointsGiven: number }) {
-  // Shared across every satellite — one shape, one pair of textures.
-  const shape = useMemo(() => makePlazaShape(), [])
+export default function PlazaArchipelago({
+  pointsGiven, lowerGraphics = false,
+}: {
+  pointsGiven: number
+  /** With the stylized field off, each island draws the flat checker instead. */
+  lowerGraphics?: boolean
+}) {
+  // Shapes are per island now; the textures are still shared.
   const grassTex = useMemo(() => makeCheckerTexture(PATCH_GRID, LIGHT_COLOR, DARK_COLOR), [])
   const dirtTex = useMemo(() => makeDirtTexture(), [])
 
@@ -145,7 +166,12 @@ export default function PlazaArchipelago({ pointsGiven }: { pointsGiven: number 
     <group>
       {satellites.map((island) => (
         <group key={island.id}>
-          <SatelliteIsland island={island} shape={shape} grassTex={grassTex} dirtTex={dirtTex} />
+          <IslandGround
+            island={island}
+            grassTex={grassTex}
+            dirtTex={dirtTex}
+            showGrassTop={lowerGraphics}
+          />
           <Bridge island={island} />
         </group>
       ))}

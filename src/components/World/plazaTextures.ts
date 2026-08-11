@@ -7,16 +7,17 @@
  */
 
 import * as THREE from 'three'
-import { FSIZE, plazaEdgeRadius } from './plazaMath'
+import { FSIZE, HOME_EDGE, edgeRadius, type EdgeShape } from './plazaMath'
 
-// The rounded "squircle" plaza outline, used for the grass top and the
-// extruded dirt column beneath it.
-export function makePlazaShape(): THREE.Shape {
+// The rounded "squircle" island outline, used for the grass top and the
+// extruded dirt column beneath it. Sampling by angle makes the outline
+// star-shaped about the centre by construction, so it can never self-intersect
+// however the harmonics land.
+export function makePlazaShape(edge: EdgeShape = HOME_EDGE, segments = 96): THREE.Shape {
   const pts: THREE.Vector2[] = []
-  const N = 96
-  for (let i = 0; i < N; i++) {
-    const th = (i / N) * Math.PI * 2
-    const r = plazaEdgeRadius(th)
+  for (let i = 0; i < segments; i++) {
+    const th = (i / segments) * Math.PI * 2
+    const r = edgeRadius(th, edge)
     pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
   }
   return new THREE.Shape(pts)

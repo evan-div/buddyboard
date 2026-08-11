@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FSIZE, plazaEdgeRadius } from './plazaMath'
+import { FSIZE, edgeRadius, edgeMaxExtent, edgeMaxRadius, type EdgeShape } from './plazaMath'
+import { makePlazaShape } from './plazaTextures'
+import { hashUid } from './plazaWalk'
+import { grassStep, grassCountFor, screenCoverage } from './plazaGrass'
 
 // Mobile-first interpretation of cortiz2894/stylized-components' GrassField:
 // keep Buddyboard's procedural island, but use tapered instanced blades, shared
@@ -53,16 +56,6 @@ const FIELD_NOISE_GLSL = /* glsl */ `
   }
 `
 
-function makePlazaShape(): THREE.Shape {
-  const points: THREE.Vector2[] = []
-  for (let i = 0; i < 96; i++) {
-    const theta = (i / 96) * Math.PI * 2
-    const radius = plazaEdgeRadius(theta)
-    points.push(new THREE.Vector2(Math.cos(theta) * radius, Math.sin(theta) * radius))
-  }
-  return new THREE.Shape(points)
-}
-
 function makeBladeGeometry(): THREE.BufferGeometry {
   // Two slightly mismatched tapered blades cross at 90 degrees. A cluster reads
   // as grass even when one blade is edge-on, and its six triangles are still a
@@ -102,8 +95,11 @@ function seededRandom(seed: number) {
   }
 }
 
-function makeJitteredPositions(count: number, seed: number): [number, number][] {
-  const span = FSIZE * 1.06
+function makeJitteredPositions(count: number, seed: number, edge: EdgeShape): [number, number][] {
+  // The scatter square has to actually contain the rim. Deriving it from FSIZE
+  // left only 0.38 units of clearance over home's widest point, and a shape
+  // whose wobble peaks on an axis would have been silently clipped flat.
+  const span = edgeMaxExtent(edge) * 2 * 1.06
   let gridSize = Math.ceil(Math.sqrt(count / 0.8))
 
   // A jittered cell per root avoids the clumps and empty streaks produced by
@@ -119,13 +115,16 @@ function makeJitteredPositions(count: number, seed: number): [number, number][] 
         const x = -span / 2 + (column + 0.5 + (random() - 0.5) * 0.88) * cellSize
         const z = -span / 2 + (row + 0.5 + (random() - 0.5) * 0.88) * cellSize
         const theta = Math.atan2(z, x)
-        if (Math.hypot(x, z) <= plazaEdgeRadius(theta) - 0.08) {
+        if (Math.hypot(x, z) <= edgeRadius(theta, edge) - 0.08) {
           positions.push([x, z])
         }
       }
     }
 
     if (positions.length >= count) {
+      // ⚠️ Load-bearing shuffle. The density dial renders only the first N of
+      // these, so the prefix has to be a uniform sample of the whole field —
+      // otherwise thinning an island would peel it from one side.
       for (let i = positions.length - 1; i > 0; i--) {
         const swapIndex = Math.floor(random() * (i + 1))
         const current = positions[i]
@@ -316,7 +315,11 @@ function fieldFbm(x: number, y: number): number {
     + fieldNoise(x * 4.01 - 3.7, y * 4.01 - 3.7) * 0.14
 }
 
-function makeGroundTexture(): THREE.CanvasTexture {
+// Painted in WORLD space, because the blade shader's dirt and meadow masks are
+// world-space too (see FIELD_NOISE_GLSL). An island drawn with a texture
+// sampled around its own origin would have its painted dirt patches somewhere
+// other than its trampled, browned blades.
+function makeGroundTexture(originX = 0, originZ = 0): THREE.CanvasTexture {
   const size = 256
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
@@ -332,10 +335,14 @@ function makeGroundTexture(): THREE.CanvasTexture {
 
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
-      const worldX = (px / (size - 1) - 0.5) * FSIZE
-      const worldZ = (py / (size - 1) - 0.5) * FSIZE
-      const checker = (Math.floor((worldX + FSIZE / 2) / PATCH_W)
-        + Math.floor((worldZ + FSIZE / 2) / PATCH_W)) & 1
+      const localX = (px / (size - 1) - 0.5) * FSIZE
+      const localZ = (py / (size - 1) - 0.5) * FSIZE
+      const worldX = localX + originX
+      const worldZ = localZ + originZ
+      // The checker stays in the island's own frame so every island's squares
+      // line up with its centre; only the noise follows world position.
+      const checker = (Math.floor((localX + FSIZE / 2) / PATCH_W)
+        + Math.floor((localZ + FSIZE / 2) / PATCH_W)) & 1
       grass.copy(dark).lerp(light, checker * 0.25)
 
       const patch = fieldFbm(worldX * 0.105 - 4.2, worldZ * 0.105 - 1.3)
@@ -362,31 +369,40 @@ function makeGroundTexture(): THREE.CanvasTexture {
   return texture
 }
 
-export default function StylizedGrassSurface({
-  mobile,
-  reducedMotion,
-  characterGroups,
+/** One island's ground: where it is, and the outline it was drawn with. */
+export type GrassIsland = { id: string; center: { x: number; z: number }; edge: EdgeShape }
+
+// One island's lawn: a checkered ground disc and a field of blades over it.
+// Geometry and material come from the parent so all five islands share them.
+function IslandLawn({
+  island, capacity, bladeGeometry, bladeMaterial, onField,
 }: {
-  mobile: boolean
-  reducedMotion: boolean
-  characterGroups?: RefObject<Map<string, THREE.Group>>
+  island: GrassIsland
+  capacity: number
+  bladeGeometry: THREE.BufferGeometry
+  bladeMaterial: THREE.ShaderMaterial
+  onField: (field: GrassField | null) => void
 }) {
-  const clusterCount = mobile ? MOBILE_CLUSTERS : DESKTOP_CLUSTERS
   const bladesRef = useRef<THREE.InstancedMesh>(null)
-  const plazaShape = useMemo(() => makePlazaShape(), [])
-  const groundGeometry = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
-  const bladeGeometry = useMemo(() => makeBladeGeometry(), [])
-  const bladeMaterial = useMemo(() => makeBladeMaterial(), [])
-  const groundTexture = useMemo(() => makeGroundTexture(), [])
-  const interactorCandidates = useRef<THREE.Group[]>([])
+  const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
+  const groundGeometry = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
+  const groundTexture = useMemo(
+    () => makeGroundTexture(island.center.x, island.center.z),
+    [island.center.x, island.center.z],
+  )
+
+  useEffect(() => () => {
+    groundGeometry.dispose()
+    groundTexture.dispose()
+  }, [groundGeometry, groundTexture])
 
   useEffect(() => {
     const mesh = bladesRef.current
     if (!mesh) return
 
-    const seed = 0x62756464 + (mobile ? 1 : 0)
+    const seed = hashUid(island.id)
     const random = seededRandom(seed ^ 0x47726173)
-    const positions = makeJitteredPositions(clusterCount, seed)
+    const positions = makeJitteredPositions(capacity, seed, island.edge)
     const dummy = new THREE.Object3D()
     positions.forEach(([x, z], placed) => {
       const height = 0.175 + random() * 0.08
@@ -398,8 +414,83 @@ export default function StylizedGrassSurface({
       mesh.setMatrixAt(placed, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
-    mesh.computeBoundingSphere()
-  }, [clusterCount, mobile])
+
+    // Pin the bounds instead of computing them. computeBoundingSphere() loops
+    // `count`, and the density dial lowers `count` — so a lazily computed
+    // sphere would fit only the surviving blades, and the island you are
+    // standing on would get frustum-culled the moment you looked off-centre.
+    // The true bound is analytic: the rim, plus headroom for wind and lean.
+    mesh.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3(0, 0.13, 0),
+      edgeMaxRadius(island.edge) + 0.5,
+    )
+
+    const field: GrassField = {
+      mesh,
+      capacity,
+      centre: new THREE.Vector3(island.center.x, 0, island.center.z),
+      rim: edgeMaxRadius(island.edge),
+      step: -1,
+    }
+    onField(field)
+    return () => onField(null)
+  }, [island.id, island.edge, island.center.x, island.center.z, capacity, onField])
+
+  return (
+    <group position={[island.center.x, 0, island.center.z]}>
+      <mesh geometry={groundGeometry} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
+        <meshBasicMaterial map={groundTexture} side={THREE.DoubleSide} />
+      </mesh>
+      <instancedMesh ref={bladesRef} args={[bladeGeometry, bladeMaterial, capacity]} />
+    </group>
+  )
+}
+
+type GrassField = {
+  mesh: THREE.InstancedMesh
+  capacity: number
+  centre: THREE.Vector3
+  rim: number
+  step: number
+}
+
+// Camera movement below this (squared, world units) counts as "settled".
+const SETTLE_EPS2 = 0.05 * 0.05
+// Frames of stillness before density is re-evaluated. Re-counting is free, but
+// doing it mid-drag makes blades appear and vanish under the user's hand.
+const SETTLE_FRAMES = 8
+
+export default function StylizedGrassSurface({
+  islands,
+  mobile,
+  reducedMotion,
+  characterGroups,
+}: {
+  islands: readonly GrassIsland[]
+  mobile: boolean
+  reducedMotion: boolean
+  characterGroups?: RefObject<Map<string, THREE.Group>>
+}) {
+  const capacity = mobile ? MOBILE_CLUSTERS : DESKTOP_CLUSTERS
+  const bladeGeometry = useMemo(() => makeBladeGeometry(), [])
+  const bladeMaterial = useMemo(() => makeBladeMaterial(), [])
+  const interactorCandidates = useRef<THREE.Group[]>([])
+
+  // Registered imperatively by each lawn: the density dial writes mesh.count
+  // directly, so React never re-renders for it.
+  const fields = useRef<Map<string, GrassField>>(new Map())
+  const registerField = useCallback((id: string) => (field: GrassField | null) => {
+    if (field) fields.current.set(id, field)
+    else fields.current.delete(id)
+  }, [])
+
+  const lastCameraPos = useRef(new THREE.Vector3(Infinity, Infinity, Infinity))
+  const stillFrames = useRef(0)
+
+  useEffect(() => () => {
+    bladeGeometry.dispose()
+    bladeMaterial.dispose()
+  }, [bladeGeometry, bladeMaterial])
 
   useFrame(({ camera }, delta) => {
     const candidates = interactorCandidates.current
@@ -426,22 +517,35 @@ export default function StylizedGrassSurface({
       bladeMaterial.uniforms.uTime.value =
         (bladeMaterial.uniforms.uTime.value + Math.min(delta, 0.1)) % 3600
     }
+
+    // ── Density ──
+    if (camera.position.distanceToSquared(lastCameraPos.current) > SETTLE_EPS2) {
+      lastCameraPos.current.copy(camera.position)
+      stillFrames.current = 0
+      return
+    }
+    if (stillFrames.current++ !== SETTLE_FRAMES) return
+    const fov = (camera as THREE.PerspectiveCamera).fov ?? 60
+    for (const field of fields.current.values()) {
+      const step = grassStep(screenCoverage(field.rim, camera.position.distanceTo(field.centre), fov))
+      if (step === field.step) continue
+      field.step = step
+      field.mesh.count = grassCountFor(field.capacity, step)
+    }
   })
 
   return (
     <>
-      <mesh
-        geometry={groundGeometry}
-        rotation={[Math.PI / 2, 0, 0]}
-        position={[0, 0.002, 0]}
-      >
-        <meshBasicMaterial map={groundTexture} side={THREE.DoubleSide} />
-      </mesh>
-      <instancedMesh
-        ref={bladesRef}
-        args={[bladeGeometry, bladeMaterial, clusterCount]}
-        frustumCulled={false}
-      />
+      {islands.map((island) => (
+        <IslandLawn
+          key={island.id}
+          island={island}
+          capacity={capacity}
+          bladeGeometry={bladeGeometry}
+          bladeMaterial={bladeMaterial}
+          onField={registerField(island.id)}
+        />
+      ))}
     </>
   )
 }

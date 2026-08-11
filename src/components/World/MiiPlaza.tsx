@@ -6,7 +6,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
-import StylizedGrassSurface from './StylizedGrassSurface'
+import StylizedGrassSurface, { type GrassIsland } from './StylizedGrassSurface'
 import PlazaGarden from './PlazaGarden'
 import PlazaArchipelago from './PlazaArchipelago'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
@@ -98,11 +98,14 @@ function makeBladeMat(
 const N_ROCKS = 90
 
 function GrassFloor({
+  islands,
   mobile,
   lowerGraphics,
   reducedMotion,
   characterGroups,
 }: {
+  /** Every island the group has earned — they all get grass. */
+  islands: GrassIsland[]
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
@@ -220,7 +223,9 @@ function GrassFloor({
           <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
         </>
       ) : (
+        // One field per island, thinned by distance — see plazaGrass.ts.
         <StylizedGrassSurface
+          islands={islands}
           mobile={mobile}
           reducedMotion={reducedMotion}
           characterGroups={characterGroups}
@@ -1464,36 +1469,62 @@ interface SpriteDef {
   width: number
 }
 
-// ~410 sprites in concentric rings — dense inner wrap, full horizon coverage
-const SPRITE_DEFS: SpriteDef[] = (() => {
-  const r    = seededRandom(42)
+type CloudRing = { count: number; r0: number; r1: number; y0: number; y1: number; w0: number; w1: number }
+
+// The mist an island sits in — laid around each island's own centre, which is
+// what makes it read as floating rather than as a hole in a cloud sea.
+const COLLAR_RINGS: CloudRing[] = [
+  { count: 22, r0: 14, r1: 18, y0: -2.0, y1: -3.5, w0: 3, w1: 6 },
+  { count: 26, r0: 17, r1: 24, y0: -2.5, y1: -4.5, w0: 4, w1: 8 },
+]
+
+// The sky the whole archipelago sits in. Radii are fractions of its reach, so
+// the shell always closes outside the land: written as absolute numbers they
+// were tuned around a lone 26-unit island, and the two lowest rings ended up
+// hanging in front of the satellites once the ring of islands grew past them.
+const SKY_RINGS: CloudRing[] = [
+  { count: 26, r0: 1.05, r1: 1.35, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // above the land, near the camera
+  { count: 24, r0: 1.30, r1: 1.70, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },
+  { count: 56, r0: 0.60, r1: 1.10, y0: -3.0, y1: -5.0, w0:  8, w1: 14 },  // the sea below, between islands
+  { count: 52, r0: 1.10, r1: 1.60, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
+  { count: 50, r0: 1.60, r1: 2.20, y0:  0.0, y1: -2.0, w0: 14, w1: 23 },  // horizon level
+  { count: 48, r0: 2.20, r1: 3.00, y0:  1.5, y1: -0.5, w0: 19, w1: 30 },  // far sky
+]
+
+function ringSprites(
+  ring: CloudRing,
+  rng: () => number,
+  centre: { x: number; z: number },
+  radiusScale: number,
+  out: SpriteDef[],
+) {
+  for (let i = 0; i < ring.count; i++) {
+    const angle = (i / ring.count) * Math.PI * 2 + rng() * 0.45 - 0.225
+    const radius = (ring.r0 + rng() * (ring.r1 - ring.r0)) * radiusScale
+    const y = ring.y0 + rng() * (ring.y1 - ring.y0)
+    const width = ring.w0 + rng() * (ring.w1 - ring.w0)
+    out.push({
+      pos: [centre.x + Math.cos(angle) * radius, y, centre.z + Math.sin(angle) * radius],
+      texIdx: Math.floor(rng() * 3),
+      width,
+    })
+  }
+}
+
+/**
+ * Every cloud in the scene: a mist collar around each island, and a shell of
+ * sky rings scaled to hold the whole archipelago. Each sprite is its own draw
+ * call, so the collars are deliberately small — the sea below carries the rest.
+ */
+function makeSpriteDefs(centres: readonly { x: number; z: number }[], reach: number): SpriteDef[] {
+  const rng = seededRandom(42)
   const defs: SpriteDef[] = []
-  const rings = [
-    { count: 26, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // foreground — near camera, above plaza
-    { count: 24, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },  // mid foreground
-    { count: 36, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  3, w1:  6 },  // wraps the spire
-    { count: 52, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  4, w1:  8 },
-    { count: 60, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0:  6, w1: 10 },
-    { count: 56, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0:  8, w1: 14 },  // transition — rising
-    { count: 52, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
-    { count: 50, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 14, w1: 23 }, // horizon level
-    { count: 48, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 19, w1: 30 }, // sky clouds past plaza
-  ]
-  rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
-    for (let i = 0; i < count; i++) {
-      const angle  = (i / count) * Math.PI * 2 + r() * 0.45 - 0.225
-      const radius = r0 + r() * (r1 - r0)
-      const y      = y0 + r() * (y1 - y0)
-      const width  = w0 + r() * (w1 - w0)
-      defs.push({
-        pos: [Math.cos(angle) * radius, y, Math.sin(angle) * radius] as [number, number, number],
-        texIdx: Math.floor(r() * 3),
-        width,
-      })
-    }
-  })
+  for (const centre of centres) {
+    for (const ring of COLLAR_RINGS) ringSprites(ring, rng, centre, 1, defs)
+  }
+  for (const ring of SKY_RINGS) ringSprites(ring, rng, { x: 0, z: 0 }, reach, defs)
   return defs
-})()
+}
 
 // Multiply the alpha channel by a soft elliptical falloff (normalized to the
 // canvas so it matches the 2:1 aspect). The centre 72% keeps its full puff
@@ -1569,10 +1600,15 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
-function Clouds() {
+function Clouds({ centres, reach }: {
+  centres: readonly { x: number; z: number }[]
+  reach: number
+}) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
+
+  const sprites = useMemo(() => makeSpriteDefs(centres, reach), [centres, reach])
 
   const fadeTex = useMemo(() => {
     const size = 1024, c = size / 2
@@ -1598,7 +1634,7 @@ function Clouds() {
         <planeGeometry args={[700, 700]} />
         <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
-      {SPRITE_DEFS.map((def, i) => (
+      {sprites.map((def, i) => (
         <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
     </>
@@ -1711,6 +1747,20 @@ function Scene({
   // Pull the camera back far enough to hold every unlocked island in one view,
   // with headroom so the whole archipelago is visible at max zoom-out.
   const camReach = useMemo(() => Math.max(40, archipelagoRadius(pointsGiven) * 2.1), [pointsGiven])
+
+  // Every island the group has earned gets grass; the field is thinned by
+  // distance so five of them cost about what one used to.
+  const grassIslands = useMemo<GrassIsland[]>(
+    () => unlockedIslands(pointsGiven).map((i) => ({ id: i.id, center: i.center, edge: i.edge })),
+    [pointsGiven],
+  )
+  // The cloud shell has to hold whatever land exists, and each island needs its
+  // own mist to float in.
+  const islandCentres = useMemo(
+    () => unlockedIslands(pointsGiven).map((i) => i.center),
+    [pointsGiven],
+  )
+  const archipelagoReach = useMemo(() => archipelagoRadius(pointsGiven), [pointsGiven])
 
   // While the camera is gliding to an island, OrbitControls must let go — its
   // own update() would otherwise pull the camera straight back to its target.
@@ -2179,15 +2229,16 @@ function Scene({
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        <Clouds />
+        <Clouds centres={islandCentres} reach={archipelagoReach} />
       </Suspense>
       <GrassFloor
+        islands={grassIslands}
         mobile={mobile}
         lowerGraphics={lowerGraphics}
         reducedMotion={reducedMotion}
         characterGroups={charGroups}
       />
-      <PlazaArchipelago pointsGiven={pointsGiven} />
+      <PlazaArchipelago pointsGiven={pointsGiven} lowerGraphics={lowerGraphics} />
       <PlazaGarden
         objects={gardenObjects}
         frames={islandFrames}
@@ -2950,7 +3001,9 @@ export default function MiiPlaza({
   const effectivePoints = preview.on && preview.points !== null ? preview.points : plazaPointsGiven
   // Placement frames for every island the group has earned
   const islandFrames = useMemo<IslandFrame[]>(
-    () => unlockedIslands(effectivePoints).map((i) => ({ id: i.id, center: i.center, scale: i.scale })),
+    () => unlockedIslands(effectivePoints).map((i) => ({
+      id: i.id, center: i.center, scale: i.scale, edge: i.edge,
+    })),
     [effectivePoints],
   )
   // Plants placed while previewing live only on this device — they are never
