@@ -1,23 +1,46 @@
 # Deploying BuddyBoard
 
-BuddyBoard's app code deploys however you host Next.js, but two things live in
-Firebase and are **not** deployed by app hosting or CI — they must be pushed to
-Firebase manually whenever they change:
+BuddyBoard's app code deploys however you host Next.js. Two more things live in
+Firebase rather than in the app bundle, so a merge alone doesn't change what's
+enforced in production:
 
 - **Firestore security rules** — `firestore.rules`
 - **Firestore indexes** — `firestore.indexes.json`
 
 If you add a new collection, change a `match` block, or add a query that needs a
-composite index, you have to deploy these or the app will hit `permission-denied`
-(rules) or `failed-precondition` (missing index) at runtime.
+composite index, these have to reach Firebase or the app will hit
+`permission-denied` (rules) or `failed-precondition` (missing index) at runtime.
 
-> ⚠️ The rules changed again with the archipelago (members may now bump
-> `plazaPointsGiven` on the group doc). **Redeploy `firestore.rules`** or giving
-> points will fail with `permission-denied` and islands will never unlock.
+## These now deploy themselves on merge
+
+`.github/workflows/deploy-firestore-rules.yml` deploys both files whenever a
+push to `main` changes either one. **In the normal case you don't have to do
+anything** — merge the PR and the rules follow.
+
+It needs one credential, set once, under **Settings → Secrets and variables →
+Actions**:
+
+| Secret | What it is |
+| --- | --- |
+| `FIREBASE_SERVICE_ACCOUNT` | *Preferred.* Service-account JSON holding only the **Firebase Rules Admin** role, so a leak can't reach your data. |
+| `FIREBASE_TOKEN` | Fallback. Output of `firebase login:ci`. Simpler, but carries your whole Google account's Firebase access. |
+
+Set either one; the workflow prefers the service account. Without a credential
+the run fails loudly with a pointer back here rather than passing silently. The
+project ID defaults to `buddyboardprototype` — override it with a
+`FIREBASE_PROJECT_ID` repository *variable* if that ever changes.
+
+You still need the manual path below when: the credential isn't configured yet,
+you want rules live **before** the code that needs them (safe, since rule
+additions don't affect the running app), or you're pushing rules from a branch
+that hasn't merged. The workflow can also be re-run by hand from the **Actions**
+tab via **Run workflow**, with no commit needed.
 
 > Heads up: deploying rules **replaces the entire live ruleset** with the file's
 > contents. That's fine — `firestore.rules` is the source of truth and holds all
-> rules, not a diff — just know it's a full replace, not a merge.
+> rules, not a diff — just know it's a full replace, not a merge. Indexes are
+> additive: deleting one needs an interactive confirmation CI can't give, so a
+> workflow run only ever creates missing indexes.
 
 ---
 

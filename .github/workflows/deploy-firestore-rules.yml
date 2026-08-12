@@ -1,0 +1,84 @@
+name: Deploy Firestore rules
+
+# Firestore rules and indexes live in this repo but are enforced by Firebase, so
+# a merge alone doesn't change what's live. Until this workflow existed, every
+# rules change needed someone to remember `firebase deploy` by hand — and a
+# forgotten deploy means `permission-denied` in production with green CI.
+#
+# Runs only when one of the two files actually changes, so ordinary merges to
+# main don't touch Firebase.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firestore.rules
+      - firestore.indexes.json
+      - .github/workflows/deploy-firestore-rules.yml
+  # Lets you re-run a deploy from the Actions tab without pushing a commit,
+  # e.g. after adding the credential secret for the first time.
+  workflow_dispatch:
+
+# Two deploys racing would leave whichever finished last in charge. Queue them.
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Two credential shapes are accepted, preferring the scoped one:
+      #   FIREBASE_SERVICE_ACCOUNT — service-account JSON, ideally holding only
+      #     the Firebase Rules Admin role, so a leak can't touch anything else.
+      #   FIREBASE_TOKEN — `firebase login:ci` token. Works, but carries the
+      #     whole Google account's Firebase access.
+      - name: Resolve credentials
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -n "$SERVICE_ACCOUNT" ]; then
+            printf '%s' "$SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+            echo "Authenticating with FIREBASE_SERVICE_ACCOUNT."
+          elif [ -n "$FIREBASE_TOKEN" ]; then
+            echo "Authenticating with FIREBASE_TOKEN."
+          else
+            echo "::error::No Firebase credential found. Add FIREBASE_SERVICE_ACCOUNT (preferred) or FIREBASE_TOKEN under Settings > Secrets and variables > Actions. See DEPLOY.md."
+            exit 1
+          fi
+
+      # Validate first. The real deploy compiles the rules too, but a dry run
+      # fails before anything has been released, and it catches a bad credential
+      # or wrong project ID without a half-finished deploy to reason about.
+      - name: Validate (dry run)
+        run: |
+          npx --yes firebase-tools@15 deploy \
+            --only firestore:rules,firestore:indexes \
+            --project "$PROJECT_ID" \
+            --non-interactive \
+            --dry-run
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'buddyboardprototype' }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      # A deploy replaces the live ruleset wholesale with this file — it is the
+      # source of truth, not a diff. Indexes are additive here: removing one
+      # needs interactive confirmation the CLI can't get in CI, so a run only
+      # ever creates missing indexes.
+      - name: Deploy rules and indexes
+        run: |
+          npx --yes firebase-tools@15 deploy \
+            --only firestore:rules,firestore:indexes \
+            --project "$PROJECT_ID" \
+            --non-interactive
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'buddyboardprototype' }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
