@@ -11,7 +11,18 @@ import {
   CAP_HALF_APPROX,
   RADIUS_APPROX,
   AXIS_X,
+  TILE_MARGIN,
+  tileToWorld,
+  tileKey,
+  tileIslandId,
+  isTileInside,
+  tilesInsidePlaza,
+  tilesOnIsland,
+  nearestFreeTile,
+  edgeMaxRadius,
+  TILE,
 } from './plazaMath'
+import { ISLANDS } from './plazaIslands'
 
 const TAU = Math.PI * 2
 
@@ -98,6 +109,102 @@ describe('capsuleFloorY', () => {
     const inverted = new THREE.Quaternion().setFromAxisAngle(AXIS_X, Math.PI)
     const upright  = new THREE.Quaternion()
     expect(capsuleFloorY(inverted)).toBeGreaterThan(capsuleFloorY(upright))
+  })
+})
+
+describe('placement grid', () => {
+  it('every tile reported inside sits within the plaza edge minus the margin', () => {
+    for (const t of tilesInsidePlaza()) {
+      const { x, z } = tileToWorld(t)
+      const r = Math.hypot(x, z)
+      const maxR = plazaEdgeRadius(Math.atan2(z, x)) - TILE_MARGIN
+      // center tile (r === 0) is always allowed
+      if (r > 0) expect(r).toBeLessThanOrEqual(maxR + 1e-9)
+      expect(isTileInside(t)).toBe(true)
+    }
+  })
+
+  it('produces a non-trivial number of plantable tiles', () => {
+    // Pinned rather than bounded: the count has exactly one tile of slack over
+    // the old "> 20", so an accidental change to the home outline should fail
+    // here loudly instead of quietly costing somebody a planting spot.
+    expect(tilesInsidePlaza().length).toBe(21)
+  })
+
+  it('rejects tiles well outside the island', () => {
+    expect(isTileInside({ q: 100, r: 100 })).toBe(false)
+  })
+
+  it('nearestFreeTile returns the closest unoccupied tile', () => {
+    const taken = new Set<string>()
+    const near = nearestFreeTile({ x: 0, z: 0 }, taken)
+    expect(near).not.toBeNull()
+    // With nothing taken, the closest tile to the origin is the origin tile
+    expect(tileKey(near!)).toBe('home:0,0')
+  })
+
+  it('nearestFreeTile skips occupied tiles', () => {
+    const taken = new Set<string>(['home:0,0'])
+    const near = nearestFreeTile({ x: 0, z: 0 }, taken)
+    expect(near).not.toBeNull()
+    expect(tileKey(near!)).not.toBe('home:0,0')
+  })
+
+  it('scopes tile keys by island so the same (q,r) never collides', () => {
+    expect(tileKey({ q: 1, r: 2 })).toBe('home:1,2')
+    expect(tileKey({ q: 1, r: 2, island: 'garden' })).toBe('garden:1,2')
+    expect(tileKey({ q: 1, r: 2 })).not.toBe(tileKey({ q: 1, r: 2, island: 'garden' }))
+  })
+
+  it('treats a tile with no island as belonging to home (back-compat)', () => {
+    expect(tileIslandId({ q: 0, r: 0 })).toBe('home')
+    expect(tileIslandId({ q: 0, r: 0, island: 'orchard' })).toBe('orchard')
+  })
+
+  it('nearestFreeTile returns null when every tile is taken', () => {
+    const taken = new Set<string>(tilesInsidePlaza().map(tileKey))
+    expect(nearestFreeTile({ x: 0, z: 0 }, taken)).toBeNull()
+  })
+
+  it('gives every island its own full-size set of usable tiles', () => {
+    // Satellites are the plaza's equals now, so each one carries a comparable
+    // number of planting spots — measured against its own rim, which reaches
+    // past FSIZE/2 on the diagonals.
+    const home = tilesInsidePlaza().length
+    for (const island of ISLANDS.slice(1)) {
+      const frame = { id: island.id, center: island.center, scale: island.scale, edge: island.edge }
+      const tiles = tilesOnIsland(frame)
+      expect(tiles.length).toBeGreaterThan(home * 0.75)
+      expect(tiles.length).toBeLessThan(home * 1.25)
+      for (const t of tiles) {
+        expect(t.island).toBe(island.id)
+        const { x, z } = tileToWorld(t, frame)
+        expect(Math.hypot(x - frame.center.x, z - frame.center.z))
+          .toBeLessThan(edgeMaxRadius(island.edge))
+      }
+    }
+  })
+
+  it('scans far enough out to find every tile', () => {
+    // The scan span is derived from the island's true reach. If it ever went
+    // back to FSIZE/2, the corner tiles would be silently clipped — which shows
+    // up as an accepted tile sitting on the very edge of the scanned square.
+    for (const island of ISLANDS) {
+      const frame = { id: island.id, center: island.center, scale: island.scale, edge: island.edge }
+      const span = Math.ceil((edgeMaxRadius(island.edge) * island.scale) / TILE)
+      for (const t of tilesOnIsland(frame)) {
+        expect(Math.max(Math.abs(t.q), Math.abs(t.r))).toBeLessThan(span)
+      }
+    }
+  })
+
+  it('keeps two islands with the same id but different shapes apart', () => {
+    // Direct regression for the tile cache: it used to key on the island id
+    // alone, so a second frame sharing that id got the first one's tiles.
+    const base = { id: 'twin', center: { x: 0, z: 0 }, scale: 1 }
+    const round = tilesOnIsland({ ...base, edge: { exp: 4.8, a1: 0.02, k1: 3, p1: 0, a2: 0.01, k2: 7, p2: 0 } })
+    const lumpy = tilesOnIsland({ ...base, edge: { exp: 3.6, a1: 0.04, k1: 6, p1: 2, a2: 0.02, k2: 11, p2: 1 } })
+    expect(round).not.toBe(lumpy)
   })
 })
 

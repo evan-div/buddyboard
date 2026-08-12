@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react'
 import Avatar3D from '@/components/Avatar/Avatar3D'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
-import { getGroupStats, type GroupStats } from '@/lib/firestore'
+import { getGroupStats, subscribeToCheckins, type GroupStats } from '@/lib/firestore'
 import { subscribeToCases } from '@/lib/appeals'
-import type { Group, GroupMember } from '@/lib/types'
+import { ISLANDS, unlockedIslands, progressToNext } from '@/components/World/plazaIslands'
+import { dayKey } from '@/lib/utils'
+import type { Checkin, Group, GroupMember } from '@/lib/types'
 
 function StatTile({ emoji, value, label }: { emoji: string; value: string; label: string }) {
   return (
@@ -41,6 +43,7 @@ export default function InfoTab({
 }) {
   const [stats, setStats] = useState<GroupStats | null>(null)
   const [caseCount, setCaseCount] = useState<number | null>(null)
+  const [checkedIn, setCheckedIn] = useState<Checkin[]>([])
   const [copied, setCopied] = useState(false)
   // Sampled once on mount — "days active" doesn't need to tick live
   const [nowTs] = useState(() => Date.now())
@@ -56,8 +59,15 @@ export default function InfoTab({
     return unsub
   }, [group.id])
 
+  const today = dayKey(group.timezone)
+  useEffect(() => subscribeToCheckins(group.id, today, setCheckedIn), [group.id, today])
+
   const mayor = members.find((m) => m.uid === group.createdBy)
   const daysActive = Math.max(1, Math.floor((nowTs - group.createdAt.getTime()) / 86_400_000))
+
+  const pointsGiven = group.plazaPointsGiven ?? 0
+  const earned = unlockedIslands(pointsGiven)
+  const { next, fraction, remaining } = progressToNext(pointsGiven)
   const founded = group.createdAt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 
   async function shareInvite() {
@@ -129,6 +139,75 @@ export default function InfoTab({
         <StatTile emoji="🔄" value={stats ? stats.totalTransactions.toLocaleString() : '…'} label="Transactions" />
         <StatTile emoji="⚖️" value={caseCount === null ? '…' : String(caseCount)} label="Court cases filed" />
         <StatTile emoji="📅" value={String(daysActive)} label="Days active" />
+      </div>
+
+      {/* The plaza — the same numbers the in-world cards show, kept somewhere
+          permanent now that those cards slide away on their own. */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 18, padding: 'var(--card-pad)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 16 }}>🏝️</span>
+          <span style={{ fontSize: 14, fontWeight: 800, color: '#f3f4f6' }}>The Plaza</span>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+            {earned.length} of {ISLANDS.length} islands
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {ISLANDS.map((isl) => {
+            const has = pointsGiven >= isl.unlockAtPoints
+            return (
+              <span
+                key={isl.id}
+                title={has
+                  ? `${isl.label} — ${isl.blurb}`
+                  : `${isl.label} — earned at ${isl.unlockAtPoints.toLocaleString()} points given`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 9px', borderRadius: 9, fontSize: 12, fontWeight: 700,
+                  border: '1px solid var(--border)',
+                  background: has ? 'var(--accent-soft)' : 'transparent',
+                  color: has ? '#f3f4f6' : 'rgba(255,255,255,0.32)',
+                }}
+              >
+                <span style={{ fontSize: 13, filter: has ? undefined : 'grayscale(1)' }}>{isl.emoji}</span>
+                {isl.label.replace(/^The /, '')}
+              </span>
+            )
+          })}
+        </div>
+
+        {next ? (
+          <>
+            <div style={{ height: 6, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.08)' }}>
+              <div style={{
+                width: `${Math.round(fraction * 100)}%`, height: '100%', borderRadius: 999,
+                background: 'linear-gradient(90deg,#43b05f,#7fd694)',
+              }} />
+            </div>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', margin: '8px 0 0', lineHeight: 1.5 }}>
+              <strong style={{ color: '#e6ecf1' }}>{next.emoji} {next.label}</strong> rises in{' '}
+              {remaining.toLocaleString()} more points given. Land is earned by the whole
+              group&apos;s generosity — only points <em>given</em> count.
+            </p>
+          </>
+        ) : (
+          <p style={{ fontSize: 12, color: '#8fd19e', margin: 0 }}>
+            Every island earned 🎉
+          </p>
+        )}
+
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+          <InfoRow emoji="🌱" label="Checked in">
+            <span>{checkedIn.length}</span>
+            <span style={{ color: 'rgba(255,255,255,0.35)', fontWeight: 400 }}>of {members.length} today</span>
+          </InfoRow>
+          <InfoRow emoji="✨" label="Group days">
+            <span>{group.plazaActiveDays ?? 0}</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>
+              active days — what grows the plants
+            </span>
+          </InfoRow>
+        </div>
       </div>
 
       {/* Group rules */}

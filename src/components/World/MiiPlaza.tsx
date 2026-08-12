@@ -6,16 +6,24 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import MiiCharacter, { WAKE_ROLL, WAKE_HOLD, WAKE_RISE, type DragMode } from './MiiCharacter'
-import StylizedGrassSurface from './StylizedGrassSurface'
+import StylizedGrassSurface, { type GrassIsland } from './StylizedGrassSurface'
+import PlazaGarden from './PlazaGarden'
+import PlazaArchipelago from './PlazaArchipelago'
+import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
-import { FSIZE, plazaEdgeRadius, clampToPlazaEdge, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y } from './plazaMath'
+import { FSIZE, plazaEdgeRadius, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
+import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
+import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView, islandAt, clampToNearestIsland, type IslandDef } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
+import { reservedTiles } from './plazaScenery'
 import ThirdPersonController from './ThirdPersonController'
 import { makeLocomotion, placeCardBeside, type Locomotion } from './thirdPerson'
-import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds } from '@/lib/firestore'
+import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
+import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
+import { dayKey, timeAgo } from '@/lib/utils'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec, PlazaObject, Checkin } from '@/lib/types'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -65,17 +73,6 @@ const DARK_COLOR  = '#246b24'
 // ─── Plaza outline ────────────────────────────────────────────────────────────
 // Edge math lives in plazaMath.ts (unit-tested); this file renders it.
 
-function makePlazaShape(): THREE.Shape {
-  const pts: THREE.Vector2[] = []
-  const N = 96
-  for (let i = 0; i < N; i++) {
-    const th = (i / N) * Math.PI * 2
-    const r = plazaEdgeRadius(th)
-    pts.push(new THREE.Vector2(Math.cos(th) * r, Math.sin(th) * r))
-  }
-  return new THREE.Shape(pts)
-}
-
 // Registers each compiled shader's uTime uniform into the passed ref so the
 // render loop can advance the sway animation without touching the material.
 function makeBladeMat(
@@ -102,11 +99,14 @@ function makeBladeMat(
 const N_ROCKS = 90
 
 function GrassFloor({
+  islands,
   mobile,
   lowerGraphics,
   reducedMotion,
   characterGroups,
 }: {
+  /** Every island the group has earned — they all get grass. */
+  islands: GrassIsland[]
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
@@ -117,25 +117,7 @@ function GrassFloor({
   const rocksRef = useRef<THREE.InstancedMesh>(null)
   const timeUniforms = useRef<{ value: number }[]>([])
 
-  // Canvas-drawn checkerboard — solid full coverage, no gaps between blades.
-  // Mapped onto the rounded plaza shape via repeat/offset (shape UVs are the
-  // raw XY coordinates).
-  const baseTex = useMemo(() => {
-    const PX = 512, TILES = PATCH_GRID, TW = PX / TILES
-    const cv  = document.createElement('canvas')
-    cv.width  = PX; cv.height = PX
-    const ctx = cv.getContext('2d')!
-    for (let y = 0; y < TILES; y++)
-      for (let x = 0; x < TILES; x++) {
-        ctx.fillStyle = (x + y) % 2 === 0 ? LIGHT_COLOR : DARK_COLOR
-        ctx.fillRect(x * TW, y * TW, TW, TW)
-      }
-    const tex = new THREE.CanvasTexture(cv)
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(1 / FSIZE, 1 / FSIZE)
-    tex.offset.set(0.5, 0.5)
-    return tex
-  }, [])
+  const baseTex = useMemo(() => makeCheckerTexture(PATCH_GRID, LIGHT_COLOR, DARK_COLOR), [])
 
   const plazaShape = useMemo(() => makePlazaShape(), [])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(plazaShape), [plazaShape])
@@ -144,49 +126,7 @@ function GrassFloor({
     [plazaShape],
   )
 
-  // Noisy dirt texture: soft earth-tone patches, faint strata, and grit so the
-  // column reads as soil instead of a flat brown wall
-  const dirtTex = useMemo(() => {
-    const S = 256
-    const cv = document.createElement('canvas')
-    cv.width = cv.height = S
-    const ctx = cv.getContext('2d')!
-    let seed = 7
-    const rng = () => { seed = (Math.imul(1664525, seed) + 1013904223) | 0; return (seed >>> 0) / 4294967296 }
-
-    ctx.fillStyle = '#6B4226'
-    ctx.fillRect(0, 0, S, S)
-
-    const patchShades = ['#5d3a20', '#7a4d2b', '#63401f', '#54331b', '#7d5533']
-    for (let i = 0; i < 46; i++) {
-      ctx.fillStyle = patchShades[Math.floor(rng() * patchShades.length)]
-      ctx.globalAlpha = 0.15 + rng() * 0.15
-      ctx.beginPath()
-      ctx.ellipse(rng() * S, rng() * S, 16 + rng() * 44, 10 + rng() * 30, rng() * Math.PI, 0, Math.PI * 2)
-      ctx.fill()
-    }
-
-    ctx.globalAlpha = 0.09
-    for (let i = 0; i < 7; i++) {
-      ctx.fillStyle = i % 2 ? '#4a2c16' : '#835832'
-      ctx.fillRect(0, rng() * S, S, 3 + rng() * 9)
-    }
-
-    const gritShades = ['#8a7a68', '#9c8c78', '#55402c', '#3f2a18', '#a3937f']
-    for (let i = 0; i < 400; i++) {
-      ctx.fillStyle = gritShades[Math.floor(rng() * gritShades.length)]
-      ctx.globalAlpha = 0.3 + rng() * 0.45
-      ctx.beginPath()
-      ctx.arc(rng() * S, rng() * S, 0.6 + rng() * 2.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.globalAlpha = 1
-
-    const tex = new THREE.CanvasTexture(cv)
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(0.22, 0.22)
-    return tex
-  }, [])
+  const dirtTex = useMemo(() => makeDirtTexture(), [])
 
   const bladeGeo = useMemo(() => {
     const geo   = new THREE.BufferGeometry()
@@ -284,7 +224,9 @@ function GrassFloor({
           <instancedMesh ref={darkRef}  args={[bladeGeo, darkMat,  BLADES_EACH]} frustumCulled={false} />
         </>
       ) : (
+        // One field per island, thinned by distance — see plazaGrass.ts.
         <StylizedGrassSurface
+          islands={islands}
           mobile={mobile}
           reducedMotion={reducedMotion}
           characterGroups={characterGroups}
@@ -313,17 +255,30 @@ const ZOOM_LOOKAT_Y    =  1.0   // look-at point (torso level)
 const DEFAULT_CAM_POS  = new THREE.Vector3(8, 6, 8)
 const DEFAULT_CAM_LOOK = new THREE.Vector3(0, 0.6, 0)
 
+// A request to fly the camera out to one island. The nonce distinguishes two
+// taps on the same island, so asking again re-centres the view.
+export type IslandVisit = { id: string; nonce: number }
+
+// Exponential approach rate for an island hop, in units of "e-folds per second"
+// — 4 lands a 40-unit crossing in a little over a second.
+const FLY_RATE = 4
+
 function CameraController({
   focusPos,
+  visit,
   orbitRef,
   onUnlock,
+  onFlying,
   mobile,
   disabled = false,
   returnNonce = 0,
 }: {
   focusPos: [number, number, number] | null
+  /** Island to fly to and park on, or null for the plaza's own camera. */
+  visit: IslandVisit | null
   orbitRef: React.RefObject<OrbitControlsImpl | null>
   onUnlock: () => void
+  onFlying: (flying: boolean) => void
   mobile: boolean
   /** Third-person mode owns the camera — stay entirely out of the way. */
   disabled?: boolean
@@ -336,6 +291,19 @@ function CameraController({
   const lookAt     = useRef(DEFAULT_CAM_LOOK.clone())
   const wasLocked  = useRef(false)
   const unlockSent = useRef(false)
+  // Island we are currently gliding toward; null once we have arrived.
+  const flyingTo   = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!visit) return
+    flyingTo.current = visit.id
+    // Cancel any pending glide back to the default view, so closing a member
+    // card just before a visit doesn't drag the camera home behind our back.
+    wasLocked.current  = false
+    unlockSent.current = true
+    onFlying(true)
+    onUnlock()
+  }, [visit, onFlying, onUnlock])
 
   useEffect(() => {
     if (returnNonce === 0) return
@@ -343,8 +311,16 @@ function CameraController({
     unlockSent.current = false
   }, [returnNonce])
 
-  useFrame(() => {
-    if (disabled) return
+  useFrame((_, rawDelta) => {
+    if (disabled) {
+      // Walk mode owns the camera. Abandon any island glide still in flight —
+      // the walker's own camera takes over from wherever we are.
+      if (flyingTo.current) {
+        flyingTo.current = null
+        onFlying(false)
+      }
+      return
+    }
     if (focusPos) {
       wasLocked.current  = true
       unlockSent.current = false
@@ -357,6 +333,32 @@ function CameraController({
       camera.position.lerp(goal, 0.07)
       lookAt.current.lerp(lookGoal, 0.07)
       camera.lookAt(lookAt.current)
+    } else if (flyingTo.current) {
+      // Glide out to the island and hand the camera back to OrbitControls
+      // re-targeted on it, so you can orbit and zoom around that island the
+      // same way you can around home.
+      const view     = islandView(getIsland(flyingTo.current))
+      const goal     = new THREE.Vector3(view.position.x, view.position.y, view.position.z)
+      const lookGoal = new THREE.Vector3(view.target.x, view.target.y, view.target.z)
+      // Time-based easing, not per-frame: these hops cross the whole archipelago
+      // and a fixed step would crawl on a phone rendering at a few frames a
+      // second. Deliberately unclamped — a long frame should cover more ground,
+      // and a huge one (a backgrounded tab) simply lands the camera.
+      const t = 1 - Math.exp(-FLY_RATE * rawDelta)
+      camera.position.lerp(goal, t)
+      lookAt.current.lerp(lookGoal, t)
+      camera.lookAt(lookAt.current)
+      if (camera.position.distanceTo(goal) < 0.4) {
+        camera.position.copy(goal)
+        lookAt.current.copy(lookGoal)
+        camera.lookAt(lookAt.current)
+        if (orbitRef.current) {
+          orbitRef.current.target.copy(lookGoal)
+          orbitRef.current.update()
+        }
+        flyingTo.current = null
+        onFlying(false)
+      }
     } else if (wasLocked.current) {
       camera.position.lerp(DEFAULT_CAM_POS, 0.06)
       lookAt.current.lerp(DEFAULT_CAM_LOOK, 0.06)
@@ -1021,7 +1023,6 @@ const HOLD_HEIGHT = 1.8
 const HEAD_HEIGHT = 1.5   // head center is 1.5 units above group origin (feet)
 const GRAVITY     = 38
 const FLING_MIN   = 4.0
-const WALL_BOUND  = FSIZE / 2 - 0.5
 const IMPACT_DAZE = 6
 const IMPACT_MAD  = 4
 // Thrown off the island: fall into the clouds, despawn, drop back in from the sky
@@ -1073,9 +1074,10 @@ const SHADOW_RINGS = [
   { r: 0.18, o: 0.24 },
 ]
 
-function BlobShadows({ members, charGroups }: {
+function BlobShadows({ members, charGroups, islands }: {
   members: GroupMember[]
   charGroups: React.RefObject<Map<string, THREE.Group>>
+  islands: readonly IslandDef[]
 }) {
   const shadowMap = useRef<Map<string, THREE.Group>>(new Map())
 
@@ -1085,10 +1087,10 @@ function BlobShadows({ members, charGroups }: {
       const g = charGroups.current.get(member.uid)
       if (!shadow) continue
       if (!g || !g.visible) { shadow.visible = false; continue }
-      // No shadow once the character sails past the island edge
-      const overIsland =
-        Math.hypot(g.position.x, g.position.z) <=
-        plazaEdgeRadius(Math.atan2(g.position.z, g.position.x))
+      // No shadow once the character sails past the island edge — but any
+      // island counts, so a Mii flung toward the garden keeps its shadow all
+      // the way across.
+      const overIsland = islandAt(g.position.x, g.position.z, islands) !== null
       shadow.visible = overIsland
       if (!overIsland) continue
 
@@ -1143,7 +1145,9 @@ interface PhysicsUpdaterProps {
   remoteHolds:    React.RefObject<Map<string, RemoteHold>>
   orbitRef:       React.RefObject<OrbitControlsImpl | null>
   cameraLocked:   boolean
+  cameraFlying:   boolean
   walkMode:       boolean
+  islands:        readonly IslandDef[]
   setCharMode:    (uid: string, mode: DragMode | null) => void
   onHeldMove:     (pos: THREE.Vector3) => void
   onHoldStale:    (uid: string) => void
@@ -1151,8 +1155,8 @@ interface PhysicsUpdaterProps {
 
 function PhysicsUpdater({
   draggingUid, dragCursor, dragCursorVel,
-  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, walkMode, setCharMode,
-  onHeldMove, onHoldStale,
+  charGroups, physicsMap, remoteHolds, orbitRef, cameraLocked, cameraFlying, walkMode, islands,
+  setCharMode, onHeldMove, onHoldStale,
 }: PhysicsUpdaterProps) {
   const { pointer, camera } = useThree()
   const raycaster  = useMemo(() => new THREE.Raycaster(), [])
@@ -1166,9 +1170,11 @@ function PhysicsUpdater({
     // characters across (or off) the island.
     const delta = Math.min(rawDelta, 0.1)
 
-    // Update orbit enabled state
+    // Update orbit enabled state (the camera also takes the controls away from
+    // the user while it glides to another island)
     if (orbitRef.current) {
-      orbitRef.current.enabled = !draggingUid.current && !cameraLocked && !walkMode
+      orbitRef.current.enabled =
+        !draggingUid.current && !cameraLocked && !cameraFlying && !walkMode
     }
 
     // If dragging: raycast pointer to hold plane, compute smoothed velocity, move char
@@ -1186,12 +1192,10 @@ function PhysicsUpdater({
         const phys = physicsMap.current.get(draggingUid.current)
         const group = charGroups.current.get(draggingUid.current)
         if (phys && group) {
-          const clampedX = THREE.MathUtils.clamp(hitPoint.x, -WALL_BOUND, WALL_BOUND)
-          const clampedZ = THREE.MathUtils.clamp(hitPoint.z, -WALL_BOUND, WALL_BOUND)
-          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, clampedX, 0.14)
+          phys.pos.x = THREE.MathUtils.lerp(phys.pos.x, hitPoint.x, 0.14)
           phys.pos.y = THREE.MathUtils.lerp(phys.pos.y, hitPoint.y - HEAD_HEIGHT, 0.14)
-          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, clampedZ, 0.14)
-          clampToPlazaEdge(phys.pos)
+          phys.pos.z = THREE.MathUtils.lerp(phys.pos.z, hitPoint.z, 0.14)
+          clampToNearestIsland(phys.pos, islands)
           group.position.copy(phys.pos)
           // Tilt body to follow drag direction — feels like hauling dead weight
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  dragCursorVel.current.z * 0.022, 0.12)
@@ -1225,7 +1229,7 @@ function PhysicsUpdater({
           }
           const k = Math.min(1, delta * 9)
           phys.pos.lerp(hold.target, k)
-          clampToPlazaEdge(phys.pos)
+          clampToNearestIsland(phys.pos, islands)
           group.position.copy(phys.pos)
           // Same hauled-weight tilt the dragger sees, from the glide velocity
           group.rotation.x = THREE.MathUtils.lerp(group.rotation.x,  (hold.target.z - phys.pos.z) * 0.35, 0.12)
@@ -1245,10 +1249,9 @@ function PhysicsUpdater({
 
         // A throw that crosses the rounded edge leaves the island: no walls,
         // no ground — the character sails off and tumbles into the clouds,
-        // then despawns for a sky respawn.
-        const overIsland =
-          Math.hypot(phys.pos.x, phys.pos.z) <=
-          plazaEdgeRadius(Math.atan2(phys.pos.z, phys.pos.x))
+        // then despawns for a sky respawn. Land anywhere in the archipelago
+        // and you land *on* it.
+        const overIsland = islandAt(phys.pos.x, phys.pos.z, islands) !== null
 
         if (!overIsland) {
           if (phys.pos.y < FALL_DEPTH) {
@@ -1347,9 +1350,9 @@ function PhysicsUpdater({
         phys.pos.y = capsuleFloorY(group.quaternion)
 
         // Slide position
-        phys.pos.x = THREE.MathUtils.clamp(phys.pos.x + phys.vel.x * delta, -WALL_BOUND, WALL_BOUND)
-        phys.pos.z = THREE.MathUtils.clamp(phys.pos.z + phys.vel.z * delta, -WALL_BOUND, WALL_BOUND)
-        clampToPlazaEdge(phys.pos)
+        phys.pos.x += phys.vel.x * delta
+        phys.pos.z += phys.vel.z * delta
+        clampToNearestIsland(phys.pos, islands)
         group.position.copy(phys.pos)
 
         // Hand off once the skid has stopped AND the body has settled
@@ -1465,36 +1468,79 @@ interface SpriteDef {
   width: number
 }
 
-// ~410 sprites in concentric rings — dense inner wrap, full horizon coverage
-const SPRITE_DEFS: SpriteDef[] = (() => {
-  const r    = seededRandom(42)
+type CloudRing = { count: number; r0: number; r1: number; y0: number; y1: number; w0: number; w1: number }
+
+// The mist an island sits in — laid around each island's own centre, which is
+// what makes it read as floating rather than as a hole in a cloud sea.
+const COLLAR_RINGS: CloudRing[] = [
+  { count: 22, r0: 14, r1: 18, y0: -2.0, y1: -3.5, w0: 3, w1: 6 },
+  { count: 26, r0: 17, r1: 24, y0: -2.5, y1: -4.5, w0: 4, w1: 8 },
+]
+
+// The sky the whole archipelago sits in. Radii are fractions of its reach, so
+// the shell always closes outside the land: written as absolute numbers they
+// were tuned around a lone 26-unit island, and the two lowest rings ended up
+// hanging in front of the satellites once the ring of islands grew past them.
+const SKY_RINGS: CloudRing[] = [
+  { count: 26, r0: 1.05, r1: 1.35, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // above the land, near the camera
+  { count: 24, r0: 1.30, r1: 1.70, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },
+  { count: 56, r0: 0.60, r1: 1.10, y0: -3.0, y1: -5.0, w0:  8, w1: 14 },  // the sea below, between islands
+  { count: 52, r0: 1.10, r1: 1.60, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
+  { count: 50, r0: 1.60, r1: 2.20, y0:  0.0, y1: -2.0, w0: 14, w1: 23 },  // horizon level
+  { count: 48, r0: 2.20, r1: 3.00, y0:  1.5, y1: -0.5, w0: 19, w1: 30 },  // far sky
+]
+
+function ringSprites(
+  ring: CloudRing,
+  rng: () => number,
+  centre: { x: number; z: number },
+  radiusScale: number,
+  out: SpriteDef[],
+) {
+  for (let i = 0; i < ring.count; i++) {
+    const angle = (i / ring.count) * Math.PI * 2 + rng() * 0.45 - 0.225
+    const radius = (ring.r0 + rng() * (ring.r1 - ring.r0)) * radiusScale
+    const y = ring.y0 + rng() * (ring.y1 - ring.y0)
+    const width = ring.w0 + rng() * (ring.w1 - ring.w0)
+    out.push({
+      pos: [centre.x + Math.cos(angle) * radius, y, centre.z + Math.sin(angle) * radius],
+      texIdx: Math.floor(rng() * 3),
+      width,
+    })
+  }
+}
+
+// Cloud drawn *over* an island the group hasn't earned, rather than under it.
+// This is what makes a shrouded island read as veiled instead of as a dark
+// shape someone forgot to texture.
+// Enough to hide what's *on* the island, not enough to hide the island. Seven
+// small puffs low over the surface: the shape stays readable as a dark mass, its
+// contents don't.
+const VEIL_RING: CloudRing = { count: 7, r0: 0.2, r1: 0.75, y0: 0.2, y1: 1.3, w0: 4, w1: 7 }
+
+/**
+ * Every cloud in the scene: a mist collar around each island — earned or not,
+ * so the count doesn't change as the group progresses — a veil over the ones
+ * still to come, and a shell of sky rings scaled to hold the whole archipelago.
+ * Each sprite is its own draw call, so the collars are deliberately small; the
+ * sea below carries the rest.
+ */
+function makeSpriteDefs(
+  centres: readonly { x: number; z: number }[],
+  reach: number,
+  veiled: readonly { x: number; z: number }[] = [],
+): SpriteDef[] {
+  const rng = seededRandom(42)
   const defs: SpriteDef[] = []
-  const rings = [
-    { count: 26, r0: 15, r1: 30, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // foreground — near camera, above plaza
-    { count: 24, r0: 28, r1: 45, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },  // mid foreground
-    { count: 36, r0:  9, r1: 13, y0: -2.0, y1: -3.5, w0:  3, w1:  6 },  // wraps the spire
-    { count: 52, r0: 13, r1: 20, y0: -2.5, y1: -4.0, w0:  4, w1:  8 },
-    { count: 60, r0: 20, r1: 32, y0: -3.0, y1: -5.0, w0:  6, w1: 10 },
-    { count: 56, r0: 32, r1: 50, y0: -2.0, y1: -4.0, w0:  8, w1: 14 },  // transition — rising
-    { count: 52, r0: 50, r1: 72, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
-    { count: 50, r0: 72, r1: 100, y0:  0.0, y1: -2.0, w0: 14, w1: 23 }, // horizon level
-    { count: 48, r0: 100, r1: 140, y0:  1.5, y1: -0.5, w0: 19, w1: 30 }, // sky clouds past plaza
-  ]
-  rings.forEach(({ count, r0, r1, y0, y1, w0, w1 }) => {
-    for (let i = 0; i < count; i++) {
-      const angle  = (i / count) * Math.PI * 2 + r() * 0.45 - 0.225
-      const radius = r0 + r() * (r1 - r0)
-      const y      = y0 + r() * (y1 - y0)
-      const width  = w0 + r() * (w1 - w0)
-      defs.push({
-        pos: [Math.cos(angle) * radius, y, Math.sin(angle) * radius] as [number, number, number],
-        texIdx: Math.floor(r() * 3),
-        width,
-      })
-    }
-  })
+  for (const centre of centres) {
+    for (const ring of COLLAR_RINGS) ringSprites(ring, rng, centre, 1, defs)
+  }
+  for (const centre of veiled) {
+    ringSprites(VEIL_RING, rng, centre, 14, defs)
+  }
+  for (const ring of SKY_RINGS) ringSprites(ring, rng, { x: 0, z: 0 }, reach, defs)
   return defs
-})()
+}
 
 // Multiply the alpha channel by a soft elliptical falloff (normalized to the
 // canvas so it matches the 2:1 aspect). The centre 72% keeps its full puff
@@ -1570,10 +1616,17 @@ function CloudSprite({ pos, texture, width }: {
   )
 }
 
-function Clouds() {
+function Clouds({ centres, reach, veiled }: {
+  centres: readonly { x: number; z: number }[]
+  reach: number
+  /** Islands still to be earned — clouds hang over these, not just around them. */
+  veiled: readonly { x: number; z: number }[]
+}) {
   const [tex1, tex2, tex3] = useMemo(() => [
     makeCloudTex(101), makeCloudTex(202), makeCloudTex(303),
   ], [])
+
+  const sprites = useMemo(() => makeSpriteDefs(centres, reach, veiled), [centres, reach, veiled])
 
   const fadeTex = useMemo(() => {
     const size = 1024, c = size / 2
@@ -1599,7 +1652,7 @@ function Clouds() {
         <planeGeometry args={[700, 700]} />
         <meshStandardMaterial map={fadeTex} transparent depthWrite={false} roughness={1} />
       </mesh>
-      {SPRITE_DEFS.map((def, i) => (
+      {sprites.map((def, i) => (
         <CloudSprite key={i} pos={def.pos} texture={texArr[def.texIdx]} width={def.width} />
       ))}
     </>
@@ -1635,9 +1688,21 @@ function Scene({
   mobile,
   lowerGraphics,
   reducedMotion,
+  gardenObjects,
+  islandFrames,
+  visit,
+  groupVitality,
+  pointsGiven,
+  nowMs,
+  dormant,
+  plantMode,
+  takenTiles,
+  onPlantSelect,
+  onTileSelect,
   walkMode,
   walkControl,
   walkerProbe,
+  walkerRef,
   walkPaused,
   walkTargetUid,
   returnNonce,
@@ -1660,9 +1725,22 @@ function Scene({
   mobile: boolean
   lowerGraphics: boolean
   reducedMotion: boolean
+  gardenObjects: PlazaObject[]
+  islandFrames: IslandFrame[]
+  visit: IslandVisit | null
+  groupVitality: number
+  pointsGiven: number
+  nowMs: number
+  dormant: boolean
+  plantMode: boolean
+  takenTiles: Set<string>
+  onPlantSelect: (o: PlazaObject) => void
+  onTileSelect: (t: Tile) => void
   walkMode: boolean
   walkControl: 'keyboard' | 'touch'
   walkerProbe?: React.RefObject<Locomotion | null>
+  /** Filled with the live walker so the plaza can read where they stopped. */
+  walkerRef: React.RefObject<Locomotion | null>
   walkPaused: boolean
   walkTargetUid: string | null
   returnNonce: number
@@ -1679,13 +1757,50 @@ function Scene({
   const walkModeRef  = useRef(walkMode)
   walkModeRef.current = walkMode
 
-  // Test seam. The walker's position lives in a ref that changes 60× a second
-  // and never reaches the DOM, so an end-to-end test has no way to see whether
-  // a tap actually moved anybody. Hand the ref out when asked; only the
-  // development-only /walkharness route asks.
+  // The plaza needs the walker's position when walk mode ends, to frame the
+  // island they finished on. `walkerProbe` is the same ref handed to the
+  // development-only /walkharness route as a test seam — the walker's position
+  // lives in a ref that changes 60× a second and never reaches the DOM, so an
+  // end-to-end test has no other way to see whether a tap moved anybody.
   useEffect(() => {
+    walkerRef.current = locomotion.current
     if (walkerProbe) walkerProbe.current = locomotion.current
-  }, [walkerProbe])
+  }, [walkerProbe, walkerRef])
+
+  // Pull back far enough to hold the whole archipelago — including the islands
+  // still to be earned, which are in the scene as shrouds. Deriving this from
+  // what's *unlocked* capped a new group at 40 units and put its own future out
+  // of view, which is the one thing the shrouds exist to show.
+  const camReach = useMemo(() => Math.max(40, archipelagoRadius(ALL_UNLOCKED_POINTS) * 2.1), [])
+
+  // Every island the group has earned gets grass; the field is thinned by
+  // distance so five of them cost about what one used to.
+  const grassIslands = useMemo<GrassIsland[]>(
+    () => unlockedIslands(pointsGiven).map((i) => ({ id: i.id, center: i.center, edge: i.edge })),
+    [pointsGiven],
+  )
+  // The cloud shell has to hold whatever land exists, and each island needs its
+  // own mist to float in.
+  // Every island gets a collar, earned or not, so the cloud count — and with it
+  // the draw-call cost — is the same however far along the group is.
+  const islandCentres = useMemo(() => ISLANDS.map((i) => i.center), [])
+  const veiledCentres = useMemo(
+    () => ISLANDS.filter((i) => pointsGiven < i.unlockAtPoints).map((i) => i.center),
+    [pointsGiven],
+  )
+  const archipelagoReach = useMemo(() => archipelagoRadius(pointsGiven), [pointsGiven])
+  // Everything that can be stood on, thrown onto, or cast a shadow over.
+  const groundIslands = useMemo(() => unlockedIslands(pointsGiven), [pointsGiven])
+
+  // While the camera is gliding to an island, OrbitControls must let go — its
+  // own update() would otherwise pull the camera straight back to its target.
+  const [flying, setFlying] = useState(false)
+  // Orbiting happens around whichever island is being visited.
+  const orbitTarget = useMemo<[number, number, number]>(() => {
+    if (!visit) return [DEFAULT_CAM_LOOK.x, DEFAULT_CAM_LOOK.y, DEFAULT_CAM_LOOK.z]
+    const { target } = islandView(getIsland(visit.id))
+    return [target.x, target.y, target.z]
+  }, [visit])
 
   const charGroups    = useRef<Map<string, THREE.Group>>(new Map())
   const physicsMap    = useRef<Map<string, PhysState>>(new Map())
@@ -2132,8 +2247,10 @@ function Scene({
       {/* sky is transparent — CSS gradient on the container div shows through */}
       <CameraController
         focusPos={focusPos}
+        visit={visit}
         orbitRef={orbitRef}
         onUnlock={onUnlock}
+        onFlying={setFlying}
         mobile={mobile}
         disabled={walkMode}
         returnNonce={returnNonce}
@@ -2142,15 +2259,29 @@ function Scene({
       <directionalLight position={[6, 12, 6]}  intensity={1.1} />
       <directionalLight position={[-4, 6, -4]} intensity={0.35} />
       <Suspense fallback={null}>
-        <Clouds />
+        <Clouds centres={islandCentres} reach={archipelagoReach} veiled={veiledCentres} />
       </Suspense>
       <GrassFloor
+        islands={grassIslands}
         mobile={mobile}
         lowerGraphics={lowerGraphics}
         reducedMotion={reducedMotion}
         characterGroups={charGroups}
       />
-      <BlobShadows members={members} charGroups={charGroups} />
+      <PlazaArchipelago pointsGiven={pointsGiven} lowerGraphics={lowerGraphics} />
+      <PlazaGarden
+        objects={gardenObjects}
+        frames={islandFrames}
+        groupVitality={groupVitality}
+        nowMs={nowMs}
+        dormant={dormant}
+        plantMode={plantMode}
+        takenTiles={takenTiles}
+        lowerGraphics={lowerGraphics}
+        onPlantSelect={onPlantSelect}
+        onTileSelect={onTileSelect}
+      />
+      <BlobShadows members={members} charGroups={charGroups} islands={groundIslands} />
       {members.map((member) => (
         <MiiCharacter
           key={member.uid}
@@ -2172,6 +2303,7 @@ function Scene({
       ))}
       <ThirdPersonController
         active={walkMode}
+        islands={groundIslands}
         control={walkControl}
         paused={walkPaused}
         reducedMotion={reducedMotion}
@@ -2197,7 +2329,9 @@ function Scene({
         remoteHolds={remoteHolds}
         orbitRef={orbitRef}
         cameraLocked={cameraLocked}
+        cameraFlying={flying}
         walkMode={walkMode}
+        islands={groundIslands}
         setCharMode={setCharMode}
         onHeldMove={onHeldMove}
         onHoldStale={(uid) => {
@@ -2209,14 +2343,14 @@ function Scene({
       />
       <OrbitControls
         ref={orbitRef}
-        enabled={!cameraLocked && !walkMode}
-        target={[0, 0.6, 0]}
+        enabled={!cameraLocked && !flying && !walkMode}
+        target={orbitTarget}
         minDistance={3}
-        maxDistance={40}
+        maxDistance={camReach}
         enableRotate={true}
         enablePan={false}
-        minPolarAngle={Math.PI / 3.3}
-        maxPolarAngle={Math.PI / 2.5}
+        minPolarAngle={POLAR_MIN}
+        maxPolarAngle={POLAR_MAX}
         makeDefault
       />
     </>
@@ -2316,6 +2450,599 @@ function PresenceTab({ members, currentUid }: { members: GroupMember[]; currentU
   )
 }
 
+// ─── Living plaza overlays ─────────────────────────────────────────────────────
+
+
+// ── Growth preview ────────────────────────────────────────────────────────────
+// Watching a plant mature normally takes a week of real check-ins, and the
+// islands beyond home take thousands of points the group hasn't given yet, so
+// preview mode fast-forwards the *rendering* — it writes nothing and never
+// touches Firestore. It can raise any island and fly the camera out to stand on
+// it, which is the only way to see a satellite up close before it is earned.
+// Opt in by adding `?preview=1` to the plaza URL (short enough to type on a
+// phone); everything after that is tap-driven, which matters when testing on
+// mobile where editing query strings is painful.
+export type PlazaPreview = { on: boolean; days: number; vitality: number; points: number | null }
+
+export const PREVIEW_OFF: PlazaPreview = { on: false, days: 0, vitality: 0, points: null }
+
+export function readPlazaPreview(): PlazaPreview {
+  if (typeof window === 'undefined') return PREVIEW_OFF
+  try {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('preview') !== '1') return PREVIEW_OFF
+    const days = Number(p.get('plazaDays'))
+    const vit = Number(p.get('plazaVitality'))
+    const pts = p.get('plazaPoints')
+    const ptsN = Number(pts)
+    return {
+      on: true,
+      days: Number.isFinite(days) && days > 0 ? days : 0,
+      vitality: Number.isFinite(vit) && vit > 0 ? vit : 0,
+      points: pts !== null && Number.isFinite(ptsN) && ptsN >= 0 ? ptsN : null,
+    }
+  } catch {
+    return PREVIEW_OFF
+  }
+}
+
+// Smallest (days, vitality) that reaches each stage, derived from the real
+// thresholds so the presets can't drift out of sync with the growth rules.
+export function presetForStage(stage: number): { days: number; vitality: number } {
+  const i = Math.max(0, Math.min(stage, TIME_DAYS.length - 1))
+  return { days: TIME_DAYS[i], vitality: NOURISH_DAYS[i] }
+}
+
+// "The Garden" → "Garden", so island chips stay narrow on a phone.
+function shortName(island: { label: string }): string {
+  return island.label.replace(/^The /, '')
+}
+
+// ─── Collapsing HUD cards ─────────────────────────────────────────────────────
+// The plaza is the point, and on a phone these cards cover a quarter of it. So
+// they say their piece and then get out of the way, sliding out to a pill you
+// can tap to bring them back. Nothing becomes unreachable — the check-in button
+// and the island list are both one tap from the collapsed state — and the same
+// numbers live permanently in the Info tab for anyone who wants to read rather
+// than glance.
+const HUD_LINGER_MS = 7000
+
+function HudCard({ pill, dot = false, children }: {
+  /** What's left once the card slides away. Keep it to an emoji and a number. */
+  pill: React.ReactNode
+  /** Draw attention to the collapsed pill — something is waiting for you. */
+  dot?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(true)
+  // Whether the user closed it themselves. An auto-collapse should feel like
+  // the card getting out of the way; a reopen should then stay open.
+  const [pinned, setPinned] = useState(false)
+
+  useEffect(() => {
+    if (!open || pinned) return
+    const t = setTimeout(() => setOpen(false), HUD_LINGER_MS)
+    return () => clearTimeout(t)
+  }, [open, pinned])
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setPinned(true); setOpen(true) }}
+        style={{
+          position: 'relative', display: 'flex', alignItems: 'center', gap: 6,
+          background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(255,255,255,0.08)', borderRadius: 999,
+          padding: '7px 12px', cursor: 'pointer', color: '#cdd6df',
+          fontSize: 12, fontWeight: 700,
+        }}
+      >
+        {pill}
+        {dot && (
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute', top: 4, right: 4, width: 7, height: 7,
+              borderRadius: '50%', background: '#f87171',
+            }}
+          />
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <div className="hud-card" style={{ position: 'relative' }}>
+      {children}
+      <button
+        onClick={() => { setPinned(false); setOpen(false) }}
+        aria-label="Dismiss"
+        style={{
+          position: 'absolute', top: -6, right: -6, width: 22, height: 22,
+          borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)',
+          background: 'rgba(12,16,22,0.92)', color: '#cdd6df',
+          fontSize: 12, lineHeight: 1, cursor: 'pointer', padding: 0,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The island list, and the only way to look at another island outside preview
+ * mode. Panning is off (it strands the camera in open sky with no way back), so
+ * without this the camera is nailed to wherever it last settled — you could walk
+ * to the observatory, leave walk mode, and have no way to look at your own
+ * character.
+ */
+function IslandJumper({ pointsGiven, visitIsland, onVisit }: {
+  pointsGiven: number
+  visitIsland: string | null
+  onVisit: (islandId: string) => void
+}) {
+  const earned = unlockedIslands(pointsGiven)
+  const p = progressToNext(pointsGiven)
+  const here = visitIsland ?? HOME_ISLAND.id
+
+  return (
+    <div style={{
+      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#cdd6df' }}>
+        <span style={{ fontSize: 14 }}>🏝️</span>
+        <strong style={{ color: '#fff' }}>{earned.length}</strong>
+        <span>island{earned.length === 1 ? '' : 's'}</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.65, fontSize: 11 }}>
+          {pointsGiven.toLocaleString()} given
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+        {earned.map((isl) => (
+          <button
+            key={isl.id}
+            onClick={() => onVisit(isl.id)}
+            title={`Look at ${isl.label}`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '6px 8px', borderRadius: 9, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: here === isl.id ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.08)',
+              color: here === isl.id ? '#14181f' : '#e6ecf1',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{isl.emoji}</span>
+            {shortName(isl)}
+          </button>
+        ))}
+      </div>
+
+      {p.next ? (
+        <>
+          <div style={{
+            height: 6, borderRadius: 999, marginTop: 10, overflow: 'hidden',
+            background: 'rgba(255,255,255,0.1)',
+          }}>
+            <div style={{
+              width: `${Math.round(p.fraction * 100)}%`, height: '100%',
+              background: 'linear-gradient(90deg,#43b05f,#7fd694)', borderRadius: 999,
+              transition: 'width 400ms ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 11, color: '#9aa6b1', marginTop: 6, lineHeight: 1.4 }}>
+            <strong style={{ color: '#e6ecf1' }}>{p.next.emoji} {p.next.label}</strong>
+            {' '}rises in {p.remaining.toLocaleString()} more points given
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: '#8fd19e', marginTop: 8 }}>
+          Every island earned 🎉
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Tap-driven growth preview: jump straight to a stage, or nudge days/vitality
+// independently to check the min(time, care) rule behaves. The island rows do
+// the same for the archipelago — raise land the group hasn't earned yet, then
+// fly out and stand on it.
+function PreviewPanel({
+  preview, previewCount, pointsGiven, visitIsland, onChange, onVisit, onFillOneOfEach, onClearPreviewPlants, onExit,
+}: {
+  preview: PlazaPreview
+  previewCount: number
+  /** Points the scene is actually drawing with (preview override or real). */
+  pointsGiven: number
+  visitIsland: string | null
+  onChange: (p: PlazaPreview) => void
+  onVisit: (islandId: string) => void
+  onFillOneOfEach: () => void
+  onClearPreviewPlants: () => void
+  onExit: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const stage = growthStage(0, 0, preview.days * 86_400_000, preview.vitality)
+
+  const btn = (label: string, onClick: () => void, wide = false): React.ReactElement => (
+    <button
+      onClick={onClick}
+      style={{
+        minWidth: wide ? 0 : 30, flex: wide ? 1 : undefined,
+        padding: '6px 8px', borderRadius: 8, cursor: 'pointer',
+        background: 'rgba(255,255,255,0.12)', color: '#fff',
+        border: '1px solid rgba(255,255,255,0.18)', fontSize: 12, fontWeight: 700,
+      }}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div style={{
+      background: 'rgba(150,95,15,0.94)', color: '#fff', borderRadius: 12,
+      padding: open ? 10 : '5px 10px', maxWidth: 250,
+      border: '1px solid rgba(255,255,255,0.2)',
+    }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, cursor: 'pointer' }}
+      >
+        ⏩ preview · +{preview.days}d · vit {preview.vitality}
+        <span style={{ marginLeft: 'auto', opacity: 0.8 }}>{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 10, opacity: 0.85, lineHeight: 1.4 }}>
+            Render-only — nothing is saved. Showing <strong>{STAGE_LABELS[stage]}</strong>.
+            {' '}Seeds are unlimited here and planting stays on this device.
+          </div>
+
+          <div style={{ display: 'flex', gap: 5 }}>
+            {btn(`🌿 One of each · ${shortName(getIsland(visitIsland ?? undefined))}`, onFillOneOfEach, true)}
+            {previewCount > 0 && btn(`✕ ${previewCount}`, onClearPreviewPlants)}
+          </div>
+
+          <div style={{ display: 'flex', gap: 5 }}>
+            {STAGE_LABELS.map((label, i) => (
+              <button
+                key={label}
+                onClick={() => onChange({ ...preview, on: true, ...presetForStage(i) })}
+                style={{
+                  flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer', fontSize: 10,
+                  fontWeight: 800, border: '1px solid rgba(255,255,255,0.18)',
+                  background: i === stage ? '#fff' : 'rgba(255,255,255,0.12)',
+                  color: i === stage ? '#8a5a10' : '#fff',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <span style={{ width: 52 }}>Days</span>
+            {btn('−', () => onChange({ ...preview, days: Math.max(0, preview.days - 1) }))}
+            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 800 }}>{preview.days}</span>
+            {btn('+', () => onChange({ ...preview, days: preview.days + 1 }))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <span style={{ width: 52 }}>Vitality</span>
+            {btn('−', () => onChange({ ...preview, vitality: Math.max(0, preview.vitality - 1) }))}
+            <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 800 }}>{preview.vitality}</span>
+            {btn('+', () => onChange({ ...preview, vitality: preview.vitality + 1 }))}
+          </div>
+
+          <div style={{ fontSize: 10, opacity: 0.85, paddingTop: 2 }}>
+            Raise land — set the group&apos;s points given:
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {ISLANDS.map((isl) => (
+              <button
+                key={isl.id}
+                onClick={() => onChange({ ...preview, on: true, points: isl.unlockAtPoints })}
+                title={`${isl.label} · ${isl.unlockAtPoints} pts`}
+                style={{
+                  padding: '6px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  background: pointsGiven >= isl.unlockAtPoints ? '#fff' : 'rgba(255,255,255,0.12)',
+                }}
+              >
+                {isl.emoji}
+              </button>
+            ))}
+            {btn('all', () => onChange({ ...preview, on: true, points: ALL_UNLOCKED_POINTS }))}
+            {preview.points !== null && btn('reset', () => onChange({ ...preview, points: null }))}
+          </div>
+
+          <div style={{ fontSize: 10, opacity: 0.85, paddingTop: 2 }}>
+            Fly to — visit an island up close:
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {ISLANDS.map((isl) => {
+              const reachable = isUnlocked(isl.id, pointsGiven)
+              const here = (visitIsland ?? HOME_ISLAND.id) === isl.id
+              return (
+                <button
+                  key={isl.id}
+                  onClick={() => { if (reachable) onVisit(isl.id) }}
+                  disabled={!reachable}
+                  title={reachable ? `Fly to ${isl.label}` : `${isl.label} — raise it first`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '6px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                    cursor: reachable ? 'pointer' : 'default', opacity: reachable ? 1 : 0.35,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: here && reachable ? '#fff' : 'rgba(255,255,255,0.12)',
+                    color: here && reachable ? '#8a5a10' : '#fff',
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>{isl.emoji}</span>
+                  {shortName(isl)}
+                </button>
+              )
+            })}
+          </div>
+
+          {btn('Exit preview', onExit, true)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Daily check-in card: the heartbeat of the living plaza. Shows how many members
+// have shown up today, and (until you have) a button to check in with an
+// optional note.
+function CheckinCard({
+  checkedIn, checkedInCount, memberCount, streak, dormant, busy, onCheckin,
+}: {
+  checkedIn: boolean
+  checkedInCount: number
+  memberCount: number
+  streak: number
+  dormant: boolean
+  busy: boolean
+  onCheckin: (note?: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'stretch',
+      background: 'rgba(12,16,22,0.72)', backdropFilter: 'blur(6px)',
+      borderRadius: 14, padding: '10px 12px', minWidth: 200, maxWidth: 260,
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cdd6df' }}>
+        <span style={{ fontSize: 15 }}>{dormant ? '🌫️' : '🌱'}</span>
+        <strong style={{ color: '#fff' }}>{checkedInCount}/{memberCount}</strong>
+        <span>checked in today</span>
+      </div>
+
+      {checkedIn ? (
+        <div style={{ fontSize: 12, color: '#8fd19e', display: 'flex', alignItems: 'center', gap: 6 }}>
+          ✅ You&apos;re in{streak > 1 ? ` · ${streak}-day streak 🔥` : ''}
+        </div>
+      ) : (
+        <>
+          {open && (
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value.slice(0, 140))}
+              placeholder="What did you show up for? (optional)"
+              rows={2}
+              style={{
+                width: '100%', resize: 'none', borderRadius: 8, padding: '6px 8px',
+                fontSize: 12, background: 'rgba(255,255,255,0.06)', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.12)', outline: 'none',
+              }}
+            />
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => onCheckin(note.trim() || undefined)}
+              disabled={busy}
+              style={{
+                flex: 1, padding: '8px 10px', borderRadius: 10, border: 'none',
+                background: busy ? '#3a6b45' : '#43b05f', color: '#fff', fontWeight: 700,
+                fontSize: 13, cursor: busy ? 'default' : 'pointer',
+              }}
+            >
+              {busy ? '…' : '✅ Check in for today'}
+            </button>
+            {!open && (
+              <button
+                onClick={() => setOpen(true)}
+                style={{
+                  padding: '8px 10px', borderRadius: 10, fontSize: 13, cursor: 'pointer',
+                  background: 'rgba(255,255,255,0.08)', color: '#cdd6df',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                }}
+                title="Add a note"
+              >
+                ✏️
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Choose a species and (optionally) a dedication for a tapped tile.
+function SpeciesPicker({
+  busy, onCancel, onConfirm,
+}: {
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (species: string, dedication?: string) => void
+}) {
+  const [species, setSpecies] = useState(PLAZA_SPECIES[0].id)
+  const [dedication, setDedication] = useState('')
+  const chosen = getSpecies(species)
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 30, display: 'flex',
+      alignItems: 'flex-end', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.45)', pointerEvents: 'auto',
+    }} onClick={onCancel}>
+      <div
+        className="sheet-rise"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 460, background: '#14181f',
+          borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18,
+          border: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
+        <div style={{ color: '#fff', fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Plant a seed 🌱</div>
+        <div style={{ color: '#9aa6b1', fontSize: 12, marginBottom: 14 }}>{chosen.blurb}</div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+          {PLAZA_SPECIES.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSpecies(s.id)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                width: 72, padding: '10px 4px', borderRadius: 12, cursor: 'pointer',
+                background: s.id === species ? 'rgba(67,176,95,0.22)' : 'rgba(255,255,255,0.05)',
+                border: s.id === species ? '2px solid #43b05f' : '2px solid transparent',
+                color: '#e6ecf1',
+              }}
+            >
+              <span style={{ fontSize: 24 }}>{s.emoji}</span>
+              <span style={{ fontSize: 11 }}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <input
+          value={dedication}
+          onChange={(e) => setDedication(e.target.value.slice(0, 80))}
+          placeholder="Dedication (optional) — e.g. “For our first 30-day streak”"
+          style={{
+            width: '100%', borderRadius: 10, padding: '10px 12px', fontSize: 13,
+            background: 'rgba(255,255,255,0.06)', color: '#fff', marginBottom: 14,
+            border: '1px solid rgba(255,255,255,0.12)', outline: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, padding: '11px', borderRadius: 12, fontSize: 14, cursor: 'pointer',
+              background: 'rgba(255,255,255,0.08)', color: '#cdd6df', border: 'none',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(species, dedication.trim() || undefined)}
+            disabled={busy}
+            style={{
+              flex: 2, padding: '11px', borderRadius: 12, fontSize: 14, fontWeight: 800,
+              cursor: busy ? 'default' : 'pointer', border: 'none',
+              background: busy ? '#3a6b45' : '#43b05f', color: '#fff',
+            }}
+          >
+            {busy ? 'Planting…' : `Plant ${chosen.label}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The "shared artifact" payoff: tap a plant to read its history.
+function PlantPlaque({
+  obj, groupVitality, nowMs, canRemove, busy, mobile, onClose, onRemove,
+}: {
+  obj: PlazaObject
+  groupVitality: number
+  nowMs: number
+  canRemove: boolean
+  busy: boolean
+  mobile: boolean
+  onClose: () => void
+  onRemove: (o: PlazaObject) => void
+}) {
+  const species = getSpecies(obj.species)
+  const stage = growthStage(obj.plantedAt.getTime(), obj.plantedAtVitality, nowMs, groupVitality)
+  const grownThrough = Math.max(0, groupVitality - obj.plantedAtVitality)
+
+  return (
+    <div
+      className="sheet-rise"
+      style={mobile ? {
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20, pointerEvents: 'auto',
+      } : {
+        position: 'absolute', left: 16, bottom: 16, zIndex: 20, width: 280, pointerEvents: 'auto',
+      }}
+    >
+      <div style={{
+        background: '#14181f', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: mobile ? '20px 20px 0 0' : 16, padding: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 30 }}>{species.emoji}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{species.label}</div>
+            <div style={{ color: '#8fd19e', fontSize: 12 }}>{stageLabel(species.form, stage)}</div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: '#7c8894', fontSize: 20, cursor: 'pointer' }}
+          >
+            ×
+          </button>
+        </div>
+
+        {obj.dedication && (
+          <div style={{
+            fontStyle: 'italic', color: '#e6ecf1', fontSize: 13, marginBottom: 10,
+            padding: '8px 10px', background: 'rgba(255,255,255,0.05)', borderRadius: 10,
+            borderLeft: '3px solid #43b05f',
+          }}>
+            “{obj.dedication}”
+          </div>
+        )}
+
+        <div style={{ fontSize: 12, color: '#b6c0ca', lineHeight: 1.7 }}>
+          <div>🌱 Planted by <strong style={{ color: '#fff' }}>{obj.plantedByName}</strong></div>
+          <div>🕰️ {timeAgo(obj.plantedAt)}</div>
+          <div>🌤️ Grown through {grownThrough} active group-{grownThrough === 1 ? 'day' : 'days'}</div>
+        </div>
+
+        {canRemove && (
+          <button
+            onClick={() => onRemove(obj)}
+            disabled={busy}
+            style={{
+              marginTop: 12, width: '100%', padding: '9px', borderRadius: 10, fontSize: 13,
+              cursor: busy ? 'default' : 'pointer', border: '1px solid rgba(255,120,120,0.3)',
+              background: 'rgba(255,80,80,0.12)', color: '#ff9a9a',
+            }}
+          >
+            {busy ? '…' : 'Remove plant'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
 // Fires onReady after N rendered frames — guarantees WebGL has actually painted.
@@ -2347,6 +3074,10 @@ interface Props {
       every bottom-anchored overlay has to be lifted clear of it. */
   bottomInset?: number
   presets?: PlazaPreset[]
+  timezone?: string
+  plazaActiveDays?: number
+  plazaLastActiveDay?: string
+  plazaPointsGiven?: number
   /** Test seam — see the Scene effect that fills it. */
   walkerProbe?: React.RefObject<Locomotion | null>
   onPointsSubmitted?: () => void
@@ -2355,7 +3086,7 @@ interface Props {
 }
 
 export default function MiiPlaza({
-  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, walkerProbe, onPointsSubmitted, onAvatarUpdated, onReady,
+  members, currentUid, groupId, inviteCode, remainingGive, remainingTake, lowerGraphics = false, reducedMotion = false, bottomInset = 0, presets, timezone, plazaActiveDays = 0, plazaLastActiveDay, plazaPointsGiven = 0, walkerProbe, onPointsSubmitted, onAvatarUpdated, onReady,
 }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const animTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2381,6 +3112,193 @@ export default function MiiPlaza({
   const [walkCardSize, setWalkCardSize]     = useState({ width: 270, height: 420 })
   const [viewSize, setViewSize]             = useState({ width: 0, height: 0 })
   const walkCardRef = useRef<HTMLDivElement>(null)
+
+  // ── Living plaza state ──
+  const [gardenObjects, setGardenObjects] = useState<PlazaObject[]>([])
+  const [todayCheckins, setTodayCheckins] = useState<Checkin[]>([])
+  const [plantMode, setPlantMode]         = useState(false)
+  const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
+  const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
+  const [busy, setBusy]                   = useState(false)
+  // Tap-driven growth preview (opt in with ?preview=1). Render-only.
+  //
+  // Read on mount rather than in the initializer. The server has no URL to
+  // read, so deriving it during the first client render makes that render
+  // disagree with the server's HTML ("1 island" vs "5"), and React responds by
+  // throwing the whole tree away and rebuilding it — an expensive way to start
+  // when there's a WebGL canvas in it.
+  // A one-shot read of a browser-only value on mount is exactly what this rule's
+  // own guidance says an effect is for, so the cascade it warns about is the
+  // intent here rather than an accident.
+  const [preview, setPreview] = useState<PlazaPreview>(PREVIEW_OFF)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setPreview(readPlazaPreview()) }, [])
+  // A slowly-advancing clock so growth stages recompute without calling the
+  // impure Date.now() during render. Ticks once a minute; the preview offset is
+  // applied as a derived value so tapping updates the scene immediately.
+  const [clockMs, setClockMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setClockMs(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  const nowMs = clockMs + (preview.on ? preview.days * 86_400_000 : 0)
+  const effectiveVitality = preview.on ? preview.vitality : plazaActiveDays
+  const effectivePoints = preview.on && preview.points !== null ? preview.points : plazaPointsGiven
+  // Placement frames for every island the group has earned
+  const islandFrames = useMemo<IslandFrame[]>(
+    () => unlockedIslands(effectivePoints).map((i) => ({
+      id: i.id, center: i.center, scale: i.scale, edge: i.edge,
+    })),
+    [effectivePoints],
+  )
+  // Plants placed while previewing live only on this device — they are never
+  // written to Firestore, so testing never litters the group's real island.
+  const [previewPlants, setPreviewPlants] = useState<PlazaObject[]>([])
+  // Island the camera has been sent to (preview sightseeing). null = the
+  // plaza's own camera, untouched. The nonce lets a repeat tap re-centre a view
+  // the user has since orbited away from.
+  const [visit, setVisit] = useState<IslandVisit | null>(null)
+  // Filled by the Scene with the live walker, so exiting walk mode can frame
+  // whichever island they stopped on.
+  const walkerRef = useRef<Locomotion | null>(null)
+  // Islands as *ground* — what the walker can be standing on when they stop.
+  const groundIslands = useMemo(() => unlockedIslands(effectivePoints), [effectivePoints])
+  const visitTo = useCallback((id: string) => {
+    setVisit((v) => ({ id, nonce: (v?.nonce ?? 0) + 1 }))
+  }, [])
+  // If the island being visited sinks back into the clouds — points lowered, or
+  // preview switched off — come home rather than orbit empty sky. Memoised so
+  // the camera only reacts when the destination actually changes.
+  const visitTarget = useMemo<IslandVisit | null>(
+    () => (visit && !isUnlocked(visit.id, effectivePoints) ? { id: HOME_ISLAND.id, nonce: visit.nonce } : visit),
+    [visit, effectivePoints],
+  )
+
+  const today = useMemo(() => dayKey(timezone), [timezone])
+  const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
+  const seeds = currentMember?.seeds ?? 0
+  const checkedInToday = currentMember?.lastCheckinDate === today
+  // Preview mode hands out unlimited seeds so every species can be inspected.
+  const canPlant = preview.on || seeds > 0
+  const isMayor = currentMember?.isAdmin === true
+
+  // Real plants plus any local preview plants
+  const allObjects = useMemo(
+    () => (preview.on && previewPlants.length ? [...gardenObjects, ...previewPlants] : gardenObjects),
+    [gardenObjects, previewPlants, preview.on],
+  )
+
+  const takenTiles = useMemo(
+    () => new Set([
+      ...allObjects.map((o) => tileKey(o.tile)),
+      // Where an island's own centrepiece stands. Planting inside the monument
+      // would grow a tree through it.
+      ...groundIslands.flatMap((i) => reservedTiles(i).map(tileKey)),
+    ]),
+    [allObjects, groundIslands],
+  )
+  const dormant = useMemo(
+    () => isDormant(plazaLastActiveDay, [today, dayKey(timezone, -1)]),
+    [plazaLastActiveDay, today, timezone],
+  )
+  // Derive the open plaque from live data — if the plant is removed, it vanishes.
+  const selectedPlant = useMemo(
+    () => allObjects.find((o) => o.id === selectedPlantId) ?? null,
+    [allObjects, selectedPlantId],
+  )
+
+  // Subscribe to the garden and to today's check-ins
+  useEffect(() => subscribeToPlazaObjects(groupId, setGardenObjects), [groupId])
+  useEffect(() => subscribeToCheckins(groupId, today, setTodayCheckins), [groupId, today])
+
+  async function handleCheckin(note?: string) {
+    if (busy || checkedInToday) return
+    setBusy(true)
+    try {
+      await recordCheckin(groupId, currentUid, note)
+    } catch (err) {
+      console.warn('[plaza] check-in failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Build a local-only plant. Planted "now" against the base clock and at zero
+  // vitality, so the preview's Days/Vitality controls drive its growth directly.
+  function makePreviewPlant(species: string, tile: Tile, dedication?: string): PlazaObject {
+    return {
+      id: `preview_${species}_${tileKey(tile)}_${clockMs}`,
+      kind: 'plant',
+      species,
+      tile,
+      plantedBy: currentUid,
+      plantedByName: currentMember?.displayName ?? 'You',
+      plantedAt: new Date(clockMs),
+      plantedAtVitality: 0,
+      dedication,
+    }
+  }
+
+  async function handlePlant(species: string, dedication?: string) {
+    if (busy || !pendingTile) return
+    // In preview, planting is local and seeds are unlimited — nothing is saved.
+    if (preview.on) {
+      setPreviewPlants((prev) => [...prev, makePreviewPlant(species, pendingTile, dedication)])
+      setPendingTile(null)
+      setPlantMode(false)
+      return
+    }
+    setBusy(true)
+    try {
+      await plantSeed(groupId, currentUid, { species, tile: pendingTile, dedication })
+      setPendingTile(null)
+      setPlantMode(false)
+    } catch (err) {
+      console.warn('[plaza] plant failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Drop one of every species on the free tiles closest to the middle, so all
+  // the forms can be compared side by side at any growth stage. Fills whichever
+  // island is being visited, so a satellite can be dressed and judged too.
+  function handleFillOneOfEach() {
+    const frame = islandFrames.find((f) => f.id === visitTarget?.id) ?? islandFrames[0]
+    const free = tilesOnIsland(frame)
+      .filter((t) => !takenTiles.has(tileKey(t)))
+      .sort((a, b) => {
+        const wa = tileToWorld(a, frame), wb = tileToWorld(b, frame)
+        return Math.hypot(wa.x - frame.center.x, wa.z - frame.center.z)
+             - Math.hypot(wb.x - frame.center.x, wb.z - frame.center.z)
+      })
+    setPreviewPlants((prev) => [
+      ...prev,
+      ...PLAZA_SPECIES.flatMap((s, i) =>
+        free[i] ? [makePreviewPlant(s.id, free[i], `Preview · ${s.label}`)] : [],
+      ),
+    ])
+    setPlantMode(false)
+  }
+
+  async function handleRemovePlant(obj: PlazaObject) {
+    if (busy) return
+    // Preview plants only exist locally — drop them without touching Firestore.
+    if (obj.id.startsWith('preview_')) {
+      setPreviewPlants((prev) => prev.filter((p) => p.id !== obj.id))
+      setSelectedPlantId(null)
+      return
+    }
+    setBusy(true)
+    try {
+      await removePlazaObject(groupId, obj.id)
+      setSelectedPlantId(null)
+    } catch (err) {
+      console.warn('[plaza] remove failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     function check() {
@@ -2409,9 +3327,13 @@ export default function MiiPlaza({
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Never leave walk mode running on a device that can no longer drive it
+  // Never leave walk mode running on a device that can no longer drive it.
+  // Through a ref, the way the rest of this file reaches a live callback from an
+  // effect that shouldn't re-run when the callback is re-created.
+  const exitWalkModeRef = useRef(exitWalkMode)
+  exitWalkModeRef.current = exitWalkMode
   useEffect(() => {
-    if (walkInput === 'none' && walkMode) exitWalkMode()
+    if (walkInput === 'none' && walkMode) exitWalkModeRef.current()
   }, [walkInput, walkMode])
 
   // The card's height changes as you page through presets / confirm / stats, and
@@ -2442,8 +3364,18 @@ export default function MiiPlaza({
     setWalkMode(false)
     setWalkTarget(null)
     setPointerLocked(false)
-    // Hand back to the same eased return-to-default path a closing card uses,
-    // so the view glides back to the plaza framing instead of cutting.
+    // Leave the camera looking at the island you actually finished on. Walking
+    // to the observatory and then being yanked back to the plaza loses your
+    // character completely: the orbit camera can't pan, so there'd be no way to
+    // find them again.
+    const walkerPos = walkerRef.current?.pos
+    const landedOn = walkerPos ? islandAt(walkerPos.x, walkerPos.z, groundIslands) : null
+    if (landedOn && landedOn.id !== HOME_ISLAND.id) {
+      visitTo(landedOn.id)
+      return
+    }
+    // Home: hand back to the same eased return-to-default path a closing card
+    // uses, so the view glides back to the plaza framing instead of cutting.
     setCameraLocked(true)
     setReturnNonce((n) => n + 1)
   }
@@ -2543,9 +3475,21 @@ export default function MiiPlaza({
             mobile={isMobile}
             lowerGraphics={lowerGraphics}
             reducedMotion={reducedMotion}
+            gardenObjects={allObjects}
+            islandFrames={islandFrames}
+            visit={visitTarget}
+            groupVitality={effectiveVitality}
+            pointsGiven={effectivePoints}
+            nowMs={nowMs}
+            dormant={dormant}
+            plantMode={plantMode}
+            takenTiles={takenTiles}
+            onPlantSelect={(o) => { setSelectedPlantId(o.id); handleClose() }}
+            onTileSelect={(t) => setPendingTile(t)}
             walkMode={walkMode}
             walkControl={walkInput === 'touch' ? 'touch' : 'keyboard'}
             walkerProbe={walkerProbe}
+            walkerRef={walkerRef}
             walkPaused={!!selectedMember}
             walkTargetUid={walkTarget}
             returnNonce={returnNonce}
@@ -2565,6 +3509,127 @@ export default function MiiPlaza({
       </Canvas>
 
       <PresenceTab members={members} currentUid={currentUid} />
+
+      {/* Living plaza: daily check-in heartbeat + the island list (top-right).
+          Both slide away to pills so they stop covering the plaza; the same
+          numbers live permanently in the Info tab. Hidden in walk mode, where
+          the camera is over the walker's shoulder and every pixel counts. */}
+      {!walkMode && (
+        <div style={{
+          position: 'absolute', top: 64, right: 12, zIndex: 12, pointerEvents: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+        }}>
+          <HudCard
+            dot={!checkedInToday}
+            pill={<>🌱 {todayCheckins.length}/{members.length}</>}
+          >
+            <CheckinCard
+              checkedIn={checkedInToday}
+              checkedInCount={todayCheckins.length}
+              memberCount={members.length}
+              streak={currentMember?.checkinStreak ?? 0}
+              dormant={dormant}
+              busy={busy}
+              onCheckin={handleCheckin}
+            />
+          </HudCard>
+          <HudCard pill={<>🏝️ {unlockedIslands(effectivePoints).length}</>}>
+            <IslandJumper
+              pointsGiven={effectivePoints}
+              visitIsland={visitTarget?.id ?? null}
+              onVisit={visitTo}
+            />
+          </HudCard>
+        </div>
+      )}
+
+      {/* Plant controls (hidden while another card or picker is open).
+          Not offered in walk mode: planting is a tap on a glowing tile, and on
+          touch that is the same gesture that walks you somewhere. */}
+      {!selectedMember && !selectedPlant && !pendingTile && !walkMode && (
+        <div style={{
+          // Stacked above the walk-mode button, which owns the bottom-right
+          // corner — overlapping it would swallow its clicks.
+          position: 'absolute', right: 12, zIndex: 12,
+          bottom: 96 + bottomInset,
+          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+          pointerEvents: 'auto',
+        }}>
+          {plantMode && (
+            <div style={{
+              background: 'rgba(67,176,95,0.9)', color: '#fff', fontSize: 12, fontWeight: 700,
+              padding: '6px 12px', borderRadius: 20,
+            }}>
+              Tap a glowing spot to plant
+            </div>
+          )}
+          {plantMode ? (
+            <button
+              onClick={() => setPlantMode(false)}
+              style={{
+                padding: '10px 16px', borderRadius: 22, border: 'none', cursor: 'pointer',
+                background: 'rgba(20,24,31,0.85)', color: '#cdd6df', fontWeight: 700, fontSize: 13,
+              }}
+            >
+              ✕ Cancel
+            </button>
+          ) : (
+            <button
+              onClick={() => { if (canPlant) { handleClose(); setPlantMode(true) } }}
+              disabled={!canPlant}
+              title={canPlant ? 'Plant a seed' : 'Check in to earn seeds'}
+              style={{
+                padding: '10px 16px', borderRadius: 22, border: 'none',
+                cursor: canPlant ? 'pointer' : 'default', opacity: canPlant ? 1 : 0.5,
+                background: '#43b05f', color: '#fff', fontWeight: 800, fontSize: 14,
+                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+              }}
+            >
+              🌱 Plant{preview.on ? ' · ∞' : seeds > 0 ? ` · ${seeds}` : ''}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Growth preview controls (?preview=1) */}
+      {preview.on && (
+        <div style={{ position: 'absolute', top: 64, left: 12, zIndex: 14, pointerEvents: 'auto' }}>
+          <PreviewPanel
+            preview={preview}
+            previewCount={previewPlants.length}
+            pointsGiven={effectivePoints}
+            visitIsland={visitTarget?.id ?? null}
+            onChange={setPreview}
+            onVisit={visitTo}
+            onFillOneOfEach={handleFillOneOfEach}
+            onClearPreviewPlants={() => { setPreviewPlants([]); setSelectedPlantId(null) }}
+            onExit={() => { setPreview(PREVIEW_OFF); setPreviewPlants([]); setSelectedPlantId(null) }}
+          />
+        </div>
+      )}
+
+      {/* Species picker (after tapping a tile) */}
+      {pendingTile && (
+        <SpeciesPicker
+          busy={busy}
+          onCancel={() => setPendingTile(null)}
+          onConfirm={handlePlant}
+        />
+      )}
+
+      {/* Plant history plaque */}
+      {selectedPlant && (
+        <PlantPlaque
+          obj={selectedPlant}
+          groupVitality={effectiveVitality}
+          nowMs={nowMs}
+          canRemove={selectedPlant.plantedBy === currentUid || isMayor}
+          busy={busy}
+          mobile={isMobile}
+          onClose={() => setSelectedPlantId(null)}
+          onRemove={handleRemovePlant}
+        />
+      )}
 
       {/* Card overlay — avatar editor for self, give/take for others */}
       {selectedMember && (

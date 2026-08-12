@@ -78,8 +78,12 @@ service cloud.firestore {
       allow get: if signedIn();
       allow list: if false;
       allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
-      // The mayor manages settings; join/leave flows may only bump memberCount
-      allow update: if isMayor(gid) || (signedIn() && affectedOnly(['memberCount']));
+      // The mayor manages settings; join/leave flows may only bump memberCount;
+      // any member may bump the living-plaza counters (vitality and the
+      // collective points-given tally that unlocks islands) and nothing else
+      allow update: if isMayor(gid)
+        || (signedIn() && affectedOnly(['memberCount']))
+        || (isMember(gid) && affectedOnly(['plazaActiveDays', 'plazaLastActiveDay', 'plazaPointsGiven']));
       allow delete: if false;
 
       match /members/{mid} {
@@ -142,6 +146,27 @@ service cloud.firestore {
         allow create, update: if isMember(gid)
           && request.resource.data.by == request.auth.uid;
         allow delete: if isMember(gid);
+      }
+
+      // Daily check-ins: one doc per member per day (id is `${uid}_${dayKey}`).
+      // A member may only write their own; they are never edited or deleted.
+      match /checkins/{cid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid)
+          && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // Persistent plants on the shared island. Any member may read and plant
+      // (attributed to themselves); only the planter or the mayor may remove one.
+      match /plazaObjects/{oid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid)
+          && request.resource.data.plantedBy == request.auth.uid;
+        allow update: if signedIn()
+          && resource.data.plantedBy == request.auth.uid;
+        allow delete: if signedIn()
+          && (resource.data.plantedBy == request.auth.uid || isMayor(gid));
       }
     }
   }

@@ -47,7 +47,8 @@ import {
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { dayKey } from './utils'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs } from './types'
+import { seedsForCheckin } from './plazaGrowth'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs, Checkin, PlazaObject, PlazaTile } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -287,6 +288,9 @@ function mapGroupDoc(id: string, data: Record<string, unknown>): Group {
     timezone: data.timezone ?? 'UTC',
     presets: data.presets ?? [],
     rules: data.rules,
+    plazaActiveDays: (data.plazaActiveDays as number) ?? 0,
+    plazaLastActiveDay: data.plazaLastActiveDay as string | undefined,
+    plazaPointsGiven: (data.plazaPointsGiven as number) ?? 0,
   } as Group
 }
 
@@ -333,6 +337,10 @@ function mapMemberDoc(data: Record<string, unknown>): GroupMember {
     lastActiveDate: data.lastActiveDate,
     badges: data.badges ?? [],
     lastSeen: data.lastSeen ? fromTimestamp(data.lastSeen as Timestamp) : undefined,
+    seeds: (data.seeds as number) ?? 0,
+    lastCheckinDate: data.lastCheckinDate as string | undefined,
+    checkinStreak: (data.checkinStreak as number) ?? 0,
+    longestCheckinStreak: (data.longestCheckinStreak as number) ?? 0,
   } as GroupMember
 }
 
@@ -644,6 +652,12 @@ export async function giveOrTakePoints(
       longestStreak,
       lastActiveDate: today,
     })
+
+    // Collective tally that unlocks new islands. Only generosity counts —
+    // taking points never buys the group land.
+    if (totalGiving > 0) {
+      transaction.update(groupRef, { plazaPointsGiven: increment(totalGiving) })
+    }
   })
 
   // Push-notify each recipient (fire-and-forget — in-app notifications were
@@ -1100,6 +1114,149 @@ export function subscribeToPlazaHolds(
 // is open. Members subscriptions pick it up; "online" = seen recently.
 export function touchPresence(groupId: string, uid: string): void {
   updateDoc(doc(db, 'groups', groupId, 'members', uid), { lastSeen: serverTimestamp() }).catch(() => {})
+}
+
+// ============ LIVING PLAZA (check-ins, seeds, plants) ============
+
+// Record a member's daily check-in — the heartbeat that earns seeds and keeps
+// the group's plants growing. Idempotent per day (deterministic doc id). Mirrors
+// the streak logic in giveOrTakePoints. All reads happen before any writes, as
+// Firestore transactions require.
+export async function recordCheckin(groupId: string, uid: string, note?: string): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    const groupRef = doc(db, 'groups', groupId)
+    const memberRef = doc(db, 'groups', groupId, 'members', uid)
+    const [groupSnap, memberSnap] = await Promise.all([tx.get(groupRef), tx.get(memberRef)])
+    if (!memberSnap.exists()) throw new Error('You are not a member of this group')
+
+    const groupData = groupSnap.data()
+    const tz: string | undefined = groupData?.timezone
+    const today = dayKey(tz)
+    const yesterday = dayKey(tz, -1)
+
+    const m = memberSnap.data()
+    if (m.lastCheckinDate === today) throw new Error('Already checked in today')
+
+    // Check-in streak (same yesterday-vs-today logic as the giving streak)
+    let streak: number = m.checkinStreak ?? 0
+    let longest: number = m.longestCheckinStreak ?? 0
+    streak = m.lastCheckinDate === yesterday ? streak + 1 : 1
+    if (streak > longest) longest = streak
+
+    const grantSeeds = seedsForCheckin(streak)
+
+    const checkinRef = doc(db, 'groups', groupId, 'checkins', `${uid}_${today}`)
+    const checkinData: Record<string, unknown> = {
+      uid,
+      dayKey: today,
+      createdAt: serverTimestamp(),
+    }
+    if (note) checkinData.note = note
+    tx.set(checkinRef, checkinData)
+
+    tx.update(memberRef, {
+      lastCheckinDate: today,
+      checkinStreak: streak,
+      longestCheckinStreak: longest,
+      seeds: increment(grantSeeds),
+    })
+
+    // Group vitality: bump once, on the first check-in of the day. Because the
+    // transaction reads the group doc, concurrent first-of-day check-ins retry
+    // and only one wins the increment.
+    if (groupData?.plazaLastActiveDay !== today) {
+      tx.update(groupRef, {
+        plazaActiveDays: increment(1),
+        plazaLastActiveDay: today,
+      })
+    }
+  })
+}
+
+// Live view of who has checked in on a given day (for the "N/M checked in" pill).
+export function subscribeToCheckins(
+  groupId: string,
+  day: string,
+  callback: (checkins: Checkin[]) => void,
+): () => void {
+  const q = query(collection(db, 'groups', groupId, 'checkins'), where('dayKey', '==', day))
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => {
+      const data = d.data()
+      return {
+        uid: data.uid as string,
+        dayKey: data.dayKey as string,
+        note: data.note as string | undefined,
+        createdAt: fromTimestamp(data.createdAt),
+      }
+    }))
+  })
+}
+
+// Plant a seed on a tile. Consumes one seed and stamps the group's current
+// vitality so growth can be computed on read. Tile emptiness is enforced by the
+// UI (which only offers free tiles); a rare double-plant just overlaps visually.
+export async function plantSeed(
+  groupId: string,
+  uid: string,
+  opts: { species: string; tile: PlazaTile; dedication?: string },
+): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    const groupRef = doc(db, 'groups', groupId)
+    const memberRef = doc(db, 'groups', groupId, 'members', uid)
+    const [groupSnap, memberSnap] = await Promise.all([tx.get(groupRef), tx.get(memberRef)])
+    if (!memberSnap.exists()) throw new Error('You are not a member of this group')
+
+    const m = memberSnap.data()
+    const seeds: number = m.seeds ?? 0
+    if (seeds < 1) throw new Error('You have no seeds to plant')
+    const plantedByName: string = m.displayName ?? uid
+    const vitality: number = groupSnap.data()?.plazaActiveDays ?? 0
+
+    const objRef = doc(collection(db, 'groups', groupId, 'plazaObjects'))
+    const objData: Record<string, unknown> = {
+      id: objRef.id,
+      kind: 'plant',
+      species: opts.species,
+      tile: { q: opts.tile.q, r: opts.tile.r },
+      plantedBy: uid,
+      plantedByName,
+      plantedAt: serverTimestamp(),
+      plantedAtVitality: vitality,
+    }
+    if (opts.dedication) objData.dedication = opts.dedication
+    tx.set(objRef, objData)
+    tx.update(memberRef, { seeds: increment(-1) })
+  })
+}
+
+// Remove a plant. Rules permit only the planter or the mayor.
+export async function removePlazaObject(groupId: string, objId: string): Promise<void> {
+  await deleteDoc(doc(db, 'groups', groupId, 'plazaObjects', objId))
+}
+
+// Realtime feed of everything planted on the island.
+export function subscribeToPlazaObjects(
+  groupId: string,
+  callback: (objects: PlazaObject[]) => void,
+): () => void {
+  const ref = collection(db, 'groups', groupId, 'plazaObjects')
+  return onSnapshot(ref, (snap) => {
+    callback(snap.docs.map((d) => {
+      const data = d.data()
+      return {
+        id: (data.id as string) ?? d.id,
+        kind: (data.kind as PlazaObject['kind']) ?? 'plant',
+        species: data.species as string,
+        tile: data.tile as PlazaTile,
+        plantedBy: data.plantedBy as string,
+        plantedByName: data.plantedByName as string,
+        plantedAt: fromTimestamp(data.plantedAt),
+        plantedAtVitality: (data.plantedAtVitality as number) ?? 0,
+        dedication: data.dedication as string | undefined,
+      }
+    }))
+  })
 }
 
 // ============ SHOP ============

@@ -79,6 +79,15 @@ export type Group = {
   timezone?: string
   presets?: PlazaPreset[]
   rules?: string            // freeform group rules, editable by the mayor
+  // ── Living plaza ──
+  // Group "vitality": a counter bumped once on the first check-in of each
+  // active day. Plants' growth is gated by how much this has risen since they
+  // were planted, so a quiet group's garden stalls (but never dies).
+  plazaActiveDays?: number
+  plazaLastActiveDay?: string   // dayKey of the most recent active day
+  // Cumulative points the group has GIVEN each other (takes excluded). Drives
+  // island unlocks — collective effort creates space, daily check-ins grow life.
+  plazaPointsGiven?: number
 }
 
 export type GroupMember = {
@@ -96,6 +105,41 @@ export type GroupMember = {
   lastActiveDate?: string
   badges?: string[]
   lastSeen?: Date   // presence heartbeat while the plaza is open
+  // ── Living plaza ──
+  seeds?: number                  // group-scoped inventory of unplanted seeds
+  lastCheckinDate?: string        // dayKey of this member's last daily check-in
+  checkinStreak?: number          // consecutive days checked in
+  longestCheckinStreak?: number
+}
+
+// ── Living plaza ─────────────────────────────────────────────────────────────
+// A member's daily "I showed up" check-in. One per member per day (the doc id is
+// `${uid}_${dayKey}`, so it is naturally idempotent). Check-ins are the heartbeat
+// that earns seeds and keeps the group's plants growing.
+export type Checkin = {
+  uid: string
+  dayKey: string
+  note?: string
+  createdAt: Date
+}
+
+// A tile on the plaza's placement grid (see plazaMath.tileToWorld).
+export type PlazaTile = { q: number; r: number }
+
+// Persistent objects placed on the shared island. Today only 'plant'; 'kind' is
+// carried so landmarks/buildings can join the same collection later.
+export type PlazaObjectKind = 'plant'
+
+export type PlazaObject = {
+  id: string
+  kind: PlazaObjectKind
+  species: string
+  tile: PlazaTile
+  plantedBy: string
+  plantedByName: string
+  plantedAt: Date
+  plantedAtVitality: number   // group vitality snapshot at planting time
+  dedication?: string
 }
 
 export type Transaction = {

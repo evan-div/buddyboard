@@ -14,14 +14,14 @@
 // Deliberately writes nothing to Firestore. Other members still see this
 // character on the deterministic wander schedule; walking is local-only.
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
   makeMoveState, stepMovement,
   makeCamState, applyLook, applyZoom, stepCamera, cameraPlacement,
   nearestInteractable, resolveCharacterOverlap,
-  clamp, smoothFactor, isOverIsland,
+  clamp, smoothFactor,
   CAM_PIVOT_Y, CAM_START_DIST, CAM_MIN_DIST, CAM_MAX_DIST,
   PITCH_MIN, PITCH_MAX, FOV_BASE, CARD_ANCHOR_Y, charHalfWidthPx,
   DOUBLE_TAP_MS, FLIP_PIVOT_Y, FALL_HANDOFF_Y,
@@ -33,6 +33,7 @@ import {
   GROUND_PICK_Y, TOUCH_LOOK_SCALE, PINCH_TO_WHEEL, MARKER_FADE_RATE, STOP_TOLERANCE,
 } from './tapMove'
 import { AXIS_X, AXIS_Y } from './plazaMath'
+import { resolveArchipelagoGround, isOnGround, type IslandDef } from './plazaIslands'
 import { playWhoosh, buzz } from './plazaSound'
 import type { GroupMember } from '@/lib/types'
 
@@ -86,13 +87,24 @@ interface Props {
   /** Walked off the island and dropped clear of it — hand the body over. */
   onFellOff: (pos: THREE.Vector3, vel: THREE.Vector3) => void
   onExit: () => void
+  /** Every island the group has earned. Ground is any of them, or a deck. */
+  islands: readonly IslandDef[]
 }
 
 export default function ThirdPersonController({
   active, control, paused, reducedMotion, suspended, playerUid, members, charGroups, locomotion,
-  tapOnCharacter, onInteract, onTargetChange, onLockChange, onCardAnchor, onFellOff, onExit,
+  tapOnCharacter, onInteract, onTargetChange, onLockChange, onCardAnchor, onFellOff, onExit, islands,
 }: Props) {
   const { camera, gl } = useThree()
+
+  // The whole archipelago is walkable, bridges included. Rebuilt only when an
+  // island unlocks; stepMovement calls it every frame, so it allocates nothing.
+  const islandsRef = useRef(islands)
+  islandsRef.current = islands
+  const resolveGround = useCallback(
+    (pos: THREE.Vector3) => resolveArchipelagoGround(pos, islandsRef.current),
+    [],
+  )
 
   const move = useRef(makeMoveState())
   const cam  = useRef(makeCamState())
@@ -611,7 +623,7 @@ export default function ThirdPersonController({
 
     // Tap-to-move faces where it's actually going. Compression exists to hide a
     // camera-relative artifact that only WASD produces — see FacingMode.
-    stepMovement(m, input, cam.current.yaw, dt, control === 'touch' ? 'travel' : 'camera')
+    stepMovement(m, input, cam.current.yaw, dt, control === 'touch' ? 'travel' : 'camera', resolveGround)
 
     // Bump into people rather than walking through them. No edge clamp after
     // it: the rim is a cliff now, and everyone else wanders well inside it, so
@@ -645,7 +657,7 @@ export default function ThirdPersonController({
 
     // Off the edge and dropping clear of the island: hand the body to the
     // plaza physics, which already owns tumble → despawn → sky respawn.
-    if (!fellOffSent.current && m.pos.y < FALL_HANDOFF_Y && !isOverIsland(m.pos.x, m.pos.z)) {
+    if (!fellOffSent.current && m.pos.y < FALL_HANDOFF_Y && !isOnGround(m.pos.x, m.pos.z, islandsRef.current)) {
       fellOffSent.current = true
       live.current.onFellOff(m.pos, m.vel)
     }

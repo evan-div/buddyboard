@@ -162,6 +162,19 @@ export function cameraBasis(cameraYaw: number): { fx: number; fz: number; rx: nu
   return { fx, fz, rx: -fz, rz: fx }
 }
 
+/**
+ * Where the walker actually ends up this step, and whether there's floor there.
+ *
+ * It may move `pos` — a bridge has rails, so walking into one slides you along
+ * it rather than off the side — which is why this resolves the position instead
+ * of merely testing it. Defaults to the home island alone, which is what walk
+ * mode's own tests assume; the plaza passes one that knows about every island
+ * the group has earned and the decks between them.
+ */
+export type GroundResolver = (pos: THREE.Vector3) => boolean
+
+const homeGround: GroundResolver = (pos) => isOverIsland(pos.x, pos.z)
+
 export function stepMovement(
   s: MoveState,
   input: MoveInput,
@@ -171,6 +184,7 @@ export function stepMovement(
   // frame, and an object literal per call would allocate where the rest of walk
   // mode deliberately doesn't.
   facing: FacingMode = 'camera',
+  resolveGround: GroundResolver = homeGround,
 ): void {
   if (dt <= 0) return
   _prevVel.copy(s.vel)
@@ -211,7 +225,7 @@ export function stepMovement(
   // what lets a walker stride off the rim rather than being fenced in.
   s.pos.x += s.vel.x * dt
   s.pos.z += s.vel.z * dt
-  const supported = isOverIsland(s.pos.x, s.pos.z)
+  const supported = resolveGround(s.pos)
 
   // Walked past the edge: nothing underneath any more.
   if (s.grounded && !supported) s.grounded = false
