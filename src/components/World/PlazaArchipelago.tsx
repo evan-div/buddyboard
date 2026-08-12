@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useRef, useEffect, type ReactNode } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FSIZE, edgeRadius } from './plazaMath'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
@@ -23,6 +24,9 @@ const LIGHT_COLOR = '#6dc957'
 const DARK_COLOR = '#57b344'
 const PATCH_GRID = 10
 const N_ROCKS = 60
+// Base opacity of a shrouded island, before the distance fade below.
+const TOP_OPACITY = 0.82
+const DIRT_OPACITY = 0.78
 
 /**
  * One island's body: the dirt column under the grass and the rocks in its rim.
@@ -107,6 +111,21 @@ export function IslandGround({
  * shroud is a view of a place, not a place: you can't walk to it, land on it, or
  * plant on it, and there is no bridge until it is earned.
  */
+
+// Opacity by camera distance. Held at full strength from far out, where the
+// sky rings between camera and island are doing the hiding, and thinned as the
+// camera closes in and those rings drop away — otherwise a shroud gets *more*
+// legible the nearer you get, which is backwards for something meant to be a
+// mystery. Up close it survives as a stain in the veil clouds, not a slab.
+const SHROUD_NEAR = 40
+const SHROUD_FAR = 95
+const SHROUD_NEAR_FADE = 0.42
+
+export function shroudFade(distance: number): number {
+  const t = (distance - SHROUD_NEAR) / (SHROUD_FAR - SHROUD_NEAR)
+  return SHROUD_NEAR_FADE + (1 - SHROUD_NEAR_FADE) * Math.min(1, Math.max(0, t))
+}
+
 function ShroudedIsland({ island }: { island: IslandDef }) {
   const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
@@ -116,15 +135,26 @@ function ShroudedIsland({ island }: { island: IslandDef }) {
   )
   useEffect(() => () => { topGeo.dispose(); dirtGeo.dispose() }, [topGeo, dirtGeo])
 
+  const topMat = useRef<THREE.MeshBasicMaterial>(null)
+  const dirtMat = useRef<THREE.MeshBasicMaterial>(null)
+
+  useFrame(({ camera }) => {
+    const dx = camera.position.x - island.center.x
+    const dz = camera.position.z - island.center.z
+    const fade = shroudFade(Math.hypot(dx, dz))
+    if (topMat.current) topMat.current.opacity = TOP_OPACITY * fade
+    if (dirtMat.current) dirtMat.current.opacity = DIRT_OPACITY * fade
+  })
+
   return (
     <group position={[island.center.x, 0, island.center.z]}>
       {/* Unlit, so it stays a flat shape against the sky however the sun moves
           — a lit dark surface reads as an island at dusk rather than a mystery. */}
       <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-        <meshBasicMaterial color="#36435c" transparent opacity={0.82} depthWrite={false} side={THREE.DoubleSide} />
+        <meshBasicMaterial ref={topMat} color="#36435c" transparent opacity={TOP_OPACITY} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
       <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-        <meshBasicMaterial color="#232d3d" transparent opacity={0.78} depthWrite={false} />
+        <meshBasicMaterial ref={dirtMat} color="#232d3d" transparent opacity={DIRT_OPACITY} depthWrite={false} />
       </mesh>
     </group>
   )

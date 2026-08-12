@@ -1513,10 +1513,21 @@ function ringSprites(
 // Cloud drawn *over* an island the group hasn't earned, rather than under it.
 // This is what makes a shrouded island read as veiled instead of as a dark
 // shape someone forgot to texture.
-// Enough to hide what's *on* the island, not enough to hide the island. Seven
-// small puffs low over the surface: the shape stays readable as a dark mass, its
-// contents don't.
-const VEIL_RING: CloudRing = { count: 7, r0: 0.2, r1: 0.75, y0: 0.2, y1: 1.3, w0: 4, w1: 7 }
+//
+// The rim ring is the one that matters. Puffs laid only *inside* the disc hide
+// the island's contents but leave its outline crisp, which is fine at distance
+// — the sky rings in front of it do the work — and reads as a flat grey sticker
+// once the camera comes close. Straddling the rim breaks the silhouette itself,
+// so the shape dissolves into mist from any range. The canopy hides what's on
+// it; the skirt ties the veil down into the island's own collar.
+const VEIL_RINGS: CloudRing[] = [
+  { count:  9, r0: 0.00, r1: 0.60, y0:  0.4, y1:  1.7, w0: 5, w1:  9 },  // canopy
+  { count: 13, r0: 0.82, r1: 1.14, y0: -1.1, y1:  1.0, w0: 6, w1: 11 },  // rim — breaks the outline
+  { count:  6, r0: 0.45, r1: 0.95, y0: -2.4, y1: -0.9, w0: 6, w1: 10 },  // skirt, down into the collar
+]
+// Veil radii are fractions of an island's true reach: a full-size squircle
+// bulges to ≈15.9 at its diagonals, not FSIZE/2.
+const VEIL_REACH = 16
 
 /**
  * Every cloud in the scene: a mist collar around each island — earned or not,
@@ -1536,7 +1547,7 @@ function makeSpriteDefs(
     for (const ring of COLLAR_RINGS) ringSprites(ring, rng, centre, 1, defs)
   }
   for (const centre of veiled) {
-    ringSprites(VEIL_RING, rng, centre, 14, defs)
+    for (const ring of VEIL_RINGS) ringSprites(ring, rng, centre, VEIL_REACH, defs)
   }
   for (const ring of SKY_RINGS) ringSprites(ring, rng, { x: 0, z: 0 }, reach, defs)
   return defs
