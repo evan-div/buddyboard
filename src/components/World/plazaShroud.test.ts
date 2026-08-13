@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shroudFade } from './PlazaArchipelago'
+import { shroudFade, topViewFade } from './PlazaArchipelago'
 
 // The fade that keeps an unearned island a mystery at every range. Far out the
 // sky rings in front of it do the hiding and it can sit at full strength; up
@@ -24,6 +24,30 @@ describe('shroudFade', () => {
     for (let d = 5; d <= 200; d += 5) {
       const fade = shroudFade(d)
       expect(fade).toBeGreaterThanOrEqual(prev)
+      prev = fade
+    }
+  })
+})
+
+// From a level view the shroud is read by its edge; from above the top face is
+// the whole shape, and at full strength it reads as a hole in the cloud sea.
+describe('topViewFade', () => {
+  it('leaves the top face alone at a level view', () => {
+    expect(topViewFade(0)).toBe(1)
+  })
+
+  it('all but removes it when the camera looks steeply down', () => {
+    expect(topViewFade(1)).toBeLessThan(0.25)
+    // Clamped at 45° and beyond, so a top-down camera doesn't invert it.
+    expect(topViewFade(4)).toBe(topViewFade(1))
+    expect(topViewFade(-1)).toBe(1)
+  })
+
+  it('thins monotonically as the camera rises', () => {
+    let prev = topViewFade(0)
+    for (let rise = 0.1; rise <= 2; rise += 0.1) {
+      const fade = topViewFade(rise)
+      expect(fade).toBeLessThanOrEqual(prev)
       prev = fade
     }
   })

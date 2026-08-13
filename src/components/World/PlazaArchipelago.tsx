@@ -29,6 +29,69 @@ const TOP_OPACITY = 0.82
 const DIRT_OPACITY = 0.78
 
 /**
+ * The column of earth under an island, as a stack of tapering segments that
+ * fade out with depth instead of one slab with a bottom.
+ *
+ * It used to be a single 90-deep extrusion — deep enough that the end was
+ * always somewhere off-screen, which held up right until the camera could pull
+ * back to 113 and tilt down. Then the column ran straight through every cloud
+ * layer and out the bottom of the frame. Depth can't fix that (there is always
+ * an angle that sees the end) so the column dissolves instead: each segment is
+ * narrower and fainter than the one above, and the last is faint enough that
+ * there is nothing to see when it stops.
+ *
+ * The segments are cumulative fractions of `depth`, so callers keep tuning one
+ * number.
+ */
+// Four steps rather than three, and the taper is slight: a segment narrower
+// than the one above leaves a ledge, and from a high camera a big ledge is a
+// hard straight edge halfway down the column — the exact artefact this is
+// supposed to remove. Small steps read as a column narrowing into haze.
+const COLUMN_SEGMENTS = [
+  { end: 0.28, opacity: 1.00, scale: 1.00 },
+  { end: 0.52, opacity: 0.62, scale: 0.98 },
+  { end: 0.76, opacity: 0.32, scale: 0.94 },
+  { end: 1.00, opacity: 0.13, scale: 0.88 },
+]
+
+function DirtColumn({
+  shape, depth, material,
+}: {
+  shape: THREE.Shape
+  depth: number
+  /** Renders one segment; opacity is the segment's share of full strength. */
+  material: (opacity: number) => ReactNode
+}) {
+  const segments = useMemo(() => {
+    let from = 0
+    return COLUMN_SEGMENTS.map(({ end, opacity, scale }) => {
+      const to = depth * end
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: to - from, bevelEnabled: false })
+      const seg = { geo, top: from, opacity, scale }
+      from = to
+      return seg
+    })
+  }, [shape, depth])
+  useEffect(() => () => { for (const s of segments) s.geo.dispose() }, [segments])
+
+  return (
+    <>
+      {segments.map((s, i) => (
+        <mesh
+          key={i}
+          geometry={s.geo}
+          rotation={[Math.PI / 2, 0, 0]}
+          position={[0, -0.01 - s.top, 0]}
+          scale={[s.scale, s.scale, 1]}
+        >
+          {material(s.opacity)}
+        </mesh>
+      ))}
+    </>
+  )
+}
+
+/**
  * One island's body: the dirt column under the grass and the rocks in its rim.
  * `children` is where an island's own scenery goes — it renders in the island's
  * local frame, so a prop placed at (0, 0, 0) sits at the island's centre.
@@ -49,11 +112,7 @@ export function IslandGround({
 
   const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
-  const dirtGeo = useMemo(
-    () => new THREE.ExtrudeGeometry(shape, { depth: dirtDepth, bevelEnabled: false }),
-    [shape, dirtDepth],
-  )
-  useEffect(() => () => { topGeo.dispose(); dirtGeo.dispose() }, [topGeo, dirtGeo])
+  useEffect(() => () => { topGeo.dispose() }, [topGeo])
 
   useEffect(() => {
     const mesh = rocksRef.current
@@ -90,9 +149,19 @@ export function IslandGround({
           <meshStandardMaterial map={grassTex} roughness={0.95} side={THREE.DoubleSide} />
         </mesh>
       )}
-      <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-        <meshStandardMaterial map={dirtTex} roughness={0.95} />
-      </mesh>
+      <DirtColumn
+        shape={shape}
+        depth={dirtDepth}
+        material={(opacity) => (
+          <meshStandardMaterial
+            map={dirtTex}
+            roughness={0.95}
+            transparent={opacity < 1}
+            opacity={opacity}
+            depthWrite={opacity === 1}
+          />
+        )}
+      />
       <instancedMesh ref={rocksRef} args={[undefined, undefined, rockCount]}>
         <dodecahedronGeometry args={[1, 0]} />
         <meshStandardMaterial roughness={0.9} flatShading />
@@ -120,30 +189,50 @@ export function IslandGround({
 const SHROUD_NEAR = 40
 const SHROUD_FAR = 95
 const SHROUD_NEAR_FADE = 0.42
+// Shorter than an earned island's column: there is nothing under a shroud worth
+// suggesting, and the taper does the rest.
+const SHROUD_DEPTH = 44
 
 export function shroudFade(distance: number): number {
   const t = (distance - SHROUD_NEAR) / (SHROUD_FAR - SHROUD_NEAR)
   return SHROUD_NEAR_FADE + (1 - SHROUD_NEAR_FADE) * Math.min(1, Math.max(0, t))
 }
 
+/**
+ * Extra thinning of the *top* face by how steeply the camera looks down on it.
+ *
+ * From a level view you read a shroud by its edge and the top is barely in
+ * frame, so it can stay strong. Look down on it and that same face becomes the
+ * whole shape — a dark navy disc lying on a white cloud floor, which reads as a
+ * hole punched in the sea rather than as an island under mist. `rise` is the
+ * camera's height above the island over its horizontal distance: 0 level, 1 at
+ * 45°, clamped past that.
+ */
+const TOP_STEEP_FADE = 0.18
+
+export function topViewFade(rise: number): number {
+  const steep = Math.min(1, Math.max(0, rise))
+  return 1 - (1 - TOP_STEEP_FADE) * steep
+}
+
 function ShroudedIsland({ island }: { island: IslandDef }) {
   const shape = useMemo(() => makePlazaShape(island.edge), [island.edge])
   const topGeo = useMemo(() => new THREE.ShapeGeometry(shape), [shape])
-  const dirtGeo = useMemo(
-    () => new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: false }),
-    [shape],
-  )
-  useEffect(() => () => { topGeo.dispose(); dirtGeo.dispose() }, [topGeo, dirtGeo])
+  useEffect(() => () => { topGeo.dispose() }, [topGeo])
 
   const topMat = useRef<THREE.MeshBasicMaterial>(null)
-  const dirtMat = useRef<THREE.MeshBasicMaterial>(null)
+  // One per column segment, each carrying its own share of DIRT_OPACITY.
+  const dirtMats = useRef<(THREE.MeshBasicMaterial | null)[]>([])
 
   useFrame(({ camera }) => {
     const dx = camera.position.x - island.center.x
     const dz = camera.position.z - island.center.z
-    const fade = shroudFade(Math.hypot(dx, dz))
-    if (topMat.current) topMat.current.opacity = TOP_OPACITY * fade
-    if (dirtMat.current) dirtMat.current.opacity = DIRT_OPACITY * fade
+    const flat = Math.hypot(dx, dz)
+    const fade = shroudFade(flat)
+    if (topMat.current) topMat.current.opacity = TOP_OPACITY * fade * topViewFade(camera.position.y / Math.max(1, flat))
+    for (const mat of dirtMats.current) {
+      if (mat) mat.opacity = DIRT_OPACITY * fade * mat.userData.share
+    }
   })
 
   return (
@@ -153,9 +242,23 @@ function ShroudedIsland({ island }: { island: IslandDef }) {
       <mesh geometry={topGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
         <meshBasicMaterial ref={topMat} color="#36435c" transparent opacity={TOP_OPACITY} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <mesh geometry={dirtGeo} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-        <meshBasicMaterial ref={dirtMat} color="#232d3d" transparent opacity={DIRT_OPACITY} depthWrite={false} />
-      </mesh>
+      <DirtColumn
+        shape={shape}
+        depth={SHROUD_DEPTH}
+        material={(share) => (
+          <meshBasicMaterial
+            ref={(m) => {
+              if (!m) return
+              m.userData.share = share
+              if (!dirtMats.current.includes(m)) dirtMats.current.push(m)
+            }}
+            color="#232d3d"
+            transparent
+            opacity={DIRT_OPACITY * share}
+            depthWrite={false}
+          />
+        )}
+      />
     </group>
   )
 }

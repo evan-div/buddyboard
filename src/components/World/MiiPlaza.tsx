@@ -1472,9 +1472,12 @@ type CloudRing = { count: number; r0: number; r1: number; y0: number; y1: number
 
 // The mist an island sits in — laid around each island's own centre, which is
 // what makes it read as floating rather than as a hole in a cloud sea.
+// Trimmed from 22/26 to pay for the veil and sea rings below: on a shrouded
+// island the veil's own rim ring now sits in the same band, and on an earned one
+// the thicker sea reads through the gaps. Sprite count is the draw-call budget.
 const COLLAR_RINGS: CloudRing[] = [
-  { count: 22, r0: 14, r1: 18, y0: -2.0, y1: -3.5, w0: 3, w1: 6 },
-  { count: 26, r0: 17, r1: 24, y0: -2.5, y1: -4.5, w0: 4, w1: 8 },
+  { count: 19, r0: 14, r1: 18, y0: -2.0, y1: -3.5, w0: 3, w1: 6 },
+  { count: 22, r0: 17, r1: 24, y0: -2.5, y1: -4.5, w0: 4, w1: 8 },
 ]
 
 // The sky the whole archipelago sits in. Radii are fractions of its reach, so
@@ -1484,10 +1487,16 @@ const COLLAR_RINGS: CloudRing[] = [
 const SKY_RINGS: CloudRing[] = [
   { count: 26, r0: 1.05, r1: 1.35, y0:  1.0, y1:  4.0, w0:  8, w1: 13 },  // above the land, near the camera
   { count: 24, r0: 1.30, r1: 1.70, y0: -0.5, y1:  2.0, w0:  8, w1: 15 },
+  { count: 34, r0: 0.00, r1: 0.62, y0: -2.8, y1: -5.5, w0:  9, w1: 16 },  // the sea directly under the archipelago
   { count: 56, r0: 0.60, r1: 1.10, y0: -3.0, y1: -5.0, w0:  8, w1: 14 },  // the sea below, between islands
   { count: 52, r0: 1.10, r1: 1.60, y0: -1.0, y1: -3.0, w0: 11, w1: 18 },
   { count: 50, r0: 1.60, r1: 2.20, y0:  0.0, y1: -2.0, w0: 14, w1: 23 },  // horizon level
   { count: 48, r0: 2.20, r1: 3.00, y0:  1.5, y1: -0.5, w0: 19, w1: 30 },  // far sky
+  // Deep sea, out past where the camera can pull back to. Pulled all the way
+  // out and tilted down, the bottom of the frame is the volume *below and in
+  // front of* the land — without this it is empty sky with island columns
+  // hanging in it.
+  { count: 34, r0: 1.70, r1: 2.60, y0: -5.0, y1: -12.0, w0: 18, w1: 30 },
 ]
 
 function ringSprites(
@@ -1521,7 +1530,7 @@ function ringSprites(
 // so the shape dissolves into mist from any range. The canopy hides what's on
 // it; the skirt ties the veil down into the island's own collar.
 const VEIL_RINGS: CloudRing[] = [
-  { count:  9, r0: 0.00, r1: 0.60, y0:  0.4, y1:  1.7, w0: 5, w1:  9 },  // canopy
+  { count: 15, r0: 0.00, r1: 0.78, y0:  0.4, y1:  2.0, w0: 7, w1: 13 },  // canopy — has to cover the disc from straight above
   { count: 13, r0: 0.82, r1: 1.14, y0: -1.1, y1:  1.0, w0: 6, w1: 11 },  // rim — breaks the outline
   { count:  6, r0: 0.45, r1: 0.95, y0: -2.4, y1: -0.9, w0: 6, w1: 10 },  // skirt, down into the collar
 ]
@@ -1645,9 +1654,13 @@ function Clouds({ centres, reach, veiled }: {
     cv.width   = cv.height = size
     const ctx  = cv.getContext('2d')!
     const g    = ctx.createRadialGradient(c, c, c * 0.05, c, c, c)
-    g.addColorStop(0.00, 'rgba(244,244,244,0.80)')
-    g.addColorStop(0.45, 'rgba(244,244,244,0.60)')
-    g.addColorStop(0.72, 'rgba(244,244,244,0.30)')
+    // Near-opaque under the land and holding that most of the way out: this is
+    // the floor that stops you seeing the columns hanging beneath the islands
+    // when the camera is pulled back and tilted down. It still reaches zero at
+    // the rim so the plane's own edge never shows.
+    g.addColorStop(0.00, 'rgba(244,244,244,0.94)')
+    g.addColorStop(0.45, 'rgba(244,244,244,0.86)')
+    g.addColorStop(0.72, 'rgba(244,244,244,0.52)')
     g.addColorStop(1.00, 'rgba(244,244,244,0.00)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, size, size)
@@ -1799,7 +1812,13 @@ function Scene({
     () => ISLANDS.filter((i) => pointsGiven < i.unlockAtPoints).map((i) => i.center),
     [pointsGiven],
   )
-  const archipelagoReach = useMemo(() => archipelagoRadius(pointsGiven), [pointsGiven])
+  // Scaled to *every* island, not the earned ones — same reasoning as camReach
+  // above. Derived from what's unlocked, a new group's whole cloud shell shrank
+  // to the 16 units of the home island while the camera pulled back to 113 and
+  // four shrouds sat at 38 with columns hanging under them: the sea was a puff
+  // around home and the rest of the sky was bare, so zooming out showed the
+  // undersides of islands the group hasn't even earned.
+  const archipelagoReach = useMemo(() => archipelagoRadius(ALL_UNLOCKED_POINTS), [])
   // Everything that can be stood on, thrown onto, or cast a shadow over.
   const groundIslands = useMemo(() => unlockedIslands(pointsGiven), [pointsGiven])
 
