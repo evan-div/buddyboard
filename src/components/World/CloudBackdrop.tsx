@@ -55,6 +55,7 @@ export default memo(function CloudBackdrop() {
   return (
     <div
       aria-hidden
+      className="cloud-layer"
       style={{
         position: 'absolute',
         inset: 0,
@@ -64,9 +65,17 @@ export default memo(function CloudBackdrop() {
     >
       <style>{`
         @keyframes cloud-drift {
-          from { transform: translate3d(calc(var(--amp) * -1), 0, 0); }
-          to   { transform: translate3d(var(--amp), 0, 0); }
+          from { transform: translate3d(calc(var(--amp) * var(--cloud-scale) * -1), 0, 0); }
+          to   { transform: translate3d(calc(var(--amp) * var(--cloud-scale)), 0, 0); }
         }
+        /* Cloud sizes are authored in vw, which reads far too small on a phone:
+           a 30vw cloud is ~120px on a 390px screen. Scale them up as the
+           viewport narrows so the sky stays fluffy at every width. */
+        .cloud-layer { --cloud-scale: 1; }
+        @media (max-width: 1100px) { .cloud-layer { --cloud-scale: 1.3; } }
+        @media (max-width: 768px)  { .cloud-layer { --cloud-scale: 1.7; } }
+        @media (max-width: 480px)  { .cloud-layer { --cloud-scale: 2.2; } }
+        .cloud-sprite { width: calc(var(--w) * var(--cloud-scale)); }
         @media (prefers-reduced-motion: reduce) {
           .cloud-sprite { animation: none !important; }
         }
@@ -79,7 +88,7 @@ export default memo(function CloudBackdrop() {
             position: 'absolute',
             top: `${c.top}%`,
             left: `${c.left}%`,
-            width: `${c.width}vw`,
+            ['--w' as string]: `${c.width}vw`,
             aspectRatio: '16 / 9',
             backgroundImage: `url(/Cloud${c.tex}.svg)`,
             backgroundSize: 'contain',
