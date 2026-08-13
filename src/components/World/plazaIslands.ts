@@ -34,6 +34,12 @@ export type IslandDef = {
   edge: EdgeShape
   /** Cumulative points given required to raise it. 0 = always present. */
   unlockAtPoints: number
+  /**
+   * The island this one is bridged to. Undefined only for home. Always an
+   * island with a lower threshold, so the arm you walk out along is finished
+   * behind you before its next link appears.
+   */
+  parentId?: string
 }
 
 /**
@@ -49,20 +55,51 @@ export function edgeForIsland(id: string): EdgeShape {
   return makeEdgeShape(mix(hashUid(id), 0xed6e))
 }
 
-// Home sits at the origin; satellites ring it at the same size, far enough out
-// to leave a clean gap for the bridge. Angles are spread so no two bridges run
-// close to each other.
+// Home is a hub with arms growing out of it. Each arm is a chain: the first
+// island on it bridges to home, the next bridges to that one, and so on, so the
+// archipelago extends *outward* as the group earns it rather than filling in a
+// ring around home. Home stays central and the framing stays balanced however
+// far the arms get.
 //
-// The ring has to clear two *true* rims, not two nominal ones: a full-size
-// island reaches ~15.9 at its diagonals, so the old 27 — chosen when satellites
-// were half-size — would overlap home by a couple of units. 38 leaves decks of
-// 10-11 units for the shipped islands (they were 8.2 when the satellites were
-// small) and at least 9 for any island the seeder can produce.
-const RING = 38
+// STEP is the centre-to-centre spacing along an arm, and it has to clear two
+// *true* rims, not two nominal ones: a full-size island reaches ~15.9 at its
+// diagonals, so the old 27 — chosen when satellites were half-size — would
+// overlap by a couple of units. 38 leaves decks of 10-11 units for the shipped
+// islands and at least 9 for any island the seeder can produce.
+const STEP = 38
 
-function ring(angleDeg: number): { x: number; z: number } {
-  const a = (angleDeg * Math.PI) / 180
-  return { x: Math.cos(a) * RING, z: Math.sin(a) * RING }
+// Each arm leaves home on its own bearing and bends by BEND at every link, so
+// an arm curves away instead of reading as a ruler-straight causeway. The two
+// bearings are 120° apart, which keeps the empty quarter behind home rather
+// than beside it.
+const ARM_BEARINGS = [35, 155]
+// Gentle. A big outward bend straightens the two arms into one long line
+// through home — at BEND 20 they end up on bearings 15° and 175°, which is the
+// causeway layout, not a hub.
+const BEND = 8
+
+function polar(from: { x: number; z: number }, bearingDeg: number, distance = STEP) {
+  const a = (bearingDeg * Math.PI) / 180
+  return { x: from.x + Math.cos(a) * distance, z: from.z + Math.sin(a) * distance }
+}
+
+const ORIGIN = { x: 0, z: 0 }
+
+/**
+ * The nth centre out along an arm (n = 0 is the island nearest home).
+ *
+ * Each arm bends *outward* — away from the bisector between the two bearings —
+ * so the pair opens up as it extends. Bending them the other way (arm 0
+ * anticlockwise, arm 1 clockwise, which is what the bearings suggest at a
+ * glance) curls the two arms toward each other and the whole archipelago reads
+ * as one horseshoe chain rather than as a hub with arms.
+ */
+function arm(index: number, step: number): { x: number; z: number } {
+  const bearing = ARM_BEARINGS[index]
+  const turn = index === 0 ? -BEND : BEND
+  let at = ORIGIN
+  for (let n = 0; n <= step; n++) at = polar(at, bearing + turn * n)
+  return at
 }
 
 export const ISLANDS: IslandDef[] = [
@@ -81,40 +118,44 @@ export const ISLANDS: IslandDef[] = [
     label: 'The Garden',
     emoji: '🌷',
     blurb: 'The first chunk of land the group earned together.',
-    center: ring(30),
+    center: arm(0, 0),
     scale: 1,
     edge: edgeForIsland('garden'),
     unlockAtPoints: 500,
+    parentId: 'home',
   },
   {
     id: 'orchard',
     label: 'The Orchard',
     emoji: '🍎',
     blurb: 'Room for the long-lived things.',
-    center: ring(120),
+    center: arm(1, 0),
     scale: 1,
     edge: edgeForIsland('orchard'),
     unlockAtPoints: 1500,
+    parentId: 'home',
   },
   {
     id: 'hill',
     label: 'Monument Hill',
     emoji: '🗿',
     blurb: 'Raised for the milestones worth remembering.',
-    center: ring(210),
+    center: arm(0, 1),
     scale: 1,
     edge: edgeForIsland('hill'),
     unlockAtPoints: 3000,
+    parentId: 'garden',
   },
   {
     id: 'observatory',
     label: 'The Observatory',
     emoji: '🔭',
     blurb: 'The far island, for groups that went the distance.',
-    center: ring(300),
+    center: arm(1, 1),
     scale: 1,
     edge: edgeForIsland('observatory'),
     unlockAtPoints: 5000,
+    parentId: 'orchard',
   },
 ]
 
@@ -207,9 +248,11 @@ function deckAnchorRadius(edge: EdgeShape, bearing: number): number {
 }
 
 /**
- * The bridge between an island and home: the two points where it meets each
- * island's rim, plus the direction and span between them. Bridges run radially,
- * so they always land square on both rims.
+ * The bridge between an island and its parent: the two points where it meets
+ * each island's rim, plus the direction and span between them. A bridge runs
+ * straight down the line joining the two centres, so it always lands square on
+ * both rims — which held when every bridge ran radially out of home, and still
+ * holds now that they chain along an arm.
  */
 export type Bridge = {
   from: { x: number; z: number }
@@ -230,17 +273,19 @@ export function bridgeFor(island: IslandDef): Bridge | null {
 }
 
 function buildBridge(island: IslandDef): Bridge | null {
-  if (island.id === HOME_ISLAND.id) return null
-  const dx = island.center.x - HOME_ISLAND.center.x
-  const dz = island.center.z - HOME_ISLAND.center.z
+  if (!island.parentId) return null
+  const parent = getIsland(island.parentId)
+  const dx = island.center.x - parent.center.x
+  const dz = island.center.z - parent.center.z
   const angle = Math.atan2(dz, dx)
   const ux = Math.cos(angle)
   const uz = Math.sin(angle)
-  // Each end sits on the rim it actually meets. The satellite's near side is at
-  // its own local bearing angle+π, which is a different radius from home's.
-  const homeR = deckAnchorRadius(HOME_ISLAND.edge, angle)
+  // Each end sits on the rim it actually meets. The far island's near side is at
+  // its own local bearing angle+π, which is a different radius from the
+  // parent's — the two outlines differ.
+  const nearR = deckAnchorRadius(parent.edge, angle)
   const farR = deckAnchorRadius(island.edge, angle + Math.PI)
-  const from = { x: HOME_ISLAND.center.x + ux * homeR, z: HOME_ISLAND.center.z + uz * homeR }
+  const from = { x: parent.center.x + ux * nearR, z: parent.center.z + uz * nearR }
   const to = { x: island.center.x - ux * farR, z: island.center.z - uz * farR }
   return {
     from,

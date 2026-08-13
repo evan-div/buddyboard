@@ -18,6 +18,7 @@ import {
   BRIDGE_WIDTH,
   isOnIsland,
   isOnGround,
+  isOnBridge,
   islandAt,
   resolveArchipelagoGround,
 } from './plazaIslands'
@@ -111,18 +112,19 @@ describe('geometry', () => {
   it('lands each bridge on both rims, square to them', () => {
     for (const i of ISLANDS.slice(1)) {
       const b = bridgeFor(i)!
-      const angle = Math.atan2(i.center.z, i.center.x)
+      const parent = getIsland(i.parentId)
+      const angle = Math.atan2(i.center.z - parent.center.z, i.center.x - parent.center.x)
       expect(b.length).toBeGreaterThan(0)
-      // The deck points from home out toward the island...
+      // The deck points from the parent island out toward this one...
       expect(angle).toBeCloseTo(b.angle, 6)
       // ...and each end sits inside the rim it actually meets — a different
       // radius at each end now that the outlines differ. The anchor tucks under
       // the grass by the bury plus however much the rim falls away across the
       // deck's width; a couple of units covers both, and the corner test below
       // is what actually pins the near edge.
-      const fromR = Math.hypot(b.from.x, b.from.z)
-      expect(fromR).toBeLessThan(edgeRadius(angle, HOME_ISLAND.edge))
-      expect(fromR).toBeGreaterThan(edgeRadius(angle, HOME_ISLAND.edge) - 2)
+      const fromR = Math.hypot(b.from.x - parent.center.x, b.from.z - parent.center.z)
+      expect(fromR).toBeLessThan(edgeRadius(angle, parent.edge))
+      expect(fromR).toBeGreaterThan(edgeRadius(angle, parent.edge) - 2)
       const toR = Math.hypot(b.to.x - i.center.x, b.to.z - i.center.z)
       expect(toR).toBeLessThan(edgeRadius(angle + Math.PI, i.edge))
       expect(toR).toBeGreaterThan(edgeRadius(angle + Math.PI, i.edge) - 2)
@@ -259,15 +261,32 @@ describe('ground', () => {
   })
 
   it('reports open sky between the islands, clear of the decks', () => {
-    // The islands sit exactly 90° apart, so the gaps are on the bisectors —
-    // 45° off any bearing, well past home's rim and short of a satellite's.
-    for (const deg of [75, 165, 255, 345]) {
+    // Written against the layout rather than against specific bearings: the
+    // islands used to sit exactly 90° apart so the gaps were always on the
+    // bisectors, which stopped being true the moment they grew into arms. The
+    // invariant that survives is the one that matters — in the band between
+    // home's rim and the next island's, the only footing is a deck.
+    let sky = 0
+    for (let deg = 0; deg < 360; deg += 3) {
       const a = (deg * Math.PI) / 180
       for (const r of [22, 26, 30]) {
-        const pos = { x: Math.cos(a) * r, z: Math.sin(a) * r }
-        expect(resolveArchipelagoGround(pos, grounds), `(${deg}°, ${r}) should be open sky`).toBe(false)
+        const at = { x: Math.cos(a) * r, z: Math.sin(a) * r }
+        // The resolver captures a full BRIDGE_WIDTH either side of the
+        // centreline — wider than the planks — and pulls you back between the
+        // rails, so that is the band to compare against.
+        const onDeck = ISLANDS.some((i) => isOnBridge(at.x, at.z, i, BRIDGE_WIDTH))
+        // An arm reaches into this band: the first island out is 38 away with a
+        // rim of ~16, so it owns everything past ~22 on its own bearing.
+        const solid = onDeck || islandAt(at.x, at.z, grounds) !== null
+        const pos = { ...at }
+        const grounded = resolveArchipelagoGround(pos, grounds)
+        expect(grounded, `(${deg}°, ${r}) should be ${solid ? 'solid' : 'open sky'}`).toBe(solid)
+        if (!grounded) sky++
       }
     }
+    // Most of that band is sky — a layout that filled it would pass the check
+    // above vacuously.
+    expect(sky).toBeGreaterThan(300)
   })
 
   it('offers no footing on an island the group has not earned', () => {
