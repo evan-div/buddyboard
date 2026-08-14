@@ -48,7 +48,8 @@ import {
 import { auth, db } from './firebase'
 import { dayKey } from './utils'
 import { seedsForCheckin } from './plazaGrowth'
-import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs, Checkin, PlazaObject, PlazaTile } from './types'
+import { seedSpendField, type SeedHolder } from './commitments'
+import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs, Checkin, PlazaObject, PlazaTile, SeedRarity } from './types'
 
 // Helper to convert Firestore Timestamp to Date
 function fromTimestamp(ts: Timestamp | Date | undefined): Date {
@@ -338,6 +339,7 @@ function mapMemberDoc(data: Record<string, unknown>): GroupMember {
     badges: data.badges ?? [],
     lastSeen: data.lastSeen ? fromTimestamp(data.lastSeen as Timestamp) : undefined,
     seeds: (data.seeds as number) ?? 0,
+    seedsByRarity: (data.seedsByRarity as GroupMember['seedsByRarity']) ?? {},
     lastCheckinDate: data.lastCheckinDate as string | undefined,
     checkinStreak: (data.checkinStreak as number) ?? 0,
     longestCheckinStreak: (data.longestCheckinStreak as number) ?? 0,
@@ -1193,14 +1195,22 @@ export function subscribeToCheckins(
   })
 }
 
-// Plant a seed on a tile. Consumes one seed and stamps the group's current
-// vitality so growth can be computed on read. Tile emptiness is enforced by the
-// UI (which only offers free tiles); a rare double-plant just overlaps visually.
+// Plant a seed on a tile. Consumes one seed of the requested rarity and stamps
+// the group's current vitality so growth can be computed on read. Tile emptiness
+// is enforced by the UI (which only offers free tiles); a rare double-plant just
+// overlaps visually.
 export async function plantSeed(
   groupId: string,
   uid: string,
-  opts: { species: string; tile: PlazaTile; dedication?: string },
+  opts: {
+    species: string
+    tile: PlazaTile
+    dedication?: string
+    rarity?: SeedRarity
+    earnedFrom?: string
+  },
 ): Promise<void> {
+  const rarity: SeedRarity = opts.rarity ?? 'common'
   await runTransaction(db, async (tx) => {
     const groupRef = doc(db, 'groups', groupId)
     const memberRef = doc(db, 'groups', groupId, 'members', uid)
@@ -1208,8 +1218,16 @@ export async function plantSeed(
     if (!memberSnap.exists()) throw new Error('You are not a member of this group')
 
     const m = memberSnap.data()
-    const seeds: number = m.seeds ?? 0
-    if (seeds < 1) throw new Error('You have no seeds to plant')
+    // Which counter to draw from: commons drain the legacy `seeds` scalar before
+    // the new per-rarity bucket, so old inventories are spent first.
+    const spendField = seedSpendField(m as SeedHolder, rarity)
+    if (!spendField) {
+      throw new Error(
+        rarity === 'common'
+          ? 'You have no seeds to plant'
+          : `You have no ${rarity} seeds to plant`,
+      )
+    }
     const plantedByName: string = m.displayName ?? uid
     const vitality: number = groupSnap.data()?.plazaActiveDays ?? 0
 
@@ -1223,10 +1241,12 @@ export async function plantSeed(
       plantedByName,
       plantedAt: serverTimestamp(),
       plantedAtVitality: vitality,
+      rarity,
     }
     if (opts.dedication) objData.dedication = opts.dedication
+    if (opts.earnedFrom) objData.earnedFrom = opts.earnedFrom
     tx.set(objRef, objData)
-    tx.update(memberRef, { seeds: increment(-1) })
+    tx.update(memberRef, { [spendField]: increment(-1) })
   })
 }
 
@@ -1254,6 +1274,9 @@ export function subscribeToPlazaObjects(
         plantedAt: fromTimestamp(data.plantedAt),
         plantedAtVitality: (data.plantedAtVitality as number) ?? 0,
         dedication: data.dedication as string | undefined,
+        // Absent on every plant grown before commitments existed — reads as common.
+        rarity: (data.rarity as SeedRarity | undefined) ?? 'common',
+        earnedFrom: data.earnedFrom as string | undefined,
       }
     }))
   })

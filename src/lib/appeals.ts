@@ -35,8 +35,14 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { awardCourtWinBadge, sendPushToUser } from './firestore'
+import { revokeCommitmentSeed } from './commitmentsData'
 import { tallyVotes } from './voteTally'
 import type { GroupNotification, CourtCase, CaseStatus } from './types'
+
+// A guilty verdict on a commitment dispute revokes the seed instead of moving
+// points. Captured during the transaction and applied after it commits, since
+// the revocation is its own guarded transaction.
+type SeedRevocation = { commitmentId: string; uid: string }
 
 function fromTs(ts: Timestamp | Date | undefined): Date {
   if (!ts) return new Date()
@@ -66,9 +72,17 @@ function fromNotifDoc(id: string, data: DocumentData): GroupNotification {
   }
 }
 
+// What a case is actually about. Absent means 'transaction' — every case filed
+// before commitments existed, and every points appeal since.
+function isCommitmentCase(data: DocumentData): boolean {
+  return data.subject === 'commitment'
+}
+
 function fromCaseDoc(id: string, data: DocumentData): CourtCase {
   return {
     id,
+    subject: (data.subject as CourtCase['subject']) ?? 'transaction',
+    commitmentId: data.commitmentId as string | undefined,
     transactionId: data.transactionId,
     defendantUid: data.defendantUid,
     defendantName: data.defendantName,
@@ -242,6 +256,11 @@ export async function reviewAppeal(
     if (!caseSnap.exists()) throw new Error('Case not found')
     const c = caseSnap.data()
 
+    // Commitment disputes skip the accept/deny step — the dispute is itself the
+    // accusation, so they open straight at 'in_court'. Nothing here should ever
+    // reach one, and accepting a zero-point case would post junk to the feed.
+    if (isCommitmentCase(c)) throw new Error('Commitment disputes are decided by vote')
+
     // Clear the accuser's notification
     tx.update(doc(db, 'groups', groupId, 'notifications', accuserNotifId), {
       cleared: true,
@@ -349,9 +368,11 @@ export async function castVote(
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
   const groupRef = doc(db, 'groups', groupId)
   let winnerUid: string | null = null
+  let revocation: SeedRevocation | null = null
 
   await runTransaction(db, async (tx) => {
     winnerUid = null
+    revocation = null
     // All reads must come before writes in a Firestore transaction
     const [caseSnap, groupSnap] = await Promise.all([tx.get(caseRef), tx.get(groupRef)])
     if (!caseSnap.exists()) throw new Error('Case not found')
@@ -379,7 +400,13 @@ export async function castVote(
 
     if (resolved) {
       winnerUid = (newStatus === 'resolved_innocent' ? c.defendantUid : c.accuserUid) as string
-      if (newStatus === 'resolved_innocent') {
+      if (isCommitmentCase(c)) {
+        // Nothing to restore — a commitment case moves a seed, not points. An
+        // innocent verdict simply leaves the seed where it already is.
+        if (newStatus === 'resolved_guilty') {
+          revocation = { commitmentId: c.commitmentId as string, uid: c.defendantUid as string }
+        }
+      } else if (newStatus === 'resolved_innocent') {
         tx.update(doc(db, 'groups', groupId, 'members', c.defendantUid), {
           totalPoints: increment(c.points),
         })
@@ -420,7 +447,15 @@ export async function castVote(
     }
   })
 
+  await applyRevocation(groupId, revocation)
   if (winnerUid) awardCourtWinBadge(groupId, winnerUid).catch(() => {})
+}
+
+// Revoke a seed won on a disputed commitment. Runs after the case transaction
+// commits because it guards its own document; failure must not undo the verdict.
+async function applyRevocation(groupId: string, r: SeedRevocation | null): Promise<void> {
+  if (!r?.commitmentId) return
+  await revokeCommitmentSeed(groupId, r.commitmentId, r.uid).catch(() => {})
 }
 
 // ─── Expired court cases ──────────────────────────────────────────────────────
@@ -431,9 +466,11 @@ export async function resolveExpiredCase(
 ): Promise<void> {
   const caseRef = doc(db, 'groups', groupId, 'cases', caseId)
   let winnerUid: string | null = null
+  let revocation: SeedRevocation | null = null
 
   await runTransaction(db, async (tx) => {
     winnerUid = null
+    revocation = null
     const caseSnap = await tx.get(caseRef)
     if (!caseSnap.exists()) return
     const c = caseSnap.data()
@@ -449,7 +486,13 @@ export async function resolveExpiredCase(
 
     tx.update(caseRef, { status: newStatus, resolvedAt: serverTimestamp() })
 
-    if (newStatus === 'resolved_innocent') {
+    if (isCommitmentCase(c)) {
+      // A commitment case moves a seed, not points — an innocent verdict leaves
+      // the seed alone, a guilty one revokes it after this commits.
+      if (newStatus === 'resolved_guilty') {
+        revocation = { commitmentId: c.commitmentId as string, uid: c.defendantUid as string }
+      }
+    } else if (newStatus === 'resolved_innocent') {
       tx.update(doc(db, 'groups', groupId, 'members', c.defendantUid), {
         totalPoints: increment(c.points),
       })
@@ -488,6 +531,7 @@ export async function resolveExpiredCase(
     }
   })
 
+  await applyRevocation(groupId, revocation)
   if (winnerUid) awardCourtWinBadge(groupId, winnerUid).catch(() => {})
 }
 
