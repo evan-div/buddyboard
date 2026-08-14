@@ -72,9 +72,9 @@ export default memo(function CloudBackdrop() {
            a 30vw cloud is ~120px on a 390px screen. Scale them up as the
            viewport narrows so the sky stays fluffy at every width. */
         .cloud-layer { --cloud-scale: 1; }
-        @media (max-width: 1100px) { .cloud-layer { --cloud-scale: 1.6; } }
-        @media (max-width: 768px)  { .cloud-layer { --cloud-scale: 2.3; } }
-        @media (max-width: 480px)  { .cloud-layer { --cloud-scale: 2.8; } }
+        @media (max-width: 1100px) { .cloud-layer { --cloud-scale: 1.9; } }
+        @media (max-width: 768px)  { .cloud-layer { --cloud-scale: 2.8; } }
+        @media (max-width: 480px)  { .cloud-layer { --cloud-scale: 3.6; } }
         .cloud-sprite { width: calc(var(--w) * var(--cloud-scale)); }
         @media (prefers-reduced-motion: reduce) {
           .cloud-sprite { animation: none !important; }
