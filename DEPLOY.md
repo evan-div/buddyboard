@@ -15,6 +15,15 @@ composite index, you have to deploy these or the app will hit `permission-denied
 > `plazaPointsGiven` on the group doc). **Redeploy `firestore.rules`** or giving
 > points will fail with `permission-denied` and islands will never unlock.
 
+> ⚠️ Commitments need **both** files redeployed:
+> - `firestore.rules` — adds the `commitments` collection, and widens `cases`
+>   so a commitment dispute can be filed by the accuser rather than only by the
+>   defendant. Without it, opening a commitment or disputing one fails with
+>   `permission-denied`.
+> - `firestore.indexes.json` — adds a **collection-group** index on
+>   `commitments` (`status`, `deadline`). Without it the hourly resolver returns
+>   500 and nothing ever pays out. The index takes a few minutes to build.
+
 > Heads up: deploying rules **replaces the entire live ruleset** with the file's
 > contents. That's fine — `firestore.rules` is the source of truth and holds all
 > rules, not a diff — just know it's a full replace, not a merge.
@@ -161,3 +170,37 @@ Island thresholds and the camera framing a visit uses live in
 | `firestore.rules` | Security rules (who can read/write what) | `--only firestore:rules` |
 | `firestore.indexes.json` | Composite indexes for multi-field queries | `--only firestore:indexes` |
 | `firebase.json` | Points the CLI at the two files above | (config only, not deployed) |
+
+---
+
+## Scheduled commitment resolution
+
+`vercel.json` registers an hourly cron against `/api/commitments/resolve`. That
+route settles every commitment whose deadline has passed — paying out seeds and
+sending the finish-line push — and it is the only part of the app that does
+anything on a clock.
+
+It needs two environment variables set on the host:
+
+| Variable | Purpose |
+| --- | --- |
+| `CRON_SECRET` | Shared secret Vercel sends as `Authorization: Bearer …`. The route **fails closed**: if this is unset, every request gets a 401 and nothing resolves. |
+| `FIREBASE_SERVICE_ACCOUNT` | The same service-account JSON push already uses. Its token requests the `datastore` scope, which is what lets the route read and write Firestore over REST. |
+
+To exercise it by hand against a local build:
+
+```bash
+npm run build
+CRON_SECRET=dev-secret npx next start -p 3000 &
+curl -H "Authorization: Bearer dev-secret" localhost:3000/api/commitments/resolve
+```
+
+It answers `{"due":N,"resolved":N,"skipped":N,"pushed":N}`. Calling it twice is
+safe and the second call resolves nothing — each write batch carries an
+`updateTime` precondition, so a commitment somebody else already settled fails
+the batch instead of paying out again. That guard matters: Vercel Cron delivers
+**at-least-once**, and the Commitments tab sweeps due commitments client-side
+too, so more than one resolver genuinely does race here.
+
+If the route returns 500 with a `Query failed` detail, the collection-group
+index has not finished building — see the rules/index warning at the top.

@@ -12,18 +12,23 @@ import PlazaArchipelago from './PlazaArchipelago'
 import { makePlazaShape, makeCheckerTexture, makeDirtTexture } from './plazaTextures'
 import { playPickup, playWhoosh, playThud, buzz } from './plazaSound'
 import { FSIZE, plazaEdgeRadius, capsuleFloorY, lyingQuat, readLyingPose, AXIS_Y, tileKey, tileToWorld, tilesOnIsland, type IslandFrame, type Tile } from './plazaMath'
-import { PLAZA_SPECIES, getSpecies, STAGE_LABELS, stageLabel } from './plazaSpecies'
+import {
+  PLAZA_SPECIES, RARITY_COLOR, RARITY_LABEL, getSpecies, speciesForRarity,
+  STAGE_LABELS, stageLabel,
+} from './plazaSpecies'
 import { ISLANDS, HOME_ISLAND, ALL_UNLOCKED_POINTS, POLAR_MIN, POLAR_MAX, getIsland, isUnlocked, unlockedIslands, progressToNext, archipelagoRadius, islandView, islandAt, clampToNearestIsland, type IslandDef } from './plazaIslands'
 import { hashUid, currentWaypoint, respawnYaw } from './plazaWalk'
 import { reservedTiles } from './plazaScenery'
 import ThirdPersonController from './ThirdPersonController'
 import { makeLocomotion, placeCardBeside, type Locomotion } from './thirdPerson'
 import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactionsSince, sendPlazaEvent, subscribeToPlazaEvents, updatePlazaHold, clearPlazaHold, subscribeToPlazaHolds, recordCheckin, subscribeToCheckins, plantSeed, removePlazaObject, subscribeToPlazaObjects } from '@/lib/firestore'
-import { growthStage, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
+import { growthStage, growthStageFor, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
+import { RARITY_ORDER, seedInventory } from '@/lib/commitments'
+import { markCommitment, subscribeToCommitments } from '@/lib/commitmentsData'
 import { dayKey, timeAgo } from '@/lib/utils'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
-import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec, PlazaObject, Checkin } from '@/lib/types'
+import type { GroupMember, AvatarConfig, PlazaPreset, Transaction, CourtCase, PlazaVec, PlazaObject, Checkin, Commitment, SeedRarity } from '@/lib/types'
 
 const DEFAULT_PRESETS: PlazaPreset[] = [
   // GIVE
@@ -2802,6 +2807,7 @@ function PreviewPanel({
 // optional note.
 function CheckinCard({
   checkedIn, checkedInCount, memberCount, streak, dormant, busy, onCheckin,
+  commitments, markedToday, markBusy, onMark,
 }: {
   checkedIn: boolean
   checkedInCount: number
@@ -2810,6 +2816,11 @@ function CheckinCard({
   dormant: boolean
   busy: boolean
   onCheckin: (note?: string) => void
+  /** Active commitments this member is in — the things today's check-in can count toward. */
+  commitments: { id: string; title: string; rarity: SeedRarity }[]
+  markedToday: Set<string>
+  markBusy: string | null
+  onMark: (commitmentId: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -2874,21 +2885,83 @@ function CheckinCard({
           </div>
         </>
       )}
+
+      {/* Commitments ride on the check-in rather than becoming a second thing to
+          remember. Marking is gated on having checked in, so the daily tap means
+          "I showed up, and here is what for". */}
+      {commitments.length > 0 && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 5,
+          paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          <div style={{ fontSize: 10, color: '#7d8894', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            {checkedIn ? 'What for?' : 'Check in to mark these'}
+          </div>
+          {commitments.map((c) => {
+            const marked = markedToday.has(c.id)
+            const pending = markBusy === c.id
+            return (
+              <button
+                key={c.id}
+                onClick={() => onMark(c.id)}
+                disabled={!checkedIn || marked || pending}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7, textAlign: 'left',
+                  padding: '6px 8px', borderRadius: 9, fontSize: 12,
+                  background: marked ? 'rgba(67,176,95,0.18)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${marked ? 'rgba(67,176,95,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  color: marked ? '#8fd19e' : '#cdd6df',
+                  cursor: !checkedIn || marked ? 'default' : 'pointer',
+                  opacity: checkedIn ? 1 : 0.45,
+                }}
+              >
+                <span>{pending ? '⏳' : marked ? '✅' : '⬜'}</span>
+                <span style={{
+                  flex: 1, minWidth: 0, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {c.title}
+                </span>
+                <span style={{ fontSize: 10, color: RARITY_COLOR[c.rarity], fontWeight: 800 }}>
+                  {RARITY_LABEL[c.rarity][0]}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
 // Choose a species and (optionally) a dedication for a tapped tile.
 function SpeciesPicker({
-  busy, onCancel, onConfirm,
+  busy, inventory, onCancel, onConfirm,
 }: {
   busy: boolean
+  /** How many seeds of each rarity this member holds. Gates which tiers show. */
+  inventory: Record<SeedRarity, number>
   onCancel: () => void
-  onConfirm: (species: string, dedication?: string) => void
+  onConfirm: (species: string, rarity: SeedRarity, dedication?: string) => void
 }) {
-  const [species, setSpecies] = useState(PLAZA_SPECIES[0].id)
+  // Only tiers you actually hold a seed for. Preview mode passes a full
+  // inventory, so it still gets to browse everything.
+  const affordable = useMemo(
+    () => RARITY_ORDER.filter((r) => inventory[r] > 0),
+    [inventory],
+  )
+  const [rarity, setRarity] = useState<SeedRarity>(() => affordable[affordable.length - 1] ?? 'common')
+  const tier = useMemo(() => speciesForRarity(rarity), [rarity])
+  const [species, setSpecies] = useState(() => tier[0]?.id ?? PLAZA_SPECIES[0].id)
   const [dedication, setDedication] = useState('')
-  const chosen = getSpecies(species)
+
+  // Switching tiers has to move the selection with it, or you would confirm a
+  // species the chosen seed cannot grow. Derived rather than synced in an
+  // effect, so there is never a render where the two disagree.
+  const selected = tier.some((s) => s.id === species)
+    ? species
+    : tier[0]?.id ?? PLAZA_SPECIES[0].id
+  const chosen = getSpecies(selected)
 
   return (
     <div style={{
@@ -2908,16 +2981,42 @@ function SpeciesPicker({
         <div style={{ color: '#fff', fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Plant a seed 🌱</div>
         <div style={{ color: '#9aa6b1', fontSize: 12, marginBottom: 14 }}>{chosen.blurb}</div>
 
+        {/* Rarity chooser — only shown once there is more than one tier to pick
+            between, so the common case stays exactly as simple as it was. */}
+        {affordable.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {affordable.map((r) => {
+              const active = r === rarity
+              const color = RARITY_COLOR[r]
+              return (
+                <button
+                  key={r}
+                  onClick={() => setRarity(r)}
+                  style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 10, cursor: 'pointer',
+                    background: active ? `${color}26` : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${active ? color : 'transparent'}`,
+                    color: active ? color : '#9aa6b1',
+                    fontSize: 11, fontWeight: 800,
+                  }}
+                >
+                  {RARITY_LABEL[r]} · {inventory[r]}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          {PLAZA_SPECIES.map((s) => (
+          {tier.map((s) => (
             <button
               key={s.id}
               onClick={() => setSpecies(s.id)}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
                 width: 72, padding: '10px 4px', borderRadius: 12, cursor: 'pointer',
-                background: s.id === species ? 'rgba(67,176,95,0.22)' : 'rgba(255,255,255,0.05)',
-                border: s.id === species ? '2px solid #43b05f' : '2px solid transparent',
+                background: s.id === selected ? 'rgba(67,176,95,0.22)' : 'rgba(255,255,255,0.05)',
+                border: s.id === selected ? '2px solid #43b05f' : '2px solid transparent',
                 color: '#e6ecf1',
               }}
             >
@@ -2949,7 +3048,7 @@ function SpeciesPicker({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(species, dedication.trim() || undefined)}
+            onClick={() => onConfirm(selected, rarity, dedication.trim() || undefined)}
             disabled={busy}
             style={{
               flex: 2, padding: '11px', borderRadius: 12, fontSize: 14, fontWeight: 800,
@@ -2979,8 +3078,11 @@ function PlantPlaque({
   onRemove: (o: PlazaObject) => void
 }) {
   const species = getSpecies(obj.species)
-  const stage = growthStage(obj.plantedAt.getTime(), obj.plantedAtVitality, nowMs, groupVitality)
+  const stage = growthStageFor(
+    obj.rarity, obj.plantedAt.getTime(), obj.plantedAtVitality, nowMs, groupVitality,
+  )
   const grownThrough = Math.max(0, groupVitality - obj.plantedAtVitality)
+  const rarity = obj.rarity ?? 'common'
 
   return (
     <div
@@ -2998,7 +3100,19 @@ function PlantPlaque({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <span style={{ fontSize: 30 }}>{species.emoji}</span>
           <div style={{ flex: 1 }}>
-            <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{species.label}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{species.label}</span>
+              {rarity !== 'common' && (
+                <span style={{
+                  fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase',
+                  padding: '2px 6px', borderRadius: 6,
+                  color: RARITY_COLOR[rarity], background: `${RARITY_COLOR[rarity]}22`,
+                  border: `1px solid ${RARITY_COLOR[rarity]}55`,
+                }}>
+                  {RARITY_LABEL[rarity]}
+                </span>
+              )}
+            </div>
             <div style={{ color: '#8fd19e', fontSize: 12 }}>{stageLabel(species.form, stage)}</div>
           </div>
           <button
@@ -3116,6 +3230,8 @@ export default function MiiPlaza({
   // ── Living plaza state ──
   const [gardenObjects, setGardenObjects] = useState<PlazaObject[]>([])
   const [todayCheckins, setTodayCheckins] = useState<Checkin[]>([])
+  const [commitments, setCommitments] = useState<Commitment[]>([])
+  const [markBusy, setMarkBusy] = useState<string | null>(null)
   const [plantMode, setPlantMode]         = useState(false)
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
   const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
@@ -3176,9 +3292,22 @@ export default function MiiPlaza({
 
   const today = useMemo(() => dayKey(timezone), [timezone])
   const currentMember = useMemo(() => members.find((m) => m.uid === currentUid), [members, currentUid])
-  const seeds = currentMember?.seeds ?? 0
   const checkedInToday = currentMember?.lastCheckinDate === today
-  // Preview mode hands out unlimited seeds so every species can be inspected.
+
+  // Seeds by rarity, with the legacy `seeds` scalar folded into commons.
+  const realInventory = useMemo(() => seedInventory(currentMember), [currentMember])
+  const seeds = useMemo(
+    () => RARITY_ORDER.reduce((sum, r) => sum + realInventory[r], 0),
+    [realInventory],
+  )
+  // Preview mode hands out unlimited seeds of every tier so all the species —
+  // including the ones only a long commitment pays for — can be inspected.
+  const inventory = useMemo<Record<SeedRarity, number>>(
+    () => (preview.on
+      ? { common: 99, uncommon: 99, rare: 99, legendary: 99 }
+      : realInventory),
+    [preview.on, realInventory],
+  )
   const canPlant = preview.on || seeds > 0
   const isMayor = currentMember?.isAdmin === true
 
@@ -3207,9 +3336,38 @@ export default function MiiPlaza({
     [allObjects, selectedPlantId],
   )
 
-  // Subscribe to the garden and to today's check-ins
+  // Subscribe to the garden, today's check-ins, and this group's commitments
   useEffect(() => subscribeToPlazaObjects(groupId, setGardenObjects), [groupId])
   useEffect(() => subscribeToCheckins(groupId, today, setTodayCheckins), [groupId, today])
+  useEffect(() => subscribeToCommitments(groupId, setCommitments), [groupId])
+
+  // The commitments today's check-in can count toward: running, and mine.
+  const myCommitments = useMemo(
+    () => commitments
+      .filter((c) => c.status === 'active' && c.participants[currentUid])
+      .map((c) => ({ id: c.id, title: c.title, rarity: c.rarity })),
+    [commitments, currentUid],
+  )
+  const markedToday = useMemo(
+    () => new Set(
+      commitments
+        .filter((c) => c.participants[currentUid]?.markedDays.includes(today))
+        .map((c) => c.id),
+    ),
+    [commitments, currentUid, today],
+  )
+
+  async function handleMarkCommitment(commitmentId: string) {
+    if (markBusy) return
+    setMarkBusy(commitmentId)
+    try {
+      await markCommitment(groupId, commitmentId, currentUid)
+    } catch (err) {
+      console.warn('[plaza] mark failed', err)
+    } finally {
+      setMarkBusy(null)
+    }
+  }
 
   async function handleCheckin(note?: string) {
     if (busy || checkedInToday) return
@@ -3225,7 +3383,9 @@ export default function MiiPlaza({
 
   // Build a local-only plant. Planted "now" against the base clock and at zero
   // vitality, so the preview's Days/Vitality controls drive its growth directly.
-  function makePreviewPlant(species: string, tile: Tile, dedication?: string): PlazaObject {
+  function makePreviewPlant(
+    species: string, tile: Tile, rarity: SeedRarity, dedication?: string,
+  ): PlazaObject {
     return {
       id: `preview_${species}_${tileKey(tile)}_${clockMs}`,
       kind: 'plant',
@@ -3236,21 +3396,24 @@ export default function MiiPlaza({
       plantedAt: new Date(clockMs),
       plantedAtVitality: 0,
       dedication,
+      rarity,
     }
   }
 
-  async function handlePlant(species: string, dedication?: string) {
+  async function handlePlant(species: string, rarity: SeedRarity, dedication?: string) {
     if (busy || !pendingTile) return
     // In preview, planting is local and seeds are unlimited — nothing is saved.
     if (preview.on) {
-      setPreviewPlants((prev) => [...prev, makePreviewPlant(species, pendingTile, dedication)])
+      setPreviewPlants((prev) => [
+        ...prev, makePreviewPlant(species, pendingTile, rarity, dedication),
+      ])
       setPendingTile(null)
       setPlantMode(false)
       return
     }
     setBusy(true)
     try {
-      await plantSeed(groupId, currentUid, { species, tile: pendingTile, dedication })
+      await plantSeed(groupId, currentUid, { species, tile: pendingTile, dedication, rarity })
       setPendingTile(null)
       setPlantMode(false)
     } catch (err) {
@@ -3274,8 +3437,9 @@ export default function MiiPlaza({
       })
     setPreviewPlants((prev) => [
       ...prev,
+      // Each at its own rarity, so the tier treatments can be compared too.
       ...PLAZA_SPECIES.flatMap((s, i) =>
-        free[i] ? [makePreviewPlant(s.id, free[i], `Preview · ${s.label}`)] : [],
+        free[i] ? [makePreviewPlant(s.id, free[i], s.rarity, `Preview · ${s.label}`)] : [],
       ),
     ])
     setPlantMode(false)
@@ -3531,6 +3695,10 @@ export default function MiiPlaza({
               dormant={dormant}
               busy={busy}
               onCheckin={handleCheckin}
+              commitments={myCommitments}
+              markedToday={markedToday}
+              markBusy={markBusy}
+              onMark={handleMarkCommitment}
             />
           </HudCard>
           <HudCard pill={<>🏝️ {unlockedIslands(effectivePoints).length}</>}>
@@ -3612,6 +3780,7 @@ export default function MiiPlaza({
       {pendingTile && (
         <SpeciesPicker
           busy={busy}
+          inventory={inventory}
           onCancel={() => setPendingTile(null)}
           onConfirm={handlePlant}
         />

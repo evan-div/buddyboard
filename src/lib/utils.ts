@@ -24,6 +24,37 @@ export function dayKey(timeZone?: string, offsetDays = 0): string {
   }
 }
 
+// Countdown to a deadline as HH:MM:SS. `isLow` drives the urgent styling once
+// under an hour. Shared by the court's 24h voting window and commitment
+// deadlines, which can be days or months out — hours are not clamped.
+export function formatCountdown(
+  deadline: Date,
+  now: number,
+): { text: string; isLow: boolean; expired: boolean } {
+  const ms = deadline.getTime() - now
+  if (ms <= 0) return { text: '00:00:00', isLow: true, expired: true }
+  const h = Math.floor(ms / 3_600_000)
+  const m = Math.floor((ms % 3_600_000) / 60_000)
+  const s = Math.floor((ms % 60_000) / 1_000)
+  return {
+    text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+    isLow: h < 1,
+    expired: false,
+  }
+}
+
+// Coarse "3 days left" phrasing for deadlines far enough out that a ticking
+// HH:MM:SS reads as noise rather than urgency.
+export function formatRemaining(deadline: Date, now: number): string {
+  const ms = deadline.getTime() - now
+  if (ms <= 0) return 'Ended'
+  const days = Math.floor(ms / 86_400_000)
+  if (days >= 2) return `${days} days left`
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours >= 1) return `${hours}h left`
+  return `${Math.max(1, Math.floor(ms / 60_000))}m left`
+}
+
 export function timeAgo(date: Date): string {
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()

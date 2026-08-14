@@ -34,6 +34,7 @@ import WallTab from './tabs/WallTab'
 import LeaderboardTab from './tabs/LeaderboardTab'
 import InfoTab from './tabs/InfoTab'
 import StyleTab from './tabs/StyleTab'
+import CommitmentsTab from './tabs/CommitmentsTab'
 
 const MiiPlaza = dynamic(() => import('@/components/World/MiiPlaza'), { ssr: false })
 const CourtTab = dynamic(() => import('@/components/Court/CourtTab'), { ssr: false })
@@ -52,7 +53,7 @@ export default function GroupPage() {
   // undefined = still loading, null = group not found
   const [group, setGroup] = useState<Group | null | undefined>(undefined)
   const [membersData, setMembersData] = useState<GroupMember[] | null>(null)
-  const [activeTab, setActiveTab] = useState<'plaza' | 'wall' | 'leaderboard' | 'court' | 'info' | 'style'>('plaza')
+  const [activeTab, setActiveTab] = useState<'plaza' | 'wall' | 'leaderboard' | 'pacts' | 'court' | 'info' | 'style'>('plaza')
   const [wipePhase, setWipePhase] = useState<WipePhase>('covered')
   const [toasts, setToasts] = useState<PointsToastItem[]>([])
   const [unreadWallCount, setUnreadWallCount] = useState(0)
@@ -324,6 +325,7 @@ export default function GroupPage() {
               { key: 'plaza', label: 'Plaza', icon: '🌳' },
               { key: 'wall', label: 'Wall', icon: '📋', badge: unreadWallCount },
               { key: 'leaderboard', label: 'Ranks', icon: '🏆' },
+              { key: 'pacts', label: 'Pacts', icon: '🤝' },
               { key: 'court', label: 'Court', icon: '⚖️', badge: activeCaseCount },
               { key: 'info', label: 'Info', icon: 'ℹ️' },
               { key: 'style', label: 'Style', icon: '🎨' },
@@ -385,6 +387,17 @@ export default function GroupPage() {
                 <>
                   <PageHeader kicker="Leaderboard" title="Ranks" emoji="🏆" />
                   <LeaderboardTab groupId={groupId} members={members} currentUid={user.uid} chiefUid={chiefUid} creatorUid={group.createdBy} />
+                </>
+              )}
+              {activeTab === 'pacts' && (
+                <>
+                  <PageHeader kicker="Together" title="Commitments" emoji="🤝" />
+                  <CommitmentsTab
+                    groupId={groupId}
+                    currentUid={user.uid}
+                    displayName={userProfile.displayName}
+                    memberUids={members.map((m) => m.uid)}
+                  />
                 </>
               )}
               {activeTab === 'court' && (
