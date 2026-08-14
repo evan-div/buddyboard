@@ -106,7 +106,8 @@ export type GroupMember = {
   badges?: string[]
   lastSeen?: Date   // presence heartbeat while the plaza is open
   // ── Living plaza ──
-  seeds?: number                  // group-scoped inventory of unplanted seeds
+  seeds?: number                  // legacy: undifferentiated seeds, now read as commons
+  seedsByRarity?: Partial<Record<SeedRarity, number>>   // seeds earned from commitments
   lastCheckinDate?: string        // dayKey of this member's last daily check-in
   checkinStreak?: number          // consecutive days checked in
   longestCheckinStreak?: number
@@ -140,6 +141,56 @@ export type PlazaObject = {
   plantedAt: Date
   plantedAtVitality: number   // group vitality snapshot at planting time
   dedication?: string
+  // ── Commitments ──
+  rarity?: SeedRarity     // absent reads as 'common' (every pre-commitment plant)
+  earnedFrom?: string     // id of the commitment whose seed grew this
+}
+
+// ── Commitments ──────────────────────────────────────────────────────────────
+// A pact between group members: a goal, a window, and a payout. Seeds earned by
+// checking in are always common; a rarer seed only ever comes from holding up
+// your end of a longer commitment, which is what makes a rare plant legible as
+// an achievement rather than decoration.
+
+export type SeedRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
+
+// 'forming' — open for sign-up, clock not running, creator can still Start it.
+// 'active'  — roster locked, clock running, marks count.
+// 'resolved'— deadline passed, per-person outcomes written, seeds paid out.
+export type CommitmentStatus = 'forming' | 'active' | 'resolved' | 'cancelled'
+
+// How often the goal repeats. The creator also picks how many marks a period
+// needs (targetPerPeriod) and what share of periods must hit that (thresholdPct).
+export type CommitmentCadence = 'daily' | 'weekly'
+
+export type CommitmentParticipant = {
+  uid: string
+  displayName: string
+  joinedAt: Date
+  markedDays: string[]          // dayKeys tapped; arrayUnion keeps this idempotent
+  outcome?: 'kept' | 'missed'   // written at resolution
+  seedAwarded?: SeedRarity
+  caseId?: string               // set if a co-participant disputed this outcome
+}
+
+export type Commitment = {
+  id: string
+  title: string                 // free text goal, like Transaction.reason
+  createdBy: string
+  createdByName: string
+  status: CommitmentStatus
+  durationDays: number          // one of COMMITMENT_TIERS; drives the payout
+  rarity: SeedRarity            // derived from durationDays, stored so the cron can read it
+  cadence: CommitmentCadence
+  targetPerPeriod: number       // marks needed for a period to count (e.g. 3 a week)
+  thresholdPct: number          // share of periods that must count, 50-100
+  createdAt: Date
+  startedAt?: Date
+  deadline?: Date
+  resolvedAt?: Date
+  // Keyed by uid rather than an array so one member's mark is a single field-path
+  // write and can never clobber another's — same reason CourtCase.votes is a map.
+  participants: Record<string, CommitmentParticipant>
 }
 
 export type Transaction = {
@@ -174,6 +225,9 @@ export type NotificationType =
   | 'member_joined'
   | 'feed_reaction'
   | 'thanks_received'
+  | 'commitment_started'
+  | 'commitment_resolved'
+  | 'commitment_disputed'
 
 export type GroupNotification = {
   id: string
@@ -181,6 +235,8 @@ export type GroupNotification = {
   type: NotificationType
   transactionId: string
   caseId?: string
+  commitmentId?: string
+  rarity?: SeedRarity   // which seed a commitment_resolved notification paid out
   fromUid: string
   fromName: string
   toName: string
@@ -240,6 +296,11 @@ export type CaseStatus =
 
 export type CourtCase = {
   id: string
+  // What is on trial. Absent means 'transaction' — every case written before
+  // commitments existed. A commitment case carries points: 0 and skips the
+  // points-restoration path entirely; what it restores or revokes is a seed.
+  subject?: 'transaction' | 'commitment'
+  commitmentId?: string
   transactionId: string
   defendantUid: string
   defendantName: string
