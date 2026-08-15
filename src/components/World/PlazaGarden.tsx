@@ -548,6 +548,9 @@ function RarityAura({
   // Fixed ring of motes; positions are recomputed each frame from the index, so
   // there is nothing to memoize beyond the count.
   const moteCount = dormant ? 0 : treatment.particles
+  // Sized against the plant, not fixed: a mote that reads well on a seedling is
+  // invisible on a mature tree seven units tall.
+  const moteSize = 0.1 + stage * 0.035
 
   useFrame((state) => {
     if (!motesRef.current) return
@@ -574,8 +577,8 @@ function RarityAura({
         <group ref={motesRef}>
           {Array.from({ length: moteCount }, (_, i) => (
             <mesh key={i}>
-              <sphereGeometry args={[0.07, 6, 6]} />
-              <meshBasicMaterial color={color} transparent opacity={0.75} depthWrite={false} />
+              <sphereGeometry args={[moteSize, 6, 6]} />
+              <meshBasicMaterial color={color} transparent opacity={0.85} depthWrite={false} />
             </mesh>
           ))}
         </group>
