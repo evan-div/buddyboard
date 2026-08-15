@@ -27,6 +27,20 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # Security rules are the one part of the app that cannot be checked by
+      # reading its code — they only exist in production. This boots the
+      # Firestore emulator (a JVM process; ubuntu-latest ships a JDK) and
+      # asserts them for real. Kept out of `npm test` so that stays
+      # infrastructure-free and quick.
+      - name: Cache Firestore emulator
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      - name: Security rules tests
+        run: npm run test:rules
+
       # The client Firebase SDK initializes lazily, so dummy values are enough
       # to build and render public pages. No real secrets in CI.
       - name: Write dummy Firebase env

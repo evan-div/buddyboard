@@ -163,6 +163,91 @@ and are unit-tested; the preset buttons derive from them, so they can't drift.
 Island thresholds and the camera framing a visit uses live in
 `src/components/World/plazaIslands.ts` (`ISLANDS`, `islandView`), also unit-tested.
 
+### Seeing every plant, including the rare ones
+
+The same `?preview=1` also hands out **unlimited seeds of every rarity**, so the
+species picker shows all four tiers rather than just the commons a check-in
+earns. Tap **🌿 One of each** to plant every species at its own rarity side by
+side, then **Mature** — that is the fastest way to compare a legendary against a
+common oak without holding a 90-day commitment first.
+
+Two things are worth knowing when judging how a rare plant looks:
+
+- A plaza renders **dormant** (colours muted toward grey, auras dimmed, motes
+  suppressed) when the group hasn't checked in recently. That is deliberate, but
+  it hides most of what makes a rare plant look rare — so judge the tiers on a
+  group that has been active today.
+- Rarity changes scale, foliage glow, drifting motes and growth speed. Growth
+  speed comes from `growthStageFor` in `plazaGrowth.ts`; the visual treatment
+  from `rarityTreatment` in `plazaSpecies.ts`. Both are data, both unit-tested.
+
+## Previewing commitments
+
+A commitment runs seven days at its shortest and ninety at its longest, needs two
+people to start, and pays out from an hourly cron — so there is no way to watch
+one end to end in real time. The same `?preview=1` flag turns the Pacts tab into
+a full fixture set:
+
+```
+/group/YOUR_GROUP_ID?preview=1        →  the Pacts tab
+```
+
+You get one fake commitment for every state a card can be in — forming with
+enough people and without, running on track and running behind, already marked
+today, past its deadline, resolved kept and resolved missed, disputed, outside
+the 48-hour dispute window, and cancelled — spread across all four rarities.
+
+The orange panel at the top is tap-driven, like the plaza's:
+
+- **Day −/+/+7/+30** shifts "now", so deadlines pass and countdowns move.
+- **Mark today** marks every running commitment you're in, exactly as the plaza
+  check-in card would.
+- **Resolve due** settles anything past the dialled deadline using the *real*
+  `metThreshold` rule — the same judgement the cron makes, so a preview that
+  looks right is evidence the real logic is right.
+- **Reset** returns to the starting fixtures.
+
+Like the plaza, this is **render-only**: preview never subscribes to Firestore
+and never writes to it, and join/leave/start/cancel/dispute are swapped for local
+mutators, so nothing you do here is visible to anyone else.
+
+Fixtures live in `src/lib/commitmentsPreview.ts` and are unit-tested, including
+that every one of them is judged correctly by the real rules.
+
+## Testing the security rules
+
+`firestore.rules` is the one part of this app that cannot be checked by reading
+its code — the rules only take effect in production, and a local setup enforces
+nothing. That is not hypothetical: the `cases` rule originally allowed only the
+*defendant* to open a case, which is right for a points appeal (you appeal your
+own loss) and wrong for a commitment dispute (you accuse someone else). It
+worked perfectly locally and would have failed every dispute in production.
+
+```bash
+npm run test:rules
+```
+
+That boots the Firestore emulator, runs `src/lib/*.rules.test.ts` against the
+real ruleset, and shuts the emulator down. It needs a JVM — the Firestore
+emulator is a Java process — and downloads the emulator jar on first run.
+
+These are deliberately **not** part of `npm test`, which stays at a couple of
+seconds with zero infrastructure. The split is `exclude` in `vitest.config.ts`
+plus a separate `vitest.rules.config.ts`. CI runs both, caching the emulator jar
+between runs.
+
+### Harness routes (development only)
+
+Two routes render these surfaces with no auth, no group and no Firebase. Both
+`notFound()` in a production build, so neither ever ships:
+
+| Route | Renders | Use with |
+| --- | --- | --- |
+| `/walkharness` | The plaza | `?preview=1` |
+| `/pactharness` | The Commitments tab | `?preview=1` |
+
+They only exist under `npm run dev`.
+
 ## What each Firebase config file is
 
 | File | Purpose | Deploy command |
