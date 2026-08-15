@@ -25,6 +25,7 @@ import { giveOrTakePoints, updateUserAvatar, updateMemberAvatar, getTransactions
 import { growthStage, growthStageFor, isDormant, TIME_DAYS, NOURISH_DAYS } from '@/lib/plazaGrowth'
 import { RARITY_ORDER, seedInventory } from '@/lib/commitments'
 import { markCommitment, subscribeToCommitments } from '@/lib/commitmentsData'
+import { previewCommitments } from '@/lib/commitmentsPreview'
 import { dayKey, timeAgo } from '@/lib/utils'
 import { subscribeToCases } from '@/lib/appeals'
 import { SKIN_TONES, HAIR_COLORS, SHIRT_COLORS, PANTS_COLORS, SHOES_COLORS } from '@/lib/avatarDefaults'
@@ -3232,6 +3233,8 @@ export default function MiiPlaza({
   const [todayCheckins, setTodayCheckins] = useState<Checkin[]>([])
   const [commitments, setCommitments] = useState<Commitment[]>([])
   const [markBusy, setMarkBusy] = useState<string | null>(null)
+  const [previewMarked, setPreviewMarked] = useState<Set<string>>(() => new Set())
+  const [previewBaseMs] = useState(() => Date.now())
   const [plantMode, setPlantMode]         = useState(false)
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null)
   const [pendingTile, setPendingTile]     = useState<Tile | null>(null)
@@ -3341,24 +3344,46 @@ export default function MiiPlaza({
   useEffect(() => subscribeToCheckins(groupId, today, setTodayCheckins), [groupId, today])
   useEffect(() => subscribeToCommitments(groupId, setCommitments), [groupId])
 
+  // In preview the check-in card shows fake commitments instead of the real
+  // ones, so the tap-to-mark row is reachable without an actual running pact.
+  // Pinned to a fixed base so the fixtures don't slide when the clock ticks.
+  const previewCommitmentList = useMemo(
+    () => (preview.on
+      ? previewCommitments({
+          uid: currentUid,
+          displayName: currentMember?.displayName ?? 'You',
+          nowMs: previewBaseMs,
+          timezone,
+        })
+      : []),
+    [preview.on, currentUid, currentMember?.displayName, previewBaseMs, timezone],
+  )
+  const effectiveCommitments = preview.on ? previewCommitmentList : commitments
+
   // The commitments today's check-in can count toward: running, and mine.
   const myCommitments = useMemo(
-    () => commitments
+    () => effectiveCommitments
       .filter((c) => c.status === 'active' && c.participants[currentUid])
       .map((c) => ({ id: c.id, title: c.title, rarity: c.rarity })),
-    [commitments, currentUid],
+    [effectiveCommitments, currentUid],
   )
   const markedToday = useMemo(
-    () => new Set(
-      commitments
+    () => new Set([
+      ...effectiveCommitments
         .filter((c) => c.participants[currentUid]?.markedDays.includes(today))
         .map((c) => c.id),
-    ),
-    [commitments, currentUid, today],
+      ...previewMarked,
+    ]),
+    [effectiveCommitments, currentUid, today, previewMarked],
   )
 
   async function handleMarkCommitment(commitmentId: string) {
     if (markBusy) return
+    // Preview marks stay on this device — the same promise preview planting makes.
+    if (preview.on) {
+      setPreviewMarked((prev) => new Set(prev).add(commitmentId))
+      return
+    }
     setMarkBusy(commitmentId)
     try {
       await markCommitment(groupId, commitmentId, currentUid)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   COMMITMENT_TIERS,
   MIN_THRESHOLD_PCT,
@@ -9,6 +9,7 @@ import {
   describeRules,
   disputeWindowOpen,
   maxTargetPerPeriod,
+  metThreshold,
   rarityForDuration,
   validateDraft,
   type CommitmentDraft,
@@ -23,9 +24,22 @@ import {
   subscribeToCommitments,
   sweepDueCommitments,
 } from '@/lib/commitmentsData'
+import {
+  commitmentPreviewServerSnapshot,
+  commitmentPreviewSnapshot,
+  previewCommitments,
+  subscribeToCommitmentPreview,
+} from '@/lib/commitmentsPreview'
 import { RARITY_COLOR, RARITY_LABEL } from '@/components/World/plazaSpecies'
-import { formatRemaining, timeAgo } from '@/lib/utils'
-import type { Commitment, CommitmentCadence, SeedRarity } from '@/lib/types'
+import { dayKey, formatRemaining, timeAgo } from '@/lib/utils'
+import type {
+  Commitment,
+  CommitmentCadence,
+  CommitmentParticipant,
+  SeedRarity,
+} from '@/lib/types'
+
+const DAY_MS = 86_400_000
 
 type Props = {
   groupId: string
@@ -268,15 +282,10 @@ function CreateCard({
 // ─── Dispute ──────────────────────────────────────────────────────────────────
 
 function DisputeBox({
-  groupId, commitment, defendantUid, defendantName, currentUid, displayName, memberUids, onClose,
+  defendantName, onSubmit, onClose,
 }: {
-  groupId: string
-  commitment: Commitment
-  defendantUid: string
   defendantName: string
-  currentUid: string
-  displayName: string
-  memberUids: string[]
+  onSubmit: (comment: string) => Promise<unknown>
   onClose: () => void
 }) {
   const [comment, setComment] = useState('')
@@ -287,9 +296,7 @@ function DisputeBox({
     setBusy(true)
     setError(null)
     try {
-      await disputeCommitment(
-        groupId, commitment.id, currentUid, displayName, defendantUid, comment.trim(), memberUids,
-      )
+      await onSubmit(comment.trim())
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not file that')
@@ -349,8 +356,18 @@ function DisputeBox({
 
 // ─── One commitment ───────────────────────────────────────────────────────────
 
+// Join/leave/start/cancel are injected rather than called directly, so preview
+// mode can swap in local mutators and never reach Firestore.
+type CardActions = {
+  join: (c: Commitment) => Promise<unknown>
+  leave: (c: Commitment) => Promise<unknown>
+  start: (c: Commitment) => Promise<unknown>
+  cancel: (c: Commitment) => Promise<unknown>
+  dispute: (c: Commitment, defendantUid: string, comment: string) => Promise<unknown>
+}
+
 function CommitmentCard({
-  c, groupId, currentUid, displayName, memberUids, commitments, now,
+  c, groupId, currentUid, displayName, memberUids, commitments, now, actions, preview,
 }: {
   c: Commitment
   groupId: string
@@ -359,6 +376,8 @@ function CommitmentCard({
   memberUids: string[]
   commitments: Commitment[]
   now: number
+  actions: CardActions
+  preview: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -455,13 +474,12 @@ function CommitmentCard({
               {canDispute && p.outcome === 'kept' && !isMe && !p.caseId && (
                 disputing === p.uid ? (
                   <DisputeBox
-                    groupId={groupId}
-                    commitment={c}
-                    defendantUid={p.uid}
                     defendantName={p.displayName}
-                    currentUid={currentUid}
-                    displayName={displayName}
-                    memberUids={memberUids}
+                    onSubmit={(comment) => preview
+                      ? actions.dispute(c, p.uid, comment)
+                      : disputeCommitment(
+                          groupId, c.id, currentUid, displayName, p.uid, comment, memberUids,
+                        )}
                     onClose={() => setDisputing(null)}
                   />
                 ) : (
@@ -499,7 +517,7 @@ function CommitmentCard({
         <div style={{ display: 'flex', gap: 8 }}>
           {!me && (
             <button
-              onClick={() => run(() => joinCommitment(groupId, c.id, currentUid, displayName))}
+              onClick={() => run(() => actions.join(c))}
               disabled={busy || blockedByTier}
               title={blockedByTier ? `You already have a ${c.rarity} commitment running` : undefined}
               style={{
@@ -515,7 +533,7 @@ function CommitmentCard({
           )}
           {me && !isCreator && (
             <button
-              onClick={() => run(() => leaveCommitment(groupId, c.id, currentUid))}
+              onClick={() => run(() => actions.leave(c))}
               disabled={busy}
               style={{
                 flex: 1, padding: '9px 12px', borderRadius: 11,
@@ -529,7 +547,7 @@ function CommitmentCard({
           {isCreator && (
             <>
               <button
-                onClick={() => run(() => startCommitment(groupId, c.id, currentUid))}
+                onClick={() => run(() => actions.start(c))}
                 disabled={busy || roster.length < 2}
                 title={roster.length < 2 ? 'A commitment needs at least two people' : undefined}
                 style={{
@@ -543,7 +561,7 @@ function CommitmentCard({
                 Start it
               </button>
               <button
-                onClick={() => run(() => cancelCommitment(groupId, c.id, currentUid))}
+                onClick={() => run(() => actions.cancel(c))}
                 disabled={busy}
                 style={{
                   padding: '9px 12px', borderRadius: 11,
@@ -566,19 +584,58 @@ function CommitmentCard({
 export default function CommitmentsTab({
   groupId, currentUid, displayName, memberUids,
 }: Props) {
-  const [commitments, setCommitments] = useState<Commitment[]>([])
-  const [loading, setLoading] = useState(true)
+  const [live, setLiveCommitments] = useState<Commitment[]>([])
+  const [liveLoading, setLiveLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const sweeping = useRef(false)
 
+  // Preview is browser-only state that never changes after load. Read through
+  // useSyncExternalStore rather than an effect: this file is outside
+  // components/World, so it has no React Compiler exemption for setState in an
+  // effect, and a lazy useState initialiser would disagree with the server.
+  const preview = useSyncExternalStore(
+    subscribeToCommitmentPreview,
+    commitmentPreviewSnapshot,
+    commitmentPreviewServerSnapshot,
+  )
+
+  // Pinned once so fixtures do not slide around underneath the day dial.
+  const [previewBaseMs] = useState(() => Date.now())
+  const [dayOffset, setDayOffset] = useState(preview.dayOffset)
+  // Local edits layered over the fixtures — the same "stays on this device"
+  // promise the plaza's preview plants make.
+  const [edited, setEdited] = useState<Record<string, Commitment>>({})
+
+  const fixtures = useMemo(
+    () => (preview.on
+      ? previewCommitments({ uid: currentUid, displayName, nowMs: previewBaseMs })
+      : []),
+    [preview.on, currentUid, displayName, previewBaseMs],
+  )
+
+  const commitments = useMemo(
+    () => (preview.on ? fixtures.map((c) => edited[c.id] ?? c) : live),
+    [preview.on, fixtures, edited, live],
+  )
+
+  const effectiveNow = preview.on ? previewBaseMs + dayOffset * DAY_MS : now
+
+  // Fixtures are ready the moment they are built, so there is nothing to wait
+  // for in preview. Derived rather than set in the effect below — setState
+  // straight from an effect body is what the React Compiler lint forbids here.
+  const loading = preview.on ? false : liveLoading
+
   useEffect(() => {
+    // Preview never subscribes — nothing should be read from or written to
+    // Firestore while a fake lifecycle is on screen.
+    if (preview.on) return
     const unsub = subscribeToCommitments(groupId, (list) => {
-      setCommitments(list)
-      setLoading(false)
+      setLiveCommitments(list)
+      setLiveLoading(false)
     })
     return unsub
-  }, [groupId])
+  }, [groupId, preview.on])
 
   // Minute tick — enough for "3 days left", and far cheaper than the court's
   // per-second countdown, which it does not need.
@@ -600,20 +657,159 @@ export default function CommitmentsTab({
   }, [groupId])
 
   useEffect(() => {
+    if (preview.on) return
     const due = commitments.some(
       (c) => c.status === 'active' && c.deadline && c.deadline.getTime() <= now,
     )
     if (due) void sweep(commitments)
-  }, [commitments, now, sweep])
+  }, [commitments, now, sweep, preview.on])
 
-  const { live, past } = useMemo(() => {
-    const live = commitments.filter((c) => c.status === 'forming' || c.status === 'active')
+  // ── Preview mutators ──
+  // Every one of these builds a new Commitment locally. Nothing is persisted,
+  // which is what lets the harness run a whole lifecycle in one sitting.
+  const editPreview = useCallback((c: Commitment, next: Partial<Commitment>) => {
+    setEdited((prev) => ({ ...prev, [c.id]: { ...c, ...next } }))
+  }, [])
+
+  const previewActions: CardActions = useMemo(() => ({
+    join: async (c) => editPreview(c, {
+      participants: {
+        ...c.participants,
+        [currentUid]: {
+          uid: currentUid, displayName, joinedAt: new Date(effectiveNow), markedDays: [],
+        },
+      },
+    }),
+    leave: async (c) => {
+      const participants = { ...c.participants }
+      delete participants[currentUid]
+      editPreview(c, { participants })
+    },
+    start: async (c) => editPreview(c, {
+      status: 'active',
+      startedAt: new Date(effectiveNow),
+      deadline: new Date(effectiveNow + c.durationDays * DAY_MS),
+    }),
+    cancel: async (c) => editPreview(c, { status: 'cancelled', resolvedAt: new Date(effectiveNow) }),
+    dispute: async (c, defendantUid) => editPreview(c, {
+      participants: {
+        ...c.participants,
+        [defendantUid]: { ...c.participants[defendantUid], caseId: 'preview-case' },
+      },
+    }),
+  }), [currentUid, displayName, effectiveNow, editPreview])
+
+  const realActions: CardActions = useMemo(() => ({
+    join: (c) => joinCommitment(groupId, c.id, currentUid, displayName),
+    leave: (c) => leaveCommitment(groupId, c.id, currentUid),
+    start: (c) => startCommitment(groupId, c.id, currentUid),
+    cancel: (c) => cancelCommitment(groupId, c.id, currentUid),
+    dispute: (c, defendantUid, comment) => disputeCommitment(
+      groupId, c.id, currentUid, displayName, defendantUid, comment, memberUids,
+    ),
+  }), [groupId, currentUid, displayName, memberUids])
+
+  const actions = preview.on ? previewActions : realActions
+
+  // Mark today on every active commitment I'm in, exactly as the plaza's
+  // check-in card would.
+  function previewMarkToday() {
+    const today = dayKey()
+    for (const c of commitments) {
+      const me = c.participants[currentUid]
+      if (c.status !== 'active' || !me || me.markedDays.includes(today)) continue
+      editPreview(c, {
+        participants: {
+          ...c.participants,
+          [currentUid]: { ...me, markedDays: [today, ...me.markedDays] },
+        },
+      })
+    }
+  }
+
+  // Settle anything past its (dialled) deadline using the real threshold rule,
+  // so what you see here is the same judgement the cron would make.
+  function previewResolveDue() {
+    for (const c of commitments) {
+      if (c.status !== 'active' || !c.deadline || c.deadline.getTime() > effectiveNow) continue
+      const participants: Record<string, CommitmentParticipant> = {}
+      for (const [uid, p] of Object.entries(c.participants)) {
+        const kept = metThreshold(c, p.markedDays)
+        participants[uid] = {
+          ...p,
+          outcome: kept ? 'kept' : 'missed',
+          seedAwarded: kept ? c.rarity : undefined,
+        }
+      }
+      editPreview(c, { status: 'resolved', resolvedAt: new Date(effectiveNow), participants })
+    }
+  }
+
+  const dueCount = commitments.filter(
+    (c) => c.status === 'active' && c.deadline && c.deadline.getTime() <= effectiveNow,
+  ).length
+
+  const { open, past } = useMemo(() => {
+    const open = commitments.filter((c) => c.status === 'forming' || c.status === 'active')
     const past = commitments.filter((c) => c.status === 'resolved' || c.status === 'cancelled')
-    return { live, past }
+    return { open, past }
   }, [commitments])
+
+  const previewBtn = (label: string, onClick: () => void, wide = false) => (
+    <button
+      onClick={onClick}
+      style={{
+        flex: wide ? 1 : undefined, minWidth: wide ? 0 : 32,
+        padding: '6px 9px', borderRadius: 8, cursor: 'pointer',
+        background: 'rgba(255,255,255,0.14)', color: '#fff',
+        border: '1px solid rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 700,
+      }}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--stack-gap)' }}>
+      {/* Tap-driven, like the plaza's panel — editing a query string on a phone
+          is miserable, and this is meant to be usable there. */}
+      {preview.on && (
+        <div style={{
+          background: 'rgba(150,95,15,0.94)', color: '#fff',
+          borderRadius: 12, padding: 10, border: '1px solid rgba(255,255,255,0.2)',
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 800 }}>
+            ⏩ preview · {dayOffset >= 0 ? '+' : ''}{dayOffset}d
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.85, lineHeight: 1.45 }}>
+            Fake commitments covering every state. Render-only — nothing is saved,
+            and no one else sees any of it.
+          </div>
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, opacity: 0.85, minWidth: 30 }}>Day</span>
+            {previewBtn('−', () => setDayOffset((d) => d - 1))}
+            <span style={{ minWidth: 30, textAlign: 'center', fontWeight: 800, fontSize: 12 }}>
+              {dayOffset >= 0 ? '+' : ''}{dayOffset}
+            </span>
+            {previewBtn('+', () => setDayOffset((d) => d + 1))}
+            {previewBtn('+7', () => setDayOffset((d) => d + 7))}
+            {previewBtn('+30', () => setDayOffset((d) => d + 30))}
+          </div>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {previewBtn('✅ Mark today', previewMarkToday, true)}
+            {previewBtn(
+              dueCount > 0 ? `⏱️ Resolve due · ${dueCount}` : '⏱️ Nothing due',
+              previewResolveDue,
+              true,
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {previewBtn('↺ Reset', () => { setEdited({}); setDayOffset(0) }, true)}
+          </div>
+        </div>
+      )}
+
       {creating ? (
         <CreateCard
           groupId={groupId}
@@ -653,7 +849,7 @@ export default function CommitmentsTab({
         </div>
       )}
 
-      {live.map((c) => (
+      {open.map((c) => (
         <CommitmentCard
           key={c.id}
           c={c}
@@ -662,7 +858,9 @@ export default function CommitmentsTab({
           displayName={displayName}
           memberUids={memberUids}
           commitments={commitments}
-          now={now}
+          now={effectiveNow}
+          actions={actions}
+          preview={preview.on}
         />
       ))}
 
@@ -678,7 +876,9 @@ export default function CommitmentsTab({
           displayName={displayName}
           memberUids={memberUids}
           commitments={commitments}
-          now={now}
+          now={effectiveNow}
+          actions={actions}
+          preview={preview.on}
         />
       ))}
     </div>
