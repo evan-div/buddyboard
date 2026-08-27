@@ -228,8 +228,10 @@ npm run test:rules
 ```
 
 That boots the Firestore emulator, runs `src/lib/*.rules.test.ts` against the
-real ruleset, and shuts the emulator down. It needs a JVM — the Firestore
-emulator is a Java process — and downloads the emulator jar on first run.
+real ruleset, and shuts the emulator down. It downloads the emulator jar on
+first run, and needs **JDK 21 or newer** — the emulator is a Java process and
+current `firebase-tools` refuses anything older. CI pins Temurin 21 explicitly
+rather than inheriting the runner's default JDK, which is older than that.
 
 These are deliberately **not** part of `npm test`, which stays at a couple of
 seconds with zero infrastructure. The split is `exclude` in `vitest.config.ts`

@@ -29,9 +29,18 @@ jobs:
 
       # Security rules are the one part of the app that cannot be checked by
       # reading its code — they only exist in production. This boots the
-      # Firestore emulator (a JVM process; ubuntu-latest ships a JDK) and
-      # asserts them for real. Kept out of `npm test` so that stays
-      # infrastructure-free and quick.
+      # Firestore emulator and asserts them for real. Kept out of `npm test`
+      # so that stays infrastructure-free and quick.
+      #
+      # The emulator is a JVM process and firebase-tools requires JDK 21+.
+      # ubuntu-latest does ship a JDK, but an older one, so pin it explicitly
+      # rather than inheriting whatever the runner image happens to default to.
+      - name: Set up JDK 21 for the Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Cache Firestore emulator
         uses: actions/cache@v4
         with:
