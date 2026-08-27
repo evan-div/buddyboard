@@ -644,8 +644,9 @@ export default function CommitmentsTab({
     return () => clearInterval(t)
   }, [])
 
-  // Fallback for the hourly cron: settle anything already past its deadline
-  // while somebody is looking. Both paths are idempotent, so racing is safe.
+  // The cron only runs daily, so this is the fast path rather than a fallback:
+  // settle anything already past its deadline while somebody is looking. Both
+  // paths are idempotent, so racing the cron is safe.
   const sweep = useCallback(async (list: Commitment[]) => {
     if (sweeping.current) return
     sweeping.current = true

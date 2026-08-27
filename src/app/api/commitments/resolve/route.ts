@@ -20,11 +20,16 @@ import type { SeedRarity } from '@/lib/types'
 /**
  * Resolve commitments whose deadline has passed.
  *
- * Called hourly by Vercel Cron (see vercel.json). This is what makes the finish
- * line a real moment: the seed lands and the push goes out on time, rather than
- * whenever somebody next happens to open the app. A client-side sweep in the
- * Commitments tab covers local development and cron outages, and both paths are
- * safe to race because the commit below carries an updateTime precondition.
+ * Called once a day by Vercel Cron (see vercel.json). Hourly would land the seed
+ * and its push much nearer the actual deadline, but Vercel's Hobby plan permits
+ * only one invocation a day and rejects anything more frequent at deploy time —
+ * DEPLOY.md covers tightening it on a plan that allows it.
+ *
+ * So the client-side sweep in the Commitments tab is the fast path in practice:
+ * it settles anything due the moment a member opens the tab, and in an active
+ * group it will usually get there first. This route is the backstop that
+ * guarantees a commitment resolves even if nobody looks. Both are safe to race,
+ * because the commit below carries an updateTime precondition.
  *
  * Vercel Cron delivers at-least-once, so this must be idempotent — it is: a
  * commitment already moved off 'active' fails the precondition and is skipped.
@@ -61,7 +66,10 @@ function judge(data: Record<string, unknown>): Outcome[] {
     // Marks can only be written while the commitment is active and only for the
     // marker's own check-in day, so everything here is already inside the
     // window — bar anything marked in the gap between the deadline and this
-    // run, which is at most an hour of grace and only ever helps.
+    // run. With a daily cron that gap can reach a day, so a participant who was
+    // one period short can still scrape in by marking late. It only ever helps,
+    // and the client sweep usually settles first anyway, but it is a real
+    // widening of the grace period versus resolving hourly.
     kept: metThreshold(rules, (p.markedDays as string[]) ?? []),
   }))
 }

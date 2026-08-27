@@ -21,7 +21,7 @@ composite index, you have to deploy these or the app will hit `permission-denied
 >   defendant. Without it, opening a commitment or disputing one fails with
 >   `permission-denied`.
 > - `firestore.indexes.json` — adds a **collection-group** index on
->   `commitments` (`status`, `deadline`). Without it the hourly resolver returns
+>   `commitments` (`status`, `deadline`). Without it the resolver returns
 >   500 and nothing ever pays out. The index takes a few minutes to build.
 
 > Heads up: deploying rules **replaces the entire live ruleset** with the file's
@@ -184,7 +184,7 @@ Two things are worth knowing when judging how a rare plant looks:
 ## Previewing commitments
 
 A commitment runs seven days at its shortest and ninety at its longest, needs two
-people to start, and pays out from an hourly cron — so there is no way to watch
+people to start, and pays out from a once-a-day cron — so there is no way to watch
 one end to end in real time. The same `?preview=1` flag turns the Pacts tab into
 a full fixture set:
 
@@ -262,10 +262,33 @@ They only exist under `npm run dev`.
 
 ## Scheduled commitment resolution
 
-`vercel.json` registers an hourly cron against `/api/commitments/resolve`. That
-route settles every commitment whose deadline has passed — paying out seeds and
-sending the finish-line push — and it is the only part of the app that does
+`vercel.json` registers a **daily** cron against `/api/commitments/resolve`.
+That route settles every commitment whose deadline has passed — paying out seeds
+and sending the finish-line push — and it is the only part of the app that does
 anything on a clock.
+
+### Why daily, and how to make it hourly
+
+Vercel's Hobby plan permits **one cron invocation per day**; an hourly schedule
+is rejected at config validation and the whole deployment fails, before any
+build runs. So the committed schedule is `0 9 * * *`, which every plan accepts.
+
+On a plan that allows sub-daily schedules, tightening it is a one-line edit:
+
+```json
+{ "crons": [{ "path": "/api/commitments/resolve", "schedule": "0 * * * *" }] }
+```
+
+It has to be a literal cron expression — Vercel resolves `vercel.json` at deploy
+time and does not interpolate environment variables into it, so this cannot be
+made configurable without moving the schedule out of Vercel entirely.
+
+**What daily costs:** a commitment can resolve up to 24 hours after its
+deadline, which blunts the finish-line push. It does not mean anyone waits a day
+to see their seed — the Commitments tab sweeps due commitments client-side
+whenever a member opens it, so in an active group most resolve well before the
+cron reaches them. Daily is the backstop; the sweep is the fast path. Both are
+idempotent, so they are safe to race.
 
 It needs two environment variables set on the host:
 
@@ -287,7 +310,8 @@ safe and the second call resolves nothing — each write batch carries an
 `updateTime` precondition, so a commitment somebody else already settled fails
 the batch instead of paying out again. That guard matters: Vercel Cron delivers
 **at-least-once**, and the Commitments tab sweeps due commitments client-side
-too, so more than one resolver genuinely does race here.
+too, so more than one resolver genuinely does race here — and with a daily cron
+the client sweep is usually the one that gets there first.
 
 If the route returns 500 with a `Query failed` detail, the collection-group
 index has not finished building — see the rules/index warning at the top.
