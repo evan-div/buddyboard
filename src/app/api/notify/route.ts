@@ -1,229 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { loadServiceAccount, verifyIdToken, getAccessToken } from '@/lib/server/googleAuth'
+import { sendPush, type NotifCategory } from '@/lib/server/push'
 
-type ServiceAccount = {
-  project_id: string
-  client_email: string
-  private_key: string
-}
-
-// ---------------------------------------------------------------------------
-// Firebase ID token verification (no firebase-admin dependency).
-// Verifies the RS256 signature against Google's securetoken JWKS and checks
-// the standard claims for this project.
-// ---------------------------------------------------------------------------
-
-const JWKS_URL =
-  'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'
-
-let cachedJwks: { keys: JsonWebKey[]; expiresAt: number } | null = null
-
-async function getJwks(): Promise<JsonWebKey[]> {
-  const now = Date.now()
-  if (cachedJwks && cachedJwks.expiresAt > now) return cachedJwks.keys
-
-  const res = await fetch(JWKS_URL)
-  if (!res.ok) throw new Error('JWKS fetch failed')
-  const data = await res.json() as { keys: (JsonWebKey & { kid?: string })[] }
-
-  // Respect Google's cache lifetime; fall back to 1 hour
-  const cacheControl = res.headers.get('cache-control') ?? ''
-  const maxAge = /max-age=(\d+)/.exec(cacheControl)
-  const ttl = maxAge ? parseInt(maxAge[1], 10) * 1000 : 3600_000
-
-  cachedJwks = { keys: data.keys, expiresAt: now + ttl }
-  return data.keys
-}
-
-function decodeSegment<T>(seg: string): T {
-  return JSON.parse(Buffer.from(seg, 'base64url').toString('utf8')) as T
-}
-
-// Returns the verified uid, or null if the token is invalid.
-async function verifyIdToken(idToken: string, projectId: string): Promise<string | null> {
-  try {
-    const parts = idToken.split('.')
-    if (parts.length !== 3) return null
-
-    const header = decodeSegment<{ alg?: string; kid?: string }>(parts[0])
-    if (header.alg !== 'RS256' || !header.kid) return null
-
-    const jwks = await getJwks()
-    const jwk = jwks.find((k) => (k as { kid?: string }).kid === header.kid)
-    if (!jwk) return null
-
-    const key = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['verify']
-    )
-
-    const valid = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      key,
-      Buffer.from(parts[2], 'base64url'),
-      Buffer.from(`${parts[0]}.${parts[1]}`)
-    )
-    if (!valid) return null
-
-    const payload = decodeSegment<{
-      aud?: string
-      iss?: string
-      sub?: string
-      exp?: number
-    }>(parts[1])
-
-    const now = Math.floor(Date.now() / 1000)
-    if (payload.aud !== projectId) return null
-    if (payload.iss !== `https://securetoken.google.com/${projectId}`) return null
-    if (!payload.exp || payload.exp <= now) return null
-    if (!payload.sub) return null
-
-    return payload.sub
-  } catch {
-    return null
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Service-account OAuth token (FCM send + Firestore read)
-// ---------------------------------------------------------------------------
-
-let cachedToken: { value: string; expiresAt: number } | null = null
-
-async function getAccessToken(sa: ServiceAccount): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  if (cachedToken && cachedToken.expiresAt > now + 60) return cachedToken.value
-
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj)).toString('base64url')
-
-  const header = encode({ alg: 'RS256', typ: 'JWT' })
-  const payload = encode({
-    iss: sa.client_email,
-    scope:
-      'https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore',
-    aud: 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600,
-  })
-
-  const signingInput = `${header}.${payload}`
-
-  const pemBody = sa.private_key
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\s/g, '')
-
-  const keyData = Buffer.from(pemBody, 'base64')
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    keyData,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  )
-
-  const sig = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    cryptoKey,
-    Buffer.from(signingInput)
-  )
-
-  const jwt = `${signingInput}.${Buffer.from(sig).toString('base64url')}`
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt,
-    }),
-  })
-
-  const data = await res.json() as { access_token: string; expires_in: number }
-  cachedToken = { value: data.access_token, expiresAt: now + (data.expires_in ?? 3600) }
-  return cachedToken.value
-}
-
-// Look up the recipient's FCM tokens AND notification preferences
-// server-side, in one read — clients never handle other users' push tokens
-// and can't override their mute settings.
-type NotifCategory = 'points' | 'court' | 'social'
-
-async function getRecipient(
-  sa: ServiceAccount,
-  accessToken: string,
-  uid: string
-): Promise<{ tokens: string[]; mutedAll: boolean; muted: (c: NotifCategory) => boolean }> {
-  const empty = { tokens: [], mutedAll: false, muted: () => false }
-  const docUrl = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/users/${encodeURIComponent(uid)}`
-  const res = await fetch(docUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!res.ok) return empty
-
-  const doc = await res.json() as {
-    fields?: {
-      fcmTokens?: { arrayValue?: { values?: { stringValue?: string }[] } }
-      notifPrefs?: { mapValue?: { fields?: Record<string, { booleanValue?: boolean }> } }
-    }
-  }
-  const values = doc.fields?.fcmTokens?.arrayValue?.values ?? []
-  const tokens = values
-    .map((v) => v.stringValue)
-    .filter((t): t is string => typeof t === 'string' && t.length > 0)
-
-  const prefs = doc.fields?.notifPrefs?.mapValue?.fields ?? {}
-  // A category is muted only when explicitly set to false; default is on.
-  return {
-    tokens,
-    mutedAll: prefs.muteAll?.booleanValue === true,
-    muted: (c: NotifCategory) => prefs[c]?.booleanValue === false,
-  }
-}
-
-// Overwrite the recipient's fcmTokens array (used to drop dead tokens). We
-// rewrite the whole array via a field-masked PATCH — arrayRemove isn't
-// available over the plain REST document API.
-async function replaceRecipientTokens(
-  sa: ServiceAccount,
-  accessToken: string,
-  uid: string,
-  tokens: string[]
-): Promise<void> {
-  const docUrl =
-    `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/users/${encodeURIComponent(uid)}` +
-    `?updateMask.fieldPaths=fcmTokens`
-  await fetch(docUrl, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      fields: {
-        fcmTokens: { arrayValue: { values: tokens.map((t) => ({ stringValue: t })) } },
-      },
-    }),
-  }).catch(() => {})
-}
-
-// FCM reports a permanently dead token (app uninstalled, token rotated) with
-// these codes — anything else (throttling, transient) we leave in place.
-function isDeadTokenError(status: number, errorCode?: string): boolean {
-  if (errorCode === 'UNREGISTERED' || errorCode === 'INVALID_ARGUMENT') return true
-  return status === 404
-}
-
+/**
+ * Send a push notification to another user.
+ *
+ * The caller proves who they are with a Firebase ID token; the recipient's push
+ * tokens and mute preferences are read server-side, so a client can neither see
+ * another user's tokens nor push past their settings.
+ *
+ * Token verification, service-account auth and FCM delivery live in
+ * @/lib/server so the commitment cron can reuse them without a user in the loop.
+ */
 export async function POST(req: NextRequest) {
-  const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT
-  if (!saRaw) {
+  const sa = loadServiceAccount()
+  if (!sa) {
     return NextResponse.json({ error: 'Push not configured' }, { status: 503 })
   }
-
-  const sa: ServiceAccount = JSON.parse(saRaw)
 
   const authHeader = req.headers.get('authorization') ?? ''
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
@@ -249,55 +42,7 @@ export async function POST(req: NextRequest) {
   }
 
   const accessToken = await getAccessToken(sa)
-  const recipient = await getRecipient(sa, accessToken, toUid)
+  const result = await sendPush(sa, accessToken, toUid, { title, body, url, category })
 
-  // Respect the recipient's mute preferences (enforced server-side so a
-  // client can't push past someone's settings)
-  if (recipient.mutedAll || recipient.muted(category)) {
-    return NextResponse.json({ sent: 0, failed: 0, muted: true })
-  }
-
-  const tokens = recipient.tokens
-  if (!tokens.length) {
-    return NextResponse.json({ sent: 0, failed: 0 })
-  }
-
-  const endpoint = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`
-
-  const deadTokens = new Set<string>()
-  const results = await Promise.allSettled(
-    tokens.map(async (token) => {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: { title, body },
-            webpush: {
-              notification: { icon: '/favicon.ico' },
-              fcm_options: { link: url ?? '/' },
-            },
-          },
-        }),
-      })
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null) as { error?: { status?: string } } | null
-        if (isDeadTokenError(res.status, errBody?.error?.status)) deadTokens.add(token)
-        throw new Error(`FCM ${res.status}`)
-      }
-    })
-  )
-
-  // Prune tokens FCM says are permanently dead so we stop paying to retry them
-  if (deadTokens.size > 0) {
-    const surviving = tokens.filter((t) => !deadTokens.has(t))
-    await replaceRecipientTokens(sa, accessToken, toUid, surviving)
-  }
-
-  const failed = results.filter((r) => r.status === 'rejected').length
-  return NextResponse.json({ sent: tokens.length - failed, failed, pruned: deadTokens.size })
+  return NextResponse.json(result)
 }

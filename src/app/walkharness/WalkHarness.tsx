@@ -11,6 +11,7 @@ import { useEffect, useRef } from 'react'
 import MiiPlaza from '@/components/World/MiiPlaza'
 import BottomTabBar, { TAB_BAR_HEIGHT, type TabDef } from '@/components/Shell/BottomTabBar'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
+import { dayKey } from '@/lib/utils'
 import type { Locomotion } from '@/components/World/thirdPerson'
 import type { GroupMember } from '@/lib/types'
 
@@ -70,6 +71,14 @@ export default function WalkHarness() {
         groupId="harness-group"
         remainingGive={100}
         remainingTake={100}
+        // Without a recent active day the plaza renders dormant: every colour is
+        // muted toward grey, plant auras drop to a quarter intensity and motes
+        // are suppressed entirely. That is correct for a group that has gone
+        // quiet, but it made the harness a misleading place to look at anything
+        // visual. Present as an active group so what renders here is what an
+        // ordinary group actually sees.
+        plazaActiveDays={12}
+        plazaLastActiveDay={dayKey()}
         bottomInset={TAB_BAR_HEIGHT}
         walkerProbe={walker}
       />
