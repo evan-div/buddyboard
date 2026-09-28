@@ -15,6 +15,15 @@ composite index, you have to deploy these or the app will hit `permission-denied
 > `plazaPointsGiven` on the group doc). **Redeploy `firestore.rules`** or giving
 > points will fail with `permission-denied` and islands will never unlock.
 
+> ⚠️ Commitments need **both** files redeployed:
+> - `firestore.rules` — adds the `commitments` collection, and widens `cases`
+>   so a commitment dispute can be filed by the accuser rather than only by the
+>   defendant. Without it, opening a commitment or disputing one fails with
+>   `permission-denied`.
+> - `firestore.indexes.json` — adds a **collection-group** index on
+>   `commitments` (`status`, `deadline`). Without it the resolver returns
+>   500 and nothing ever pays out. The index takes a few minutes to build.
+
 > Heads up: deploying rules **replaces the entire live ruleset** with the file's
 > contents. That's fine — `firestore.rules` is the source of truth and holds all
 > rules, not a diff — just know it's a full replace, not a merge.
@@ -154,6 +163,93 @@ and are unit-tested; the preset buttons derive from them, so they can't drift.
 Island thresholds and the camera framing a visit uses live in
 `src/components/World/plazaIslands.ts` (`ISLANDS`, `islandView`), also unit-tested.
 
+### Seeing every plant, including the rare ones
+
+The same `?preview=1` also hands out **unlimited seeds of every rarity**, so the
+species picker shows all four tiers rather than just the commons a check-in
+earns. Tap **🌿 One of each** to plant every species at its own rarity side by
+side, then **Mature** — that is the fastest way to compare a legendary against a
+common oak without holding a 90-day commitment first.
+
+Two things are worth knowing when judging how a rare plant looks:
+
+- A plaza renders **dormant** (colours muted toward grey, auras dimmed, motes
+  suppressed) when the group hasn't checked in recently. That is deliberate, but
+  it hides most of what makes a rare plant look rare — so judge the tiers on a
+  group that has been active today.
+- Rarity changes scale, foliage glow, drifting motes and growth speed. Growth
+  speed comes from `growthStageFor` in `plazaGrowth.ts`; the visual treatment
+  from `rarityTreatment` in `plazaSpecies.ts`. Both are data, both unit-tested.
+
+## Previewing commitments
+
+A commitment runs seven days at its shortest and ninety at its longest, needs two
+people to start, and pays out from a once-a-day cron — so there is no way to watch
+one end to end in real time. The same `?preview=1` flag turns the Pacts tab into
+a full fixture set:
+
+```
+/group/YOUR_GROUP_ID?preview=1        →  the Pacts tab
+```
+
+You get one fake commitment for every state a card can be in — forming with
+enough people and without, running on track and running behind, already marked
+today, past its deadline, resolved kept and resolved missed, disputed, outside
+the 48-hour dispute window, and cancelled — spread across all four rarities.
+
+The orange panel at the top is tap-driven, like the plaza's:
+
+- **Day −/+/+7/+30** shifts "now", so deadlines pass and countdowns move.
+- **Mark today** marks every running commitment you're in, exactly as the plaza
+  check-in card would.
+- **Resolve due** settles anything past the dialled deadline using the *real*
+  `metThreshold` rule — the same judgement the cron makes, so a preview that
+  looks right is evidence the real logic is right.
+- **Reset** returns to the starting fixtures.
+
+Like the plaza, this is **render-only**: preview never subscribes to Firestore
+and never writes to it, and join/leave/start/cancel/dispute are swapped for local
+mutators, so nothing you do here is visible to anyone else.
+
+Fixtures live in `src/lib/commitmentsPreview.ts` and are unit-tested, including
+that every one of them is judged correctly by the real rules.
+
+## Testing the security rules
+
+`firestore.rules` is the one part of this app that cannot be checked by reading
+its code — the rules only take effect in production, and a local setup enforces
+nothing. That is not hypothetical: the `cases` rule originally allowed only the
+*defendant* to open a case, which is right for a points appeal (you appeal your
+own loss) and wrong for a commitment dispute (you accuse someone else). It
+worked perfectly locally and would have failed every dispute in production.
+
+```bash
+npm run test:rules
+```
+
+That boots the Firestore emulator, runs `src/lib/*.rules.test.ts` against the
+real ruleset, and shuts the emulator down. It downloads the emulator jar on
+first run, and needs **JDK 21 or newer** — the emulator is a Java process and
+current `firebase-tools` refuses anything older. CI pins Temurin 21 explicitly
+rather than inheriting the runner's default JDK, which is older than that.
+
+These are deliberately **not** part of `npm test`, which stays at a couple of
+seconds with zero infrastructure. The split is `exclude` in `vitest.config.ts`
+plus a separate `vitest.rules.config.ts`. CI runs both, caching the emulator jar
+between runs.
+
+### Harness routes (development only)
+
+Two routes render these surfaces with no auth, no group and no Firebase. Both
+`notFound()` in a production build, so neither ever ships:
+
+| Route | Renders | Use with |
+| --- | --- | --- |
+| `/walkharness` | The plaza | `?preview=1` |
+| `/pactharness` | The Commitments tab | `?preview=1` |
+
+They only exist under `npm run dev`.
+
 ## What each Firebase config file is
 
 | File | Purpose | Deploy command |
@@ -161,3 +257,61 @@ Island thresholds and the camera framing a visit uses live in
 | `firestore.rules` | Security rules (who can read/write what) | `--only firestore:rules` |
 | `firestore.indexes.json` | Composite indexes for multi-field queries | `--only firestore:indexes` |
 | `firebase.json` | Points the CLI at the two files above | (config only, not deployed) |
+
+---
+
+## Scheduled commitment resolution
+
+`vercel.json` registers a **daily** cron against `/api/commitments/resolve`.
+That route settles every commitment whose deadline has passed — paying out seeds
+and sending the finish-line push — and it is the only part of the app that does
+anything on a clock.
+
+### Why daily, and how to make it hourly
+
+Vercel's Hobby plan permits **one cron invocation per day**; an hourly schedule
+is rejected at config validation and the whole deployment fails, before any
+build runs. So the committed schedule is `0 9 * * *`, which every plan accepts.
+
+On a plan that allows sub-daily schedules, tightening it is a one-line edit:
+
+```json
+{ "crons": [{ "path": "/api/commitments/resolve", "schedule": "0 * * * *" }] }
+```
+
+It has to be a literal cron expression — Vercel resolves `vercel.json` at deploy
+time and does not interpolate environment variables into it, so this cannot be
+made configurable without moving the schedule out of Vercel entirely.
+
+**What daily costs:** a commitment can resolve up to 24 hours after its
+deadline, which blunts the finish-line push. It does not mean anyone waits a day
+to see their seed — the Commitments tab sweeps due commitments client-side
+whenever a member opens it, so in an active group most resolve well before the
+cron reaches them. Daily is the backstop; the sweep is the fast path. Both are
+idempotent, so they are safe to race.
+
+It needs two environment variables set on the host:
+
+| Variable | Purpose |
+| --- | --- |
+| `CRON_SECRET` | Shared secret Vercel sends as `Authorization: Bearer …`. The route **fails closed**: if this is unset, every request gets a 401 and nothing resolves. |
+| `FIREBASE_SERVICE_ACCOUNT` | The same service-account JSON push already uses. Its token requests the `datastore` scope, which is what lets the route read and write Firestore over REST. |
+
+To exercise it by hand against a local build:
+
+```bash
+npm run build
+CRON_SECRET=dev-secret npx next start -p 3000 &
+curl -H "Authorization: Bearer dev-secret" localhost:3000/api/commitments/resolve
+```
+
+It answers `{"due":N,"resolved":N,"skipped":N,"pushed":N}`. Calling it twice is
+safe and the second call resolves nothing — each write batch carries an
+`updateTime` precondition, so a commitment somebody else already settled fails
+the batch instead of paying out again. That guard matters: Vercel Cron delivers
+**at-least-once**, and the Commitments tab sweeps due commitments client-side
+too, so more than one resolver genuinely does race here — and with a daily cron
+the client sweep is usually the one that gets there first.
+
+If the route returns 500 with a `Query failed` detail, the collection-group
+index has not finished building — see the rules/index warning at the top.

@@ -5,9 +5,9 @@ import { useFrame } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { PlazaObject } from '@/lib/types'
-import { growthStage } from '@/lib/plazaGrowth'
+import { growthStageFor } from '@/lib/plazaGrowth'
 import { tileToWorld, tileKey, tileIslandId, tilesOnIsland, HOME_FRAME, type IslandFrame, type Tile } from './plazaMath'
-import { getSpecies, isTwoStage, soilScale, type PlazaSpecies } from './plazaSpecies'
+import { getSpecies, isTwoStage, rarityTreatment, soilScale, type PlazaSpecies } from './plazaSpecies'
 
 /**
  * Each growth stage is its own model, not a scaled copy of the mature plant —
@@ -523,6 +523,70 @@ function SoilMound({ stage, scale, dormant }: { stage: number; scale: number; do
 
 // ─── One planted object ────────────────────────────────────────────────────────
 
+// Roughly where each stage's canopy sits, so the glow and motes hang around the
+// leaves rather than the dirt.
+const CANOPY_Y = [0.45, 1.5, 3.1, 5.4]
+
+/**
+ * The visual tax a rare seed buys: a held light in the foliage and, from rare
+ * up, slow motes drifting around the canopy. Deliberately additive — it layers
+ * over whatever the species already draws rather than threading an emissive
+ * value through every material in this file.
+ */
+function RarityAura({
+  rarity, stage, color, dormant,
+}: {
+  rarity: PlazaObject['rarity']
+  stage: number
+  color: string
+  dormant: boolean
+}) {
+  const motesRef = useRef<THREE.Group>(null)
+  const treatment = rarityTreatment(rarity)
+  const y = CANOPY_Y[Math.max(0, Math.min(stage, CANOPY_Y.length - 1))]
+
+  // Fixed ring of motes; positions are recomputed each frame from the index, so
+  // there is nothing to memoize beyond the count.
+  const moteCount = dormant ? 0 : treatment.particles
+  // Sized against the plant, not fixed: a mote that reads well on a seedling is
+  // invisible on a mature tree seven units tall.
+  const moteSize = 0.1 + stage * 0.035
+
+  useFrame((state) => {
+    if (!motesRef.current) return
+    const t = state.clock.elapsedTime
+    motesRef.current.children.forEach((mote, i) => {
+      const a = (i / Math.max(1, moteCount)) * Math.PI * 2 + t * 0.35
+      const bob = Math.sin(t * 0.9 + i * 1.7) * 0.35
+      const radius = 1.1 + (stage * 0.42) + Math.sin(t * 0.5 + i) * 0.18
+      mote.position.set(Math.cos(a) * radius, bob, Math.sin(a) * radius)
+    })
+  })
+
+  if (treatment.emissive <= 0) return null
+
+  return (
+    <group position={[0, y, 0]}>
+      <pointLight
+        color={color}
+        intensity={treatment.emissive * (dormant ? 1.5 : 6)}
+        distance={4 + stage * 1.6}
+        decay={2}
+      />
+      {moteCount > 0 && (
+        <group ref={motesRef}>
+          {Array.from({ length: moteCount }, (_, i) => (
+            <mesh key={i}>
+              <sphereGeometry args={[moteSize, 6, 6]} />
+              <meshBasicMaterial color={color} transparent opacity={0.85} depthWrite={false} />
+            </mesh>
+          ))}
+        </group>
+      )}
+    </group>
+  )
+}
+
 function PlantMesh({
   object, frame, groupVitality, nowMs, dormant, onSelect,
 }: {
@@ -537,8 +601,10 @@ function PlantMesh({
   const species = getSpecies(object.species)
 
   const stage = useMemo(
-    () => growthStage(object.plantedAt.getTime(), object.plantedAtVitality, nowMs, groupVitality),
-    [object.plantedAt, object.plantedAtVitality, nowMs, groupVitality],
+    () => growthStageFor(
+      object.rarity, object.plantedAt.getTime(), object.plantedAtVitality, nowMs, groupVitality,
+    ),
+    [object.rarity, object.plantedAt, object.plantedAtVitality, nowMs, groupVitality],
   )
   const { x, z } = tileToWorld(object.tile, frame)
   // Per-plant offsets so a row of the same species doesn't look stamped out.
@@ -557,6 +623,10 @@ function PlantMesh({
 
   // Soil and sway follow the silhouette actually drawn, not the raw stage.
   const vStage = visualStage(species, stage)
+  // A rare stands taller than a common of the same species and age, so the tier
+  // reads from across the island. Applied to the whole group below, which scales
+  // the soil mound along with the plant — so soilScale stays per-form only.
+  const treatment = rarityTreatment(object.rarity)
   const soil = soilScale(species.form)
 
   useFrame((state) => {
@@ -569,13 +639,14 @@ function PlantMesh({
     <group
       position={[x, 0, z]}
       rotation={[0, seed * Math.PI * 2, 0]}
-      scale={0.92 + seed * 0.16}
+      scale={(0.92 + seed * 0.16) * treatment.scale}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(object) }}
     >
       <SoilMound stage={vStage} scale={soil} dormant={dormant} />
       <group ref={swayRef}>
         <StageForm stage={stage} species={species} colors={colors} />
       </group>
+      <RarityAura rarity={object.rarity} stage={vStage} color={colors.foliage} dormant={dormant} />
     </group>
   )
 }

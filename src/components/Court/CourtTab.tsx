@@ -6,7 +6,7 @@ import Avatar3D from '@/components/Avatar/Avatar3D'
 import { DEFAULT_AVATAR } from '@/lib/avatarDefaults'
 import { db } from '@/lib/firebase'
 import { subscribeToCases, castVote, resolveExpiredCase } from '@/lib/appeals'
-import { timeAgo } from '@/lib/utils'
+import { formatCountdown, timeAgo } from '@/lib/utils'
 import type { CourtCase, GroupMember } from '@/lib/types'
 
 type Props = {
@@ -18,19 +18,6 @@ type Props = {
 
 const GUILTY_COLOR   = '#fb6d5d'
 const INNOCENT_COLOR = '#14d8b0'
-
-function formatCountdown(deadline: Date, now: number): { text: string; isLow: boolean; expired: boolean } {
-  const ms = deadline.getTime() - now
-  if (ms <= 0) return { text: '00:00:00', isLow: true, expired: true }
-  const h = Math.floor(ms / 3_600_000)
-  const m = Math.floor((ms % 3_600_000) / 60_000)
-  const s = Math.floor((ms % 60_000) / 1_000)
-  return {
-    text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-    isLow: h < 1,
-    expired: false,
-  }
-}
 
 // Status chip label + colors per case state
 function statusChip(c: CourtCase): { label: string; color: string } {

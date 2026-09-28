@@ -35,7 +35,10 @@ import type {
   Checkin,
   PlazaObject,
   PlazaTile,
+  Commitment,
+  SeedRarity,
 } from '../types'
+import type { CommitmentDraft } from '../commitments'
 
 // Subscription callbacks
 export type UnsubscribeFn = () => void
@@ -237,10 +240,48 @@ export interface IDataLayer {
   plantSeed(
     groupId: string,
     uid: string,
-    opts: { species: string; tile: PlazaTile; dedication?: string }
+    opts: {
+      species: string
+      tile: PlazaTile
+      dedication?: string
+      rarity?: SeedRarity
+      earnedFrom?: string
+    }
   ): Promise<void>
   removePlazaObject(groupId: string, objId: string): Promise<void>
   subscribeToPlazaObjects(groupId: string, callback: (objects: PlazaObject[]) => void): UnsubscribeFn
+
+  // ============ COMMITMENTS ============
+  // Shared pacts: a goal, a window, and a seed whose rarity scales with the
+  // window. Rules live in commitments.ts (pure); these move the documents.
+  createCommitment(
+    groupId: string,
+    uid: string,
+    displayName: string,
+    draft: CommitmentDraft
+  ): Promise<string>
+  joinCommitment(groupId: string, commitmentId: string, uid: string, displayName: string): Promise<void>
+  leaveCommitment(groupId: string, commitmentId: string, uid: string): Promise<void>
+  startCommitment(groupId: string, commitmentId: string, uid: string): Promise<void>
+  cancelCommitment(groupId: string, commitmentId: string, uid: string): Promise<void>
+  markCommitment(groupId: string, commitmentId: string, uid: string): Promise<void>
+  resolveCommitment(groupId: string, commitmentId: string): Promise<void>
+  getCommitment(groupId: string, commitmentId: string): Promise<Commitment | null>
+  getCommitments(groupId: string): Promise<Commitment[]>
+  subscribeToCommitments(
+    groupId: string,
+    callback: (commitments: Commitment[]) => void
+  ): UnsubscribeFn
+  disputeCommitment(
+    groupId: string,
+    commitmentId: string,
+    accuserUid: string,
+    accuserName: string,
+    defendantUid: string,
+    comment: string,
+    memberUids: string[]
+  ): Promise<string>
+  revokeCommitmentSeed(groupId: string, commitmentId: string, uid: string): Promise<void>
 
   // ============ BADGES & SHOP ============
   checkAndAwardBadges(

@@ -7,7 +7,10 @@ import {
   isDormant,
   seedsForCheckin,
   SEED_EVERY,
+  growthStageFor,
+  RARITY_GROWTH_FACTOR,
 } from './plazaGrowth'
+import { RARITY_ORDER } from './commitments'
 
 const DAY = 86_400_000
 
@@ -102,5 +105,52 @@ describe('seedsForCheckin', () => {
   it('grants nothing for a zero or negative streak', () => {
     expect(seedsForCheckin(0)).toBe(0)
     expect(seedsForCheckin(-1)).toBe(0)
+  })
+})
+
+describe('growthStageFor', () => {
+  const planted = 1_000_000_000_000
+  // Enough vitality that nourishment never becomes the binding constraint.
+  const plenty = 100
+
+  it('is identical to growthStage for commons and for absent rarity', () => {
+    for (const days of [0, 0.5, 1, 2, 3, 6, 7, 30]) {
+      const now = planted + days * DAY
+      const base = growthStage(planted, 0, now, plenty)
+      expect(growthStageFor('common', planted, 0, now, plenty)).toBe(base)
+      expect(growthStageFor(undefined, planted, 0, now, plenty)).toBe(base)
+    }
+  })
+
+  it('lets a legendary reach maturity sooner than a common', () => {
+    // A common needs 7 days to mature; a legendary needs 7 * 0.6 = 4.2.
+    const atFiveDays = planted + 5 * DAY
+    expect(growthStage(planted, 0, atFiveDays, plenty)).toBe(2)
+    expect(growthStageFor('legendary', planted, 0, atFiveDays, plenty)).toBe(MAX_STAGE)
+  })
+
+  it('still caps rare growth by nourishment — care outranks rarity', () => {
+    // Plenty of time, but the group gained no vitality at all.
+    const later = planted + 30 * DAY
+    expect(growthStageFor('legendary', planted, 0, later, 0)).toBe(0)
+  })
+
+  it('never starts above stage 0, however rare the seed', () => {
+    expect(growthStageFor('legendary', planted, 0, planted, plenty)).toBe(0)
+  })
+
+  it('orders the tiers monotonically at a fixed moment', () => {
+    const now = planted + 3 * DAY
+    const stages = RARITY_ORDER.map((r) => growthStageFor(r, planted, 0, now, plenty))
+    for (let i = 1; i < stages.length; i++) {
+      expect(stages[i]).toBeGreaterThanOrEqual(stages[i - 1])
+    }
+  })
+
+  it('has a growth factor for every rarity, none of them faster than instant', () => {
+    for (const r of RARITY_ORDER) {
+      expect(RARITY_GROWTH_FACTOR[r]).toBeGreaterThan(0)
+      expect(RARITY_GROWTH_FACTOR[r]).toBeLessThanOrEqual(1)
+    }
   })
 })

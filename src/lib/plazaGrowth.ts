@@ -12,6 +12,8 @@
  * (rendered as a quiet, misty dormancy) but can never kill a plant.
  */
 
+import type { SeedRarity } from './types'
+
 // Stage indices: 0 = seedling, 1 = sprout, 2 = young, 3 = mature.
 export const MAX_STAGE = 3
 
@@ -46,6 +48,41 @@ export function growthStage(
   const nourishment = Math.max(0, groupVitality - plantedAtVitality)
   const timeStage = stageFromThresholds(daysElapsed, TIME_DAYS)
   const nourishStage = stageFromThresholds(nourishment, NOURISH_DAYS)
+  return Math.min(timeStage, nourishStage)
+}
+
+// Rarer seeds establish themselves faster — a legendary reaches its full form in
+// roughly 60% of the time and care a common needs. This scales the thresholds
+// rather than the elapsed values so the "care matters more than time" rule and
+// the monotonic, never-dies guarantee both survive untouched.
+export const RARITY_GROWTH_FACTOR: Record<SeedRarity, number> = {
+  common: 1,
+  uncommon: 0.9,
+  rare: 0.75,
+  legendary: 0.6,
+}
+
+/**
+ * Growth stage for a plant of a given rarity. `growthStage` above is left exactly
+ * as it was — it is pinned by tests and every plant rendered before commitments
+ * existed depends on its numbers. Absent rarity resolves to common, so this is a
+ * drop-in replacement for the older call.
+ */
+export function growthStageFor(
+  rarity: SeedRarity | undefined,
+  plantedAtMs: number,
+  plantedAtVitality: number,
+  nowMs: number,
+  groupVitality: number,
+): number {
+  const factor = RARITY_GROWTH_FACTOR[rarity ?? 'common'] ?? 1
+  if (factor === 1) {
+    return growthStage(plantedAtMs, plantedAtVitality, nowMs, groupVitality)
+  }
+  const daysElapsed = Math.max(0, (nowMs - plantedAtMs) / 86_400_000)
+  const nourishment = Math.max(0, groupVitality - plantedAtVitality)
+  const timeStage = stageFromThresholds(daysElapsed, TIME_DAYS.map((t) => t * factor))
+  const nourishStage = stageFromThresholds(nourishment, NOURISH_DAYS.map((n) => n * factor))
   return Math.min(timeStage, nourishStage)
 }
 

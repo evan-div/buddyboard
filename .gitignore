@@ -46,3 +46,7 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Firestore emulator debug output (npm run test:rules)
+firestore-debug.log
+firebase-debug.log

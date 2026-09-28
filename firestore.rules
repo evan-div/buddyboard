@@ -127,7 +127,15 @@ service cloud.firestore {
 
       match /cases/{cid} {
         allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.defendantUid == request.auth.uid;
+        // A points appeal is filed BY the person who lost the points, so they
+        // are the defendant in their own case. A commitment dispute is the
+        // other way round: a co-participant accuses someone else of not
+        // holding up their end, so the accuser is the one writing the doc.
+        allow create: if isMember(gid) && (
+          request.resource.data.defendantUid == request.auth.uid
+          || (request.resource.data.subject == 'commitment'
+              && request.resource.data.accuserUid == request.auth.uid)
+        );
         allow update: if isMember(gid);   // review, votes, resolution, dismissal
         allow delete: if false;
       }
@@ -167,6 +175,20 @@ service cloud.firestore {
           && resource.data.plantedBy == request.auth.uid;
         allow delete: if signedIn()
           && (resource.data.plantedBy == request.auth.uid || isMayor(gid));
+      }
+
+      // Commitments: shared pacts that pay out a seed. Any member may read them
+      // and open one attributed to themselves. Updates are open to members
+      // because joining, marking and resolving all write another member's slot
+      // in the participants map — the same client-enforced posture as
+      // members/{mid} above, and the same ceiling until Cloud Functions exist.
+      match /commitments/{cid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isMember(gid);
+        allow delete: if signedIn()
+          && (resource.data.createdBy == request.auth.uid || isMayor(gid));
       }
     }
   }
