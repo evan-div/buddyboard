@@ -12,6 +12,7 @@ import {
   incrementField,
   runCollectionGroupQuery,
   type FsDocument,
+  type FsValue,
   type FsWrite,
 } from '@/lib/server/firestoreRest'
 import { metThreshold } from '@/lib/commitments'
@@ -39,6 +40,9 @@ import type { SeedRarity } from '@/lib/types'
 export const dynamic = 'force-dynamic'
 
 const PAGE_LIMIT = 200
+// Safety valve against an unbounded loop (e.g. a query that never shrinks
+// below PAGE_LIMIT) rather than an expected ceiling on due commitments.
+const MAX_PAGES = 50
 
 type Outcome = { uid: string; kept: boolean; displayName: string }
 
@@ -171,30 +175,44 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   const accessToken = await getAccessToken(sa)
 
-  let due: FsDocument[]
+  const filters = [
+    {
+      fieldFilter: {
+        field: { fieldPath: 'status' },
+        op: 'EQUAL' as const,
+        value: { stringValue: 'active' },
+      },
+    },
+    {
+      fieldFilter: {
+        field: { fieldPath: 'deadline' },
+        op: 'LESS_THAN_OR_EQUAL' as const,
+        value: { timestampValue: now.toISOString() },
+      },
+    },
+  ]
+  // Ordering by deadline gives every page a stable cursor to resume from — the
+  // composite index this query needs (status, deadline) already supports it.
+  const orderBy = [{ field: 'deadline' }]
+
+  const due: FsDocument[] = []
   try {
-    due = await runCollectionGroupQuery(
-      sa,
-      accessToken,
-      'commitments',
-      [
-        {
-          fieldFilter: {
-            field: { fieldPath: 'status' },
-            op: 'EQUAL',
-            value: { stringValue: 'active' },
-          },
-        },
-        {
-          fieldFilter: {
-            field: { fieldPath: 'deadline' },
-            op: 'LESS_THAN_OR_EQUAL',
-            value: { timestampValue: now.toISOString() },
-          },
-        },
-      ],
-      PAGE_LIMIT,
-    )
+    let startAfter: FsValue[] | undefined
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await runCollectionGroupQuery(
+        sa,
+        accessToken,
+        'commitments',
+        filters,
+        PAGE_LIMIT,
+        orderBy,
+        startAfter,
+      )
+      due.push(...batch)
+      if (batch.length < PAGE_LIMIT) break
+      const last = batch[batch.length - 1]
+      startAfter = [last.fields?.deadline ?? { timestampValue: now.toISOString() }]
+    }
   } catch (err) {
     // Almost always a missing COLLECTION_GROUP index — surface it rather than
     // reporting a quiet success that hides unresolved commitments.

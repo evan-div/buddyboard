@@ -49,6 +49,7 @@ import { auth, db } from './firebase'
 import { dayKey } from './utils'
 import { seedsForCheckin } from './plazaGrowth'
 import { seedSpendField, type SeedHolder } from './commitments'
+import { getSpecies } from '@/components/World/plazaSpecies'
 import type { User, Group, GroupMember, Transaction, AvatarConfig, PointsAllocation, PlazaPreset, PlazaEvent, PlazaVec, WallPost, WallComment, NotifCategory, NotifPrefs, StylePrefs, Checkin, PlazaObject, PlazaTile, SeedRarity } from './types'
 
 // Helper to convert Firestore Timestamp to Date
@@ -1211,6 +1212,9 @@ export async function plantSeed(
   },
 ): Promise<void> {
   const rarity: SeedRarity = opts.rarity ?? 'common'
+  if (getSpecies(opts.species).rarity !== rarity) {
+    throw new Error('That species does not grow from a seed of this rarity')
+  }
   await runTransaction(db, async (tx) => {
     const groupRef = doc(db, 'groups', groupId)
     const memberRef = doc(db, 'groups', groupId, 'members', uid)

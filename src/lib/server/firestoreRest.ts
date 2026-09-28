@@ -126,6 +126,10 @@ export type FieldFilter = {
 /**
  * Run a collection-group query across every group. Requires a COLLECTION_GROUP
  * index on the filtered fields — see firestore.indexes.json.
+ *
+ * `orderBy`/`startAfter` let a caller page through results beyond one page:
+ * pass the last returned document's ordered field values back in as the next
+ * `startAfter` to resume after it.
  */
 export async function runCollectionGroupQuery(
   sa: ServiceAccount,
@@ -133,6 +137,8 @@ export async function runCollectionGroupQuery(
   collectionId: string,
   filters: FieldFilter[],
   limit = 200,
+  orderBy?: { field: string; direction?: 'ASCENDING' | 'DESCENDING' }[],
+  startAfter?: FsValue[],
 ): Promise<FsDocument[]> {
   const res = await fetch(`${BASE}/${documentsRoot(sa)}:runQuery`, {
     method: 'POST',
@@ -147,6 +153,15 @@ export async function runCollectionGroupQuery(
           filters.length === 1
             ? filters[0]
             : { compositeFilter: { op: 'AND', filters } },
+        ...(orderBy
+          ? {
+              orderBy: orderBy.map((o) => ({
+                field: { fieldPath: o.field },
+                direction: o.direction ?? 'ASCENDING',
+              })),
+            }
+          : {}),
+        ...(startAfter ? { startAt: { values: startAfter, before: false } } : {}),
         limit,
       },
     }),
